@@ -1,0 +1,91 @@
+/** What the M1 portal yields, once its selectors have been read. */
+interface M1WebBalance {
+  balance: number;
+  currency: 'SGD';
+  account_number: string;
+  expires_at: string;
+  balance_path: string;
+  expiry_path: string;
+  account_path: string;
+}
+
+/** The text the workflow scraped from the three selectors. */
+interface M1WebBalanceInput {
+  accountText?: unknown;
+  balanceText?: unknown;
+  validityText?: unknown;
+}
+
+const MONTHS = new Map<string, number>([
+  ['jan', 1],
+  ['feb', 2],
+  ['mar', 3],
+  ['apr', 4],
+  ['may', 5],
+  ['jun', 6],
+  ['jul', 7],
+  ['aug', 8],
+  ['sep', 9],
+  ['oct', 10],
+  ['nov', 11],
+  ['dec', 12],
+]);
+
+function textOf(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
+function localSingaporeNumber(value: unknown): string {
+  return textOf(value)
+    .replace(/\D/g, '')
+    .replace(/^65(?=\d{8}$)/, '');
+}
+
+function parseValidityDate(value: unknown): string | null {
+  const match = /\bvalid\s+till\s+(\d{1,2})\s+([a-z]{3})\s+(\d{4})\b/i.exec(textOf(value).trim());
+  const [, dayText, monthText, yearText] = match ?? [];
+  if (dayText === undefined || monthText === undefined || yearText === undefined) return null;
+  const day = Number(dayText);
+  const month = MONTHS.get(monthText.toLocaleLowerCase());
+  if (month === undefined) return null;
+  const year = Number(yearText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  )
+    return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export function extractM1WebBalance(
+  { accountText, balanceText, validityText }: M1WebBalanceInput = {},
+  expectedPhone: unknown,
+): M1WebBalance {
+  const expected = localSingaporeNumber(expectedPhone);
+  if (!/^\d{8}$/.test(expected))
+    throw new Error('M1 balance task SIM is not a valid Singapore number');
+  if (localSingaporeNumber(accountText) !== expected) {
+    throw new Error('M1 portal does not prove the authenticated account number');
+  }
+
+  const balanceMatch = /^\$\s*(\d+(?:\.\d{1,2})?)$/.exec(textOf(balanceText).trim());
+  const amountText = balanceMatch?.[1];
+  if (amountText === undefined) throw new Error('M1 portal does not contain an exact SGD balance');
+  const balance = Number(amountText);
+  if (!Number.isFinite(balance)) throw new Error('M1 portal SGD balance is invalid');
+
+  const expiresAt = parseValidityDate(validityText);
+  if (!expiresAt) throw new Error('M1 portal does not contain a valid validity date');
+
+  return {
+    balance,
+    currency: 'SGD',
+    account_number: textOf(expectedPhone),
+    expires_at: expiresAt,
+    balance_path: '.balanceAmt.maBalanceDiv',
+    expiry_path: '.balanceForBox .brand-color',
+    account_path: '.numberTxt',
+  };
+}

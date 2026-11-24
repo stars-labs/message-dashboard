@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/calls/ended",
+    "body": {
+      "call_id": "call-1",
+      "iccid": "89860123456789012345",
+      "reason": "remote_hangup"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "call_id": "call-1"
+    }
+  }
+}

@@ -8,7 +8,9 @@
        Browser chrome already protects Safari tabs, so use only its real inset. */
     --mobile-tab-safe-area: env(safe-area-inset-bottom, 0px);
     --mobile-tab-content-height: 60px;
-    --mobile-tab-bar-height: calc(var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area));
+    --mobile-tab-bar-height: calc(
+      var(--mobile-tab-content-height) + 1px + var(--mobile-tab-safe-area)
+    );
   }
 
   /* Installed apps have no Safari toolbar beneath the page. Keep the controls
@@ -19,11 +21,17 @@
 
   body {
     @apply bg-[#F7F5F2] min-h-screen text-stone-900 antialiased;
-    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family:
+      'IBM Plex Sans',
+      -apple-system,
+      BlinkMacSystemFont,
+      sans-serif;
   }
 
   /* IBM Plex Mono for all numeric data */
-  .font-mono, code, pre {
+  .font-mono,
+  code,
+  pre {
     font-family: 'IBM Plex Mono', 'Fira Code', monospace;
   }
 
@@ -53,7 +61,9 @@
 @layer components {
   .tech-card {
     @apply bg-white border border-stone-200/80 rounded-xl p-6 relative overflow-hidden;
-    box-shadow: 0 1px 3px rgba(28,25,23,0.06), 0 1px 2px rgba(28,25,23,0.04);
+    box-shadow:
+      0 1px 3px rgba(28, 25, 23, 0.06),
+      0 1px 2px rgba(28, 25, 23, 0.04);
   }
 
   .tech-button {
@@ -106,7 +116,6 @@
   .tech-text {
     @apply font-semibold tracking-wide;
   }
-
 }
 
 ::-webkit-scrollbar {
@@ -162,16 +171,22 @@ html.is-ios.is-standalone .mobile-tab-bar {
   background: rgba(245, 245, 244, 0.54);
   -webkit-backdrop-filter: blur(22px) saturate(165%);
   backdrop-filter: blur(22px) saturate(165%);
-  box-shadow: 0 8px 28px rgba(28, 25, 23, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
+  box-shadow:
+    0 8px 28px rgba(28, 25, 23, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
 }
 
 html.is-ios.is-standalone .mobile-tab-bar::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0;
   z-index: 2;
   border-radius: inherit;
-  background: radial-gradient(circle at var(--mobile-tab-glow-x) 12%, rgba(255, 255, 255, 0.28), transparent 30%);
+  background: radial-gradient(
+    circle at var(--mobile-tab-glow-x) 12%,
+    rgba(255, 255, 255, 0.28),
+    transparent 30%
+  );
   opacity: 0;
   pointer-events: none;
   transition: opacity 160ms ease-out;
@@ -187,26 +202,29 @@ html.is-ios.is-standalone .mobile-tab-selection {
   border: 1px solid rgba(255, 255, 255, 0.74);
   border-radius: 26px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 237, 213, 0.34));
-  box-shadow: 0 3px 14px rgba(120, 53, 15, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  box-shadow:
+    0 3px 14px rgba(120, 53, 15, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
   pointer-events: none;
   transform: translate3d(var(--mobile-tab-selection-x), 0, 0)
-    scaleX(var(--mobile-tab-selection-scale-x, 1))
-    scaleY(var(--mobile-tab-selection-scale-y, 1));
+    scaleX(var(--mobile-tab-selection-scale-x, 1)) scaleY(var(--mobile-tab-selection-scale-y, 1));
   transform-origin: center;
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), width 160ms ease-out;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 160ms ease-out;
   will-change: transform;
 }
 
-html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging="true"] {
+html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging='true'] {
   --mobile-tab-selection-scale-x: 1.08;
   --mobile-tab-selection-scale-y: 0.96;
 }
 
-html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging="true"]::before {
+html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging='true']::before {
   opacity: 1;
 }
 
-html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging="true"] .mobile-tab-selection {
+html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging='true'] .mobile-tab-selection {
   transition: none;
 }
 
@@ -219,12 +237,14 @@ html.is-ios.is-standalone .mobile-tab-button > svg {
   transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-html.is-ios.is-standalone .mobile-tab-button[data-mobile-tab-active="true"] > svg {
+html.is-ios.is-standalone .mobile-tab-button[data-mobile-tab-active='true'] > svg {
   transform: translate3d(var(--mobile-tab-icon-shift-x), -1px, 0) scale(1.04);
 }
 
-html.is-ios.is-standalone .mobile-tab-bar[data-mobile-tab-dragging="true"]
-  .mobile-tab-button[data-mobile-tab-active="true"] > svg {
+html.is-ios.is-standalone
+  .mobile-tab-bar[data-mobile-tab-dragging='true']
+  .mobile-tab-button[data-mobile-tab-active='true']
+  > svg {
   transform: translate3d(var(--mobile-tab-icon-shift-x), -1px, 0) scale(1.08);
 }
 

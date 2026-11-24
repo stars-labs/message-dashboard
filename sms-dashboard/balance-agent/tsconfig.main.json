@@ -1,0 +1,24 @@
+// The Electron main process, the CLI and the runner they share. They run under
+// Node or Bun, never in the browser, and drive the carrier portal through
+// Playwright.
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/main.tsbuildinfo",
+    "types": ["bun"],
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/main-declarations"
+  },
+  "include": ["src/**/*.ts", "package.json"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/test-support/**",
+    "src/ipc/**",
+    "src/renderer/**",
+    "src/preload.ts"
+  ],
+  "references": [{ "path": "../tsconfig.shared.json" }, { "path": "./tsconfig.contract.json" }]
+}

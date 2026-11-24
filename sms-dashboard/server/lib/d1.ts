@@ -1,0 +1,62 @@
+import * as v from 'valibot';
+import type { Schema } from '../../shared/parse-json.js';
+
+/** D1 rejects a statement with more bound parameters than this. */
+export const D1_MAX_BOUND_PARAMETERS = 100;
+
+export interface D1RunResult {
+  meta: { changes: number; last_row_id: number };
+}
+
+interface StatementOperations {
+  all(): Promise<{ results: unknown[] }>;
+  first(): Promise<unknown>;
+  run(): Promise<D1RunResult>;
+}
+
+export type D1Operation = keyof StatementOperations;
+
+/**
+ * The part of a D1 prepared statement a caller uses. Code names the operations
+ * it needs, e.g. `D1<'all' | 'first'>`, so the real binding satisfies the type
+ * and a test double implements exactly those operations.
+ */
+export type D1Statement<Op extends D1Operation = D1Operation> = Pick<StatementOperations, Op> & {
+  bind(...values: unknown[]): D1Statement<Op>;
+};
+
+export interface D1<Op extends D1Operation = D1Operation> {
+  prepare(query: string): D1Statement<Op>;
+}
+
+/** Runs statements from the same database as one transaction; only their write metadata is read. */
+export interface D1Batch<Op extends D1Operation = D1Operation> {
+  batch(statements: D1Statement<Op>[]): Promise<D1RunResult[]>;
+}
+
+/** D1 returns untyped rows; every read goes through a row schema so a schema drift throws instead of leaking. */
+export async function queryAll<T>(
+  statement: Pick<StatementOperations, 'all'>,
+  row: Schema<T>,
+): Promise<T[]> {
+  const { results } = await statement.all();
+  return v.parse(v.array(row), results);
+}
+
+export async function queryFirst<T>(
+  statement: Pick<StatementOperations, 'first'>,
+  row: Schema<T>,
+): Promise<T | null> {
+  const result = await statement.first();
+  return result === null ? null : v.parse(row, result);
+}
+
+/** For a statement that always yields a row, such as INSERT ... RETURNING; no row throws. */
+export async function queryOne<T>(
+  statement: Pick<StatementOperations, 'first'>,
+  row: Schema<T>,
+): Promise<T> {
+  const result = await queryFirst(statement, row);
+  if (result === null) throw new Error('Statement returned no row');
+  return result;
+}

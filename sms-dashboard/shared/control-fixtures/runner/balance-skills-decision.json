@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/balance-skills/jobs/skill-job-1/decision",
+    "body": {
+      "runner_id": "runner-1",
+      "model": "company-model",
+      "decision": {
+        "action": "reply",
+        "selected_option": "11",
+        "balance": null,
+        "currency": null,
+        "confidence": 0.98,
+        "evidence": "",
+        "reason": ""
+      }
+    }
+  },
+  "response": {
+    "status": 202,
+    "body": {
+      "success": true,
+      "action": "reply",
+      "status": "queued"
+    }
+  }
+}

@@ -59,8 +59,7 @@ for each flow step by step.
 │   │   ├── handlers/       # API endpoint handlers
 │   │   ├── api/            # Route modules (keywords, filters, verification, calls)
 │   │   └── middleware/     # CORS, Auth0, RBAC
-│   ├── runner-core/        # Shared runner logic (control client, SMS AI, carrier browser)
-│   ├── balance-agent/      # Electron app + CLI for balance jobs
+│   ├── balance-agent/      # Electron app + CLI for balance jobs (src/runner/: control client, SMS AI, carrier browser)
 │   ├── migrations/         # D1 SQL migrations
 │   ├── config/             # Auth0 role config
 │   └── wrangler.toml       # Cloudflare Workers config

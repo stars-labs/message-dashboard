@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/api/control/messages"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "message": "Cleared 1 messages"
+    }
+  }
+}

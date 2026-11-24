@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/carrier-web-balance/jobs/web-job-1/complete",
+    "body": {
+      "runner_id": "runner-1",
+      "balance": 18.25,
+      "currency": "CNY",
+      "account_number": "+8613800000001"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true,
+      "status": "parsed"
+    }
+  }
+}

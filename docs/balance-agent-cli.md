@@ -45,6 +45,9 @@ balance-agent --help
 nix run .#balance-agent-cli -- --help
 ```
 
+Both run the TypeScript source, `sms-dashboard/balance-agent/src/cli.ts`, under Bun.
+From `sms-dashboard/balance-agent`, `bun run cli -- --help` does the same.
+
 Save the public Dashboard, Auth0 native-client, and AI endpoint settings. Use the
 same non-secret values configured for the desktop Balance Agent:
 

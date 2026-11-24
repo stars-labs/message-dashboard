@@ -1,0 +1,414 @@
+// Run with: bun test server/utils/spam-filter.test.ts
+import { describe, expect, test } from 'bun:test';
+import { sqliteD1 } from '../../test/sqlite-d1.js';
+import type { D1, D1Statement } from '../lib/d1.js';
+import {
+  classifyMessage,
+  loadActiveRules,
+  normalizeSender,
+  senderMatches,
+  senderMatchesSpamRule,
+  type ClassifiableMessage,
+  type SpamRule,
+} from './spam-filter.js';
+
+// Mirrors the seed rules in migrations/035_add_message_filter.sql.
+// Ordered by id, which is the order classifyMessage evaluates them in.
+const RULES: SpamRule[] = [
+  { id: 1, rule_type: 'body_keyword', pattern: '外交部领保中心' },
+  { id: 2, rule_type: 'body_keyword', pattern: '中国文化和旅游部温馨提示' },
+  { id: 3, rule_type: 'body_keyword', pattern: '中国海关提示' },
+  { id: 4, rule_type: 'sender', pattern: '10086' },
+  { id: 5, rule_type: 'sender', pattern: '10010' },
+  { id: 6, rule_type: 'sender', pattern: '101906' },
+  { id: 7, rule_type: 'sender', pattern: '12306' },
+  { id: 8, rule_type: 'sender', pattern: 'M1 Limited' },
+  { id: 9, rule_type: 'sender', pattern: '10001' },
+  // Added by migration 070.
+  { id: 10, rule_type: 'body_keyword', pattern: '请您评价' },
+  { id: 11, rule_type: 'body_keyword', pattern: '心级服务' },
+];
+
+// A received message with only the fields the classifier reads.
+function received(fields: ClassifiableMessage): ClassifiableMessage {
+  return { type: 'received', content: '', phone_number: null, ...fields };
+}
+
+describe('normalizeSender', () => {
+  test('strips the leading + and any punctuation', () => {
+    expect(normalizeSender('+8610086')).toBe('8610086');
+    expect(normalizeSender('10086')).toBe('10086');
+    expect(normalizeSender(' 100-86 ')).toBe('10086');
+  });
+
+  test('returns empty string for absent senders', () => {
+    expect(normalizeSender(null)).toBe('');
+    expect(normalizeSender(undefined)).toBe('');
+    expect(normalizeSender('')).toBe('');
+  });
+});
+
+describe('senderMatches', () => {
+  test('matches named sender IDs case-insensitively but exactly', () => {
+    expect(senderMatches('M1 Limited', 'M1 Limited')).toBe(true);
+    expect(senderMatches('m1 limited', 'M1 Limited')).toBe(true);
+    expect(senderMatches('M1 Limited Promo', 'M1 Limited')).toBe(false);
+  });
+
+  test('preserves numeric shortcode and country-prefix matching', () => {
+    expect(senderMatches('+8610001', '10001')).toBe(true);
+    expect(senderMatches('85212580', '12580')).toBe(true);
+    expect(senderMatches('13910001', '10001')).toBe(false);
+  });
+
+  // The strict form stays strict: balance correlation depends on it rejecting a
+  // campaign-suffixed sender, which is a different origin from the shortcode.
+  test('does NOT match a campaign-suffixed shortcode', () => {
+    expect(senderMatches('100860011575', '10086')).toBe(false);
+    expect(senderMatches('10086100', '10086')).toBe(false);
+  });
+});
+
+describe('senderMatchesSpamRule', () => {
+  // Carriers append a per-campaign suffix to their shortcode, so one marketing
+  // blast arrives from 100860011575 and the next from 10086123456. Exact match
+  // alone lets every one of them through.
+  test('matches a shortcode carrying a campaign suffix', () => {
+    expect(senderMatchesSpamRule('100860011575', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('+86100860011575', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('1001012345', '10010')).toBe(true);
+  });
+
+  test('still matches the bare shortcode and country-prefixed forms', () => {
+    expect(senderMatchesSpamRule('10086', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('+8610086', '10086')).toBe(true);
+    expect(senderMatchesSpamRule('85212580', '12580')).toBe(true);
+  });
+
+  // The suffix must extend the shortcode, never merely contain it: a real mobile
+  // number can end with or embed a shortcode, but cannot start with one.
+  test('does NOT match numbers that only contain the shortcode', () => {
+    expect(senderMatchesSpamRule('13910086', '10086')).toBe(false);
+    expect(senderMatchesSpamRule('8613100862222', '10086')).toBe(false);
+  });
+
+  // A different sender, not another campaign from the same one.
+  test('keeps alphanumeric sender IDs exact', () => {
+    expect(senderMatchesSpamRule('M1 Limited', 'M1 Limited')).toBe(true);
+    expect(senderMatchesSpamRule('M1 Limited Promo', 'M1 Limited')).toBe(false);
+  });
+});
+
+describe('classifyMessage — body keyword rules', () => {
+  // Backstop for the sender fix: the same campaign from a sender with no rule.
+  test('filters the 满意度调研 broadcast on wording alone', () => {
+    const msg = received({
+      content: '【心级服务 让爱连接】邀请您参与2道问题调研，期待您的10分满意！',
+      phone_number: '9528',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 11,
+    });
+  });
+
+  test('filters the 领保中心 broadcast', () => {
+    const msg = received({
+      content:
+        '外交部领保中心祝您健康平安！近期本地区假冒公检法、银行、使馆和防疫部门工作人员的电信诈骗高发，请提高警惕。',
+      phone_number: '10086',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 1,
+    });
+  });
+
+  test('filters the 文旅部 broadcast', () => {
+    const msg = received({
+      content:
+        "中国文化和旅游部温馨提示，文明旅游'三讲三不'：讲安全、讲礼让、讲卫生；不大声喧哗、不乱写乱画、不违法违规。",
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 2,
+    });
+  });
+
+  test('filters the 海关 broadcast despite the full-width comma after the pattern', () => {
+    const msg = received({
+      content: '中国海关提示，请勿携带下列物品进入中国境内',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 3,
+    });
+  });
+
+  test('first matching rule wins when a message contains two patterns', () => {
+    // The real 领保中心 SMS also embeds the 文旅部 text further down.
+    const msg = received({
+      content: '外交部领保中心祝您健康平安！……中国文化和旅游部温馨提示，文明旅游"三讲三不"。',
+    });
+    // Rule 1 comes before rule 2, so provenance must point at rule 1.
+    expect(classifyMessage(msg, RULES).filter_rule_id).toBe(1);
+  });
+});
+
+describe('classifyMessage — sender rules', () => {
+  test('filters a named carrier sender', () => {
+    const msg = received({
+      content: 'M1 Prepaid is now on 5G! Upgrade to a 5G SIM for faster speeds.',
+      phone_number: 'M1 Limited',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 8,
+    });
+  });
+
+  test('filters 10001 carrier broadcasts', () => {
+    const msg = received({
+      content: '尊敬的客户，新加坡漫游使用方式及资费如下',
+      phone_number: '10001',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 9,
+    });
+  });
+
+  test('filters an exact shortcode match', () => {
+    const msg = received({ content: '【联通助理】国际漫游提醒', phone_number: '101906' });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 6,
+    });
+  });
+
+  test('filters a shortcode carrying a 86 country prefix', () => {
+    const msg = received({ content: '任意内容', phone_number: '+8610086' });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 4,
+    });
+  });
+
+  // Regression guard: an endsWith() implementation would wrongly filter this.
+  test('does NOT filter a real mobile number that merely ends with a shortcode', () => {
+    const msg = received({
+      content: '您的验证码是 384912，请勿泄露。',
+      phone_number: '13910086',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+
+  test('does NOT filter a longer number that merely contains a shortcode', () => {
+    const msg = received({ content: '任意内容', phone_number: '8613100862222' });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
+  });
+
+  // Observed in production: a 移动 satisfaction survey from a suffixed shortcode.
+  // The body carries no verification code, and "无验证码" showed in the UI, yet the
+  // message stayed visible because 100860011575 !== 10086.
+  test('filters the 移动 satisfaction survey from a suffixed shortcode', () => {
+    const msg = received({
+      content:
+        '【心级服务 让爱连接】尊敬的客户，感谢您长期以来的支持，中国移动特开展“请您评价”调研活动，邀请您参与2道问题调研，期待您的10分满意！',
+      phone_number: '100860011575',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 4,
+    });
+  });
+});
+
+describe('classifyMessage — messages that must never be filtered', () => {
+  test('keeps a genuine verification code SMS', () => {
+    const msg = received({
+      content: '【抖音】您的验证码是38291，请在15分钟内使用，请勿泄露。',
+      phone_number: '1069',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+
+  test('keeps an English verification code SMS', () => {
+    const msg = received({
+      content: 'Your Google verification code is 123456',
+      phone_number: '+6580286158',
+    });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
+  });
+
+  test('never filters our own outbound SMS, even if the body matches a rule', () => {
+    const msg = {
+      type: 'sent',
+      content: '中国海关提示，请勿携带下列物品进入中国境内',
+      phone_number: '10086',
+    };
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+
+  test('keeps everything when there are no rules', () => {
+    const msg = received({ content: '中国海关提示，请勿携带下列物品', phone_number: '10086' });
+    expect(classifyMessage(msg, [])).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+});
+
+// 10010 is 2,864 of the 8,624 messages in the real table, but 14 of those are
+// genuine 联通网上营业厅 login codes. Blanket-blocking the shortcode would hide them,
+// so a labelled code overrides every rule.
+describe('classifyMessage — OTP safety guard', () => {
+  test('keeps a real 10010 verification code even though 10010 is blocked', () => {
+    const msg = received({
+      content: '验证码：754852，感谢您使用网上营业厅【中国联通】',
+      phone_number: '10010',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+
+  test('still filters 10010 marketing that carries no labelled code', () => {
+    const msg = received({
+      content:
+        '【中国联通】尊敬的用户，您在中国联通订购的"广东在网得24个月沃视频月卡优惠"(方案编号: 25GD300965)，将于2026-08-31到期。',
+      phone_number: '10010',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'filtered',
+      filter_rule_id: 5,
+    });
+  });
+
+  test('the guard beats body-keyword rules too, not just sender rules', () => {
+    const msg = received({
+      content: '中国海关提示，请勿携带下列物品。您的验证码是 445566',
+      phone_number: '10086',
+    });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
+  });
+
+  test('protects English OTPs, which the Singapore SIMs receive', () => {
+    const msg = received({
+      content: 'Your Google verification code is 123456',
+      phone_number: '10010',
+    });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('clean');
+  });
+
+  test('protects an M1 selfcare OTP from the M1 Limited sender rule', () => {
+    const msg = received({
+      content: 'OTP for login to selfcare portal is 159571',
+      phone_number: 'M1 Limited',
+    });
+    expect(classifyMessage(msg, RULES)).toEqual({
+      filter_status: 'clean',
+      filter_rule_id: null,
+    });
+  });
+
+  test('a bare year is not a labelled code, so it does not rescue marketing', () => {
+    const msg = received({ content: '优惠将于2026-08-31到期', phone_number: '10086' });
+    expect(classifyMessage(msg, RULES).filter_status).toBe('filtered');
+  });
+});
+
+describe('classifyMessage — malformed input', () => {
+  test('tolerates a missing body', () => {
+    expect(classifyMessage(received({ content: null }), RULES).filter_status).toBe('clean');
+    expect(classifyMessage(received({}), RULES).filter_status).toBe('clean');
+  });
+
+  test('tolerates a non-string body', () => {
+    expect(classifyMessage(received({ content: 12345 }), RULES).filter_status).toBe('clean');
+  });
+
+  test('skips a rule with an empty pattern instead of matching everything', () => {
+    const msg = received({ content: '中国海关提示，请勿携带', phone_number: '9528' });
+    const rules: SpamRule[] = [
+      { id: 98, rule_type: 'body_keyword', pattern: '' },
+      { id: 99, rule_type: 'sender', pattern: '' },
+      { id: 3, rule_type: 'body_keyword', pattern: '中国海关提示' },
+    ];
+    expect(classifyMessage(msg, rules).filter_rule_id).toBe(3);
+    expect(classifyMessage(msg, rules.slice(0, 2)).filter_status).toBe('clean');
+  });
+
+  test('keeps a missing message and missing rules clean', () => {
+    expect(classifyMessage(null, RULES).filter_status).toBe('clean');
+    expect(classifyMessage(undefined, RULES).filter_status).toBe('clean');
+    expect(classifyMessage(received({ phone_number: '10086' }), null).filter_status).toBe('clean');
+    expect(classifyMessage(received({ phone_number: '10086' }), undefined).filter_status).toBe(
+      'clean',
+    );
+  });
+
+  test('ignores a non-string sender', () => {
+    expect(classifyMessage(received({ phone_number: 10086 }), RULES).filter_status).toBe('clean');
+  });
+});
+
+function ruleDatabase() {
+  const d1 = sqliteD1();
+  d1.db.run(`CREATE TABLE filter_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_type TEXT NOT NULL CHECK(rule_type IN ('body_keyword', 'sender')),
+    pattern TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1
+  )`);
+  return d1;
+}
+
+describe('loadActiveRules', () => {
+  test('returns the active rules in id order with exactly the fields classification reads', async () => {
+    const d1 = ruleDatabase();
+    d1.db.run(`INSERT INTO filter_rules (id, rule_type, pattern, is_active) VALUES
+      (3, 'sender', '10010', 1),
+      (1, 'body_keyword', '中国海关提示', 1),
+      (2, 'sender', '10086', 0),
+      (4, 'body_keyword', '请您评价', 1)`);
+
+    expect(await loadActiveRules(d1)).toEqual([
+      { id: 1, rule_type: 'body_keyword', pattern: '中国海关提示' },
+      { id: 3, rule_type: 'sender', pattern: '10010' },
+      { id: 4, rule_type: 'body_keyword', pattern: '请您评价' },
+    ]);
+  });
+
+  test('returns no rules when none are active', async () => {
+    const d1 = ruleDatabase();
+    d1.db.run(`INSERT INTO filter_rules (rule_type, pattern, is_active) VALUES ('sender', '1', 0)`);
+    expect(await loadActiveRules(d1)).toEqual([]);
+  });
+
+  test('rejects a row whose rule_type is outside the known set', async () => {
+    const statement: D1Statement<'all'> = {
+      bind: () => statement,
+      all: () => Promise.resolve({ results: [{ id: 99, rule_type: 'regex', pattern: '.*' }] }),
+    };
+    const db: D1<'all'> = { prepare: () => statement };
+
+    let failure: unknown;
+    try {
+      await loadActiveRules(db);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+  });
+});

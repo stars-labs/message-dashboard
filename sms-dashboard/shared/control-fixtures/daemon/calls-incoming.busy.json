@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/calls/incoming",
+    "body": {
+      "from": "+8613900000002",
+      "iccid": "89860123456789012345"
+    }
+  },
+  "response": {
+    "status": 409,
+    "body": {
+      "ok": false,
+      "reason": "another call is active"
+    }
+  }
+}

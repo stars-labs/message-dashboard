@@ -1,0 +1,3 @@
+# Formatting-only commits. Use with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# style: format the dashboard with Prettier
+48edb23d2e742066d9853642744b6bc411c415b3

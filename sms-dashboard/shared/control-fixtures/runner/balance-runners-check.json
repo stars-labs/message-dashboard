@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/control/balance-runners/check"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "success": true
+    }
+  }
+}

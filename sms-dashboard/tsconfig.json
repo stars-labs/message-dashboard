@@ -1,0 +1,12 @@
+// The strict gate for the dashboard; balance-agent has its own, run by `check`.
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.shared.json" },
+    { "path": "./tsconfig.worker.json" },
+    { "path": "./tsconfig.test.json" },
+    { "path": "./tsconfig.client.json" },
+    { "path": "./tsconfig.client-test.json" },
+    { "path": "./tsconfig.tooling.json" }
+  ]
+}

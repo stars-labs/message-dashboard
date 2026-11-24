@@ -1,7 +1,7 @@
 //! PROXY protocol v1, as sent by nginx `stream { proxy_protocol on; }`.
 //!
 //! The voice bridge now sits behind an nginx SNI router that shares port 443
-//! with NetBird. A plain TCP proxy would make every connection look like it came
+//! with `NetBird`. A plain TCP proxy would make every connection look like it came
 //! from 127.0.0.1, which defeats the Cloudflare allowlist. With the PROXY
 //! protocol nginx prefixes each connection with one text line naming the real
 //! source, and the bridge reads that line before the TLS handshake begins.
@@ -32,15 +32,18 @@ pub enum ParseError {
 
 /// Parse the header at the start of `buf`.
 pub fn parse_v1(buf: &[u8]) -> Result<ProxyHeader, ParseError> {
-    let limit = buf.len().min(MAX_HEADER_LEN);
-    let Some(end) = buf[..limit].windows(2).position(|w| w == b"\r\n") else {
+    let head = buf.get(..MAX_HEADER_LEN).unwrap_or(buf);
+    let Some(end) = head.windows(2).position(|w| w == b"\r\n") else {
         return if buf.len() >= MAX_HEADER_LEN {
             Err(ParseError::Malformed("no CRLF within 107 bytes"))
         } else {
             Err(ParseError::Incomplete)
         };
     };
-    let line = std::str::from_utf8(&buf[..end]).map_err(|_| ParseError::Malformed("not ASCII"))?;
+    let line = head
+        .get(..end)
+        .and_then(|line| std::str::from_utf8(line).ok())
+        .ok_or(ParseError::Malformed("not ASCII"))?;
     let len = end + 2;
 
     let mut fields = line.split(' ');
@@ -49,7 +52,7 @@ pub fn parse_v1(buf: &[u8]) -> Result<ProxyHeader, ParseError> {
     }
     match fields.next() {
         Some("UNKNOWN") => return Ok(ProxyHeader { source: None, len }),
-        Some("TCP4") | Some("TCP6") => {}
+        Some("TCP4" | "TCP6") => {}
         _ => return Err(ParseError::Malformed("unknown protocol family")),
     }
     let src_ip: IpAddr = fields

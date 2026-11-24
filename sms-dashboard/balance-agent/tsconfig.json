@@ -1,0 +1,13 @@
+// The Balance Agent's strict gate: `bun run typecheck` (tsc -b) checks every
+// project below, and the shared contracts it reads from ../shared.
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.contract.json" },
+    { "path": "./tsconfig.main.json" },
+    { "path": "./tsconfig.preload.json" },
+    { "path": "./tsconfig.renderer.json" },
+    { "path": "./tsconfig.test.json" },
+    { "path": "./tsconfig.tooling.json" }
+  ]
+}

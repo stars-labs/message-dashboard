@@ -1,0 +1,4 @@
+{
+  "request": { "method": "POST", "path": "/api/control/heartbeat", "text": "{\"schema_version\":" },
+  "response": { "status": 400, "body": { "success": false, "error": "Body must be JSON" } }
+}

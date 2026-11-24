@@ -28,6 +28,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # JSON serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# TypeScript bindings for the daemon-Worker wire types; see src/wire.rs
+ts-rs = { version = "=12.0.1", features = ["no-serde-warnings"] }
 
 # Logging
 tracing = "0.1"
@@ -70,3 +72,23 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "warn"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+as_conversions = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+indexing_slicing = "warn"
+string_slice = "warn"
+panic = "warn"
+unreachable = "warn"
+todo = "warn"
+unimplemented = "warn"

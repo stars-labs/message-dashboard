@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/control/calls/incoming",
+    "body": {
+      "from": "+8613900000002",
+      "iccid": "89860123456789012345"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "call": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "direction": "inbound",
+        "state": "ringing",
+        "iccid": "89860123456789012345",
+        "number": "+8613900000002",
+        "started_at": "2026-11-15T00:00:00.000Z"
+      }
+    }
+  }
+}

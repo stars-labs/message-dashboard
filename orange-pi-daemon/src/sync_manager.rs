@@ -1,26 +1,19 @@
-use crate::types::ModemReport;
+use crate::identifiers::Imei;
+use crate::wire::{ModemReport, SyncMode};
 use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 use tracing::{info, warn};
-
-/// Sync mode for state reconciliation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncMode {
-    /// Full state sync - reconcile all devices with server
-    Full,
-    /// Incremental update - only send changed data
-    Incremental,
-}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct DeviceDelta {
     pub reports: Vec<ModemReport>,
-    pub removed_equipment_ids: Vec<String>,
+    pub removed_equipment_ids: Vec<Imei>,
 }
 
 /// Merge successful reads into the last known report snapshot while using USB
 /// discovery, not AT-command success, as the authority for physical removal.
-pub fn merge_device_reports<I>(
-    previous: &HashMap<String, ModemReport>,
+pub fn merge_device_reports<I, S: BuildHasher>(
+    previous: &HashMap<String, ModemReport, S>,
     discovered_modem_ids: &[String],
     successful_reports: I,
 ) -> HashMap<String, ModemReport>
@@ -65,28 +58,25 @@ fn device_state_changed(previous: &ModemReport, current: &ModemReport) -> bool {
 /// Return only reports whose durable dashboard state changed, plus explicit removals.
 /// Raw signal and RSSI noise inside the same UI signal band is intentionally ignored.
 pub fn device_delta(previous: &[ModemReport], current: &[ModemReport]) -> DeviceDelta {
-    let previous_by_id: HashMap<&str, &ModemReport> = previous
+    let previous_by_id: HashMap<&Imei, &ModemReport> = previous
         .iter()
-        .map(|report| (report.equipment_id.as_str(), report))
+        .map(|report| (&report.equipment_id, report))
         .collect();
-    let current_ids: HashSet<&str> = current
-        .iter()
-        .map(|report| report.equipment_id.as_str())
-        .collect();
+    let current_ids: HashSet<&Imei> = current.iter().map(|report| &report.equipment_id).collect();
 
     let reports = current
         .iter()
         .filter(|report| {
             previous_by_id
-                .get(report.equipment_id.as_str())
+                .get(&report.equipment_id)
                 .is_none_or(|previous| device_state_changed(previous, report))
         })
         .cloned()
         .collect();
 
-    let mut removed_equipment_ids: Vec<String> = previous
+    let mut removed_equipment_ids: Vec<Imei> = previous
         .iter()
-        .filter(|report| !current_ids.contains(report.equipment_id.as_str()))
+        .filter(|report| !current_ids.contains(&report.equipment_id))
         .map(|report| report.equipment_id.clone())
         .collect();
     removed_equipment_ids.sort();
@@ -97,20 +87,17 @@ pub fn device_delta(previous: &[ModemReport], current: &[ModemReport]) -> Device
     }
 }
 
-impl SyncMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SyncMode::Full => "full",
-            SyncMode::Incremental => "incremental",
-        }
-    }
-}
-
 /// Manages synchronization state between daemon and server
 /// Implements full/incremental sync pattern for efficient updates
 pub struct SyncManager {
     full_sync_completed: bool,
     consecutive_failures: u32,
+}
+
+impl Default for SyncManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SyncManager {
@@ -190,17 +177,29 @@ impl SyncManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::identifiers::Iccid;
+    use crate::wire::ModemStatus;
     use std::collections::HashMap;
+
+    fn tag_number(tag: &str) -> u32 {
+        tag.bytes().next().map_or(0, u32::from)
+    }
+
+    fn imei(tag: &str) -> Imei {
+        Imei::try_from(format!("86000000000{:04}", tag_number(tag))).unwrap()
+    }
 
     fn report(equipment_id: &str, signal_percent: i32) -> ModemReport {
         ModemReport {
-            equipment_id: equipment_id.to_string(),
+            equipment_id: imei(equipment_id),
             manufacturer: Some("Quectel".to_string()),
             model: Some("EC20".to_string()),
             firmware_revision: Some("1".to_string()),
             hardware_revision: Some("1".to_string()),
-            status: "active".to_string(),
-            detected_iccid: Some(format!("iccid-{equipment_id}")),
+            status: ModemStatus::Active,
+            detected_iccid: Some(
+                Iccid::try_from(format!("8986{:04}", tag_number(equipment_id))).unwrap(),
+            ),
             detected_phone_number: None,
             detected_operator: Some("carrier".to_string()),
             signal_percent: Some(signal_percent),
@@ -236,10 +235,7 @@ mod tests {
 
         // Simulate failures
         for _ in 0..3 {
-            sm.record_failure(
-                SyncMode::Incremental,
-                &std::io::Error::new(std::io::ErrorKind::Other, "test"),
-            );
+            sm.record_failure(SyncMode::Incremental, &std::io::Error::other("test"));
         }
 
         assert!(sm.needs_full_sync());
@@ -259,7 +255,7 @@ mod tests {
         let mut signal_changed = report("a", 49);
         signal_changed.rssi = Some(-92);
         let mut state_changed = report("b", 60);
-        state_changed.status = "error".to_string();
+        state_changed.status = ModemStatus::Disconnected;
 
         let delta = device_delta(&previous, &[signal_changed.clone(), state_changed.clone()]);
 
@@ -274,7 +270,7 @@ mod tests {
         let delta = device_delta(&previous, &[report("a", 80)]);
 
         assert!(delta.reports.is_empty());
-        assert_eq!(delta.removed_equipment_ids, vec!["b"]);
+        assert_eq!(delta.removed_equipment_ids, vec![imei("b")]);
     }
 
     #[test]
@@ -293,7 +289,7 @@ mod tests {
 
         assert_eq!(snapshot.len(), 2);
         assert_eq!(snapshot["port-a"].signal_percent, Some(49));
-        assert_eq!(snapshot["port-b"].equipment_id, "b");
+        assert_eq!(snapshot["port-b"].equipment_id, imei("b"));
     }
 
     #[test]
@@ -310,7 +306,7 @@ mod tests {
         );
 
         assert_eq!(snapshot.len(), 1);
-        assert_eq!(snapshot["port-a"].equipment_id, "a");
+        assert_eq!(snapshot["port-a"].equipment_id, imei("a"));
         assert!(!snapshot.contains_key("port-b"));
     }
 }

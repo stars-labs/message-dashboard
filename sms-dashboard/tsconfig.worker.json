@@ -1,0 +1,16 @@
+// The Cloudflare Worker. worker-runtime.d.ts holds the runtime globals and
+// worker-configuration.d.ts the generated Env, which secrets-env.d.ts extends.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/worker.tsbuildinfo",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./node_modules/.tmp/worker-declarations"
+  },
+  "include": ["worker-runtime.d.ts", "worker-configuration.d.ts", "server/**/*.ts"],
+  "exclude": ["**/*.test.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }]
+}
