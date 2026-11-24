@@ -2,20 +2,43 @@ import { ORPCError } from '@orpc/server';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { parseJson, type Schema } from '../../shared/parse-json.js';
+import { D1_MAX_BOUND_PARAMETERS, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
 import {
-  D1_MAX_BOUND_PARAMETERS,
-  queryAll,
-  queryFirst,
-  type D1,
-  type D1Batch,
-  type D1RunResult,
-  type D1Statement,
-} from '../lib/d1.js';
+  expireStaleBalanceChecks,
+  findBalanceCheckId,
+  findBalanceCheckToContinue,
+  findBalanceCheckToRetry,
+  findBalanceCheckToStop,
+  findCheckPhone,
+  findEnabledBalanceProfile,
+  findRecentBalanceCheck,
+  listBalanceCheckMessages,
+  listBalanceChecks,
+  listBalanceChecksByIds,
+  listBalanceCheckStatuses,
+  listBalanceCheckWebEvents,
+  listCooldownChecks,
+  listParsedChecks,
+  listPendingChecksForReply,
+  listPlanPhones,
+  listQueryProfiles,
+  markBalanceCheckSmsResult,
+  queueBalanceFollowUpMessage,
+  queueSmsBalanceCheck,
+  recordBalanceReply,
+  requeueBalanceCheck,
+  runBalanceStatements,
+  stopBalanceCheck,
+  type BalanceCheckListRow,
+  type BalanceCheckRow,
+  type BalanceMessage,
+  type BalanceProfile,
+  type FollowUpCheck,
+  type ParsedCheck,
+  type PlanPhone,
+} from '../db/balance-checks.js';
 import { parseBalanceSkillConfig } from '../../shared/balance-skill.js';
 import {
-  CHECK_STATUSES,
-  SKILL_JOB_STATUSES,
-  WEB_JOB_STATUSES,
   type CheckStatus,
   type DisplayStatus,
   type SkillJobStatus,
@@ -23,18 +46,14 @@ import {
 } from '../../shared/balance-status.js';
 import {
   BATCH_METHODS,
-  BalanceConversationMessage,
   BalanceMetric,
-  BalanceWebEvent,
   INELIGIBLE_REASONS,
-  PROFILE_METHODS,
-  QUERY_METHODS,
   type BalanceMethod,
   type BalanceQueryBatchResponse,
   type BalanceQueryPreflightResponse,
   type BalanceQueryPreviewResponse,
   type BalanceQueryResponse,
-  RecentBalanceCheck,
+  type RecentBalanceCheck,
   type BalanceCheck,
   type BalanceQueryRefusal,
   type QueuedBalanceCheck,
@@ -66,53 +85,9 @@ export type SmsOutcome = 'confirmed' | 'submitted_unconfirmed' | 'failed';
 type BatchMethod = (typeof BATCH_METHODS)[number];
 type IneligibleReason = (typeof INELIGIBLE_REASONS)[number];
 
-const Flag = v.picklist([0, 1]);
-
-/** A row of device_view as the balance planner reads it. */
-const PlanPhoneRow = v.object({
-  iccid: v.string(),
-  number: v.string(),
-  carrier: v.nullable(v.string()),
-  country: v.nullable(v.string()),
-  sim_status: v.string(),
-  sim_index: v.number(),
-  sim_role: v.string(),
-  service_type: v.string(),
-});
-
-export type PlanPhone = v.InferOutput<typeof PlanPhoneRow>;
-
-const PROFILE_COLUMNS = `id, country_code, carrier, method, command, destination, expected_senders,
-  parser_version, response_window_minutes, discovery_enabled, enabled, conversation_steps,
-  skill_config`;
-
-const profileColumns = {
-  id: v.string(),
-  country_code: v.string(),
-  carrier: v.string(),
-  command: v.string(),
-  destination: v.nullable(v.string()),
-  expected_senders: v.string(),
-  parser_version: v.string(),
-  response_window_minutes: v.number(),
-  discovery_enabled: Flag,
-  enabled: Flag,
-  conversation_steps: v.string(),
-  skill_config: v.string(),
-};
-
-/** A sim_balance_profiles row of any method. */
-const ProfileRow = v.object({ ...profileColumns, method: v.picklist(PROFILE_METHODS) });
-
-/** A sim_balance_profiles row whose method the planner can run. */
-const QueryProfileRow = v.object({ ...profileColumns, method: v.picklist(QUERY_METHODS) });
-
-export type BalanceProfile = v.InferOutput<typeof QueryProfileRow>;
-
-const ParsedCheckRow = v.object({ sim_iccid: v.string(), profile_id: v.string() });
+export type { BalanceCheckRow, BalanceProfile, PlanPhone };
 
 type RecentCheck = RecentBalanceCheck;
-type ParsedCheck = v.InferOutput<typeof ParsedCheckRow>;
 
 /** One SIM's balance-query eligibility. An eligible SIM always has a profile. */
 type PlanItem =
@@ -133,42 +108,6 @@ type PlanItem =
 
 type EligiblePlanItem = Extract<PlanItem, { eligible: true }>;
 
-/** A message handed to the balancer: what was received, from whom. */
-interface BalanceMessage {
-  id: string;
-  phone_number: string | null;
-  content: string;
-}
-
-/** The fields of a balance check a follow-up SMS is queued from. */
-interface FollowUpCheck {
-  id: string;
-  sim_number: string | null;
-  destination: string | null;
-  step_index: number;
-}
-
-/**
- * A pending check as reply correlation reads it. The query only returns checks
- * whose deadline the reply arrived before, so the window flag is never null.
- */
-const PendingCheckRow = v.object({
-  id: v.string(),
-  sim_iccid: v.string(),
-  profile_id: v.string(),
-  parser_version: v.string(),
-  step_index: v.number(),
-  status: v.picklist(CHECK_STATUSES),
-  expected_senders: v.string(),
-  conversation_steps: v.string(),
-  skill_config: v.string(),
-  destination: v.nullable(v.string()),
-  sim_number: v.nullable(v.string()),
-  response_window_open: Flag,
-});
-
-export type BalanceCheckRow = v.InferOutput<typeof PendingCheckRow>;
-
 const ConversationStep = v.object({ command: v.string(), response_contains: v.string() });
 const AttemptedStep = v.object({ command: v.string() });
 const SkillOutputs = v.object({ outputs: v.array(v.unknown()) });
@@ -178,11 +117,6 @@ const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
 const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
 const CHINA_TELECOM_NAMES = ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'];
 const CMHK_NAMES = ['cmhk', 'china mobile hong kong', '中国移动香港', '中移香港', '香港移动'];
-const BALANCE_COOLDOWN_PREDICATE = `
-  status IN ('queued', 'awaiting_response')
-  OR (status IN ('response_received', 'parsed', 'unparsed')
-    AND datetime(requested_at) >= datetime('now', '-24 hours'))
-`;
 
 /**
  * The cash balance patterns of each SMS parser, in order of preference.
@@ -216,99 +150,6 @@ const INELIGIBLE_ERRORS: Readonly<Record<IneligibleReason, string>> = {
   service_type: NOT_ELIGIBLE,
 };
 
-const CheckStatusSchema = v.picklist(CHECK_STATUSES);
-const SkillJobStatusSchema = v.nullable(v.picklist(SKILL_JOB_STATUSES));
-const WebJobStatusSchema = v.nullable(v.picklist(WEB_JOB_STATUSES));
-
-const ListRow = v.object({
-  id: v.string(),
-  sim_iccid: v.string(),
-  profile_id: v.string(),
-  requested_at: v.string(),
-  sent_at: v.nullable(v.string()),
-  completed_at: v.nullable(v.string()),
-  status: CheckStatusSchema,
-  step_index: v.number(),
-  response_sender: v.nullable(v.string()),
-  raw_response: v.nullable(v.string()),
-  error: v.nullable(v.string()),
-  parser_version: v.string(),
-  country_code: v.string(),
-  profile_carrier: v.string(),
-  method: v.picklist(PROFILE_METHODS),
-  command: v.string(),
-  destination: v.nullable(v.string()),
-  conversation_steps: v.string(),
-  skill_config: v.string(),
-  sim_index: v.nullable(v.number()),
-  sim_number: v.nullable(v.string()),
-  sim_carrier: v.nullable(v.string()),
-  sim_country: v.nullable(v.string()),
-  outbound_content: v.nullable(v.string()),
-  outbound_recipient: v.nullable(v.string()),
-  outbound_timestamp: v.nullable(v.string()),
-  outbound_status: v.nullable(v.string()),
-  response_content: v.nullable(v.string()),
-  response_phone_number: v.nullable(v.string()),
-  response_timestamp: v.nullable(v.string()),
-  skill_job_status: SkillJobStatusSchema,
-  web_job_status: WebJobStatusSchema,
-  web_human_reason: v.nullable(v.string()),
-  metrics_json: v.string(),
-});
-
-const StatusRow = v.object({
-  id: v.string(),
-  status: CheckStatusSchema,
-  updated_at: v.string(),
-  completed_at: v.nullable(v.string()),
-  skill_job_status: SkillJobStatusSchema,
-  web_job_status: WebJobStatusSchema,
-  web_human_reason: v.nullable(v.string()),
-});
-
-const IdRow = v.object({ id: v.string() });
-
-const CheckPhoneRow = v.object({
-  iccid: v.string(),
-  number: v.string(),
-  carrier: v.nullable(v.string()),
-  country: v.nullable(v.string()),
-  sim_status: v.string(),
-});
-
-const CooldownRow = v.object({
-  id: v.string(),
-  status: CheckStatusSchema,
-  requested_at: v.string(),
-});
-
-const ContinueRow = v.object({
-  id: v.string(),
-  status: CheckStatusSchema,
-  step_index: v.number(),
-  response_message_id: v.nullable(v.string()),
-  response_sender: v.nullable(v.string()),
-  raw_response: v.nullable(v.string()),
-  destination: v.nullable(v.string()),
-  conversation_steps: v.string(),
-  sim_number: v.nullable(v.string()),
-});
-
-const RetryRow = v.object({
-  id: v.string(),
-  status: CheckStatusSchema,
-  step_index: v.number(),
-  destination: v.nullable(v.string()),
-  conversation_steps: v.string(),
-  message_id: v.string(),
-  message_content: v.string(),
-  message_recipient: v.nullable(v.string()),
-  message_status: v.nullable(v.string()),
-});
-
-const StopRow = v.object({ id: v.string(), status: CheckStatusSchema });
-
 interface ReadCall {
   env: { DB: D1<'first' | 'all'> };
 }
@@ -340,11 +181,6 @@ function refused(
   message: string,
 ): ORPCError<string, undefined> {
   return new ORPCError(code, { message });
-}
-
-/** A batch statement that changed no row lost a race with another writer. */
-function changed(result: D1RunResult | undefined): boolean {
-  return result !== undefined && result.meta.changes > 0;
 }
 
 function normalizeCarrier(value: string | null): string {
@@ -522,64 +358,15 @@ export function filterBalancePlanByMethods(
   );
 }
 
-/** The SIMs in scope, by index; a scope larger than D1 binds is read in chunks. */
-async function loadPlanPhones(
-  db: D1<'all'>,
-  scope: readonly string[] | null,
-): Promise<PlanPhone[]> {
-  const select = `
-    SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role, service_type
-    FROM device_view`;
-  if (scope === null) {
-    return queryAll(db.prepare(`${select} ORDER BY sim_index`), PlanPhoneRow);
-  }
-  const phones: PlanPhone[] = [];
-  for (let start = 0; start < scope.length; start += D1_MAX_BOUND_PARAMETERS) {
-    const chunk = scope.slice(start, start + D1_MAX_BOUND_PARAMETERS);
-    const where = `WHERE iccid IN (${chunk.map(() => '?').join(', ')})`;
-    phones.push(...(await queryAll(db.prepare(`${select} ${where}`).bind(...chunk), PlanPhoneRow)));
-  }
-  return phones.sort((a, b) => a.sim_index - b.sim_index);
-}
-
 async function loadBalanceQueryPlan(
   db: D1<'all'>,
   { scope, allowDiscovery = false }: { scope: readonly string[] | null; allowDiscovery?: boolean },
 ): Promise<PlanItem[]> {
   const [phones, profiles, recentChecks, successfulChecks] = await Promise.all([
-    loadPlanPhones(db, scope),
-    queryAll(
-      db.prepare(
-        `
-      SELECT ${PROFILE_COLUMNS} FROM sim_balance_profiles
-      WHERE method IN ('sms', 'browser')
-        AND (discovery_enabled = 1 OR enabled = 1)
-      ORDER BY enabled DESC, id
-    `,
-      ),
-      QueryProfileRow,
-    ),
-    queryAll(
-      db.prepare(
-        `
-      SELECT sim_iccid, profile_id, id, status, requested_at
-      FROM sim_balance_checks
-      WHERE ${BALANCE_COOLDOWN_PREDICATE}
-      ORDER BY datetime(requested_at) DESC
-    `,
-      ),
-      RecentBalanceCheck,
-    ),
-    queryAll(
-      db.prepare(
-        `
-      SELECT DISTINCT sim_iccid, profile_id
-      FROM sim_balance_checks
-      WHERE status = 'parsed'
-    `,
-      ),
-      ParsedCheckRow,
-    ),
+    listPlanPhones(db, scope),
+    listQueryProfiles(db),
+    listCooldownChecks(db),
+    listParsedChecks(db),
   ]);
 
   return buildBalanceQueryPlan({
@@ -604,7 +391,8 @@ async function queueBalanceCheck(
   const requestedAt = new Date().toISOString();
   if (profile.method === 'browser') {
     const { checkId, jobId } = newCarrierWebBalanceIds();
-    await db.batch(
+    await runBalanceStatements(
+      db,
       createCarrierWebBalanceStatements(db, {
         checkId,
         jobId,
@@ -628,38 +416,7 @@ async function queueBalanceCheck(
   const checkId = `bal-${nanoid()}`;
   const messageId = `msg-balance-${nanoid()}`;
 
-  await db.batch([
-    db
-      .prepare(
-        `
-      INSERT INTO sim_balance_checks (
-        id, sim_iccid, profile_id, status, outbound_message_id, parser_version,
-        requested_by_subject
-      ) VALUES (?, ?, ?, 'queued', ?, ?, ?)
-    `,
-      )
-      .bind(
-        checkId,
-        phone.iccid,
-        profile.id,
-        messageId,
-        profile.parser_version,
-        requestedBySubject,
-      ),
-    db
-      .prepare(
-        `
-      INSERT INTO messages (
-        id, phone_iccid, phone_number, content, timestamp, type, recipient,
-        status, filter_status, purpose, balance_check_id
-      ) VALUES (
-        ?, ?, ?, ?, CURRENT_TIMESTAMP, 'sent', ?,
-        'sending', 'filtered', 'balance_maintenance', ?
-      )
-    `,
-      )
-      .bind(messageId, phone.iccid, phone.number, profile.command, profile.destination, checkId),
-  ]);
+  await queueSmsBalanceCheck(db, { checkId, messageId, phone, profile, requestedBySubject });
 
   return {
     id: checkId,
@@ -758,41 +515,7 @@ export async function findPendingBalanceCheck(
 ): Promise<BalanceCheckRow | null> {
   if (!phone_iccid || !phone_number) return null;
 
-  const candidates = await queryAll(
-    db
-      .prepare(
-        `
-    SELECT
-      c.id,
-      c.sim_iccid,
-      c.profile_id,
-      c.parser_version,
-      c.step_index,
-      c.status,
-      p.expected_senders,
-      p.conversation_steps,
-      p.skill_config,
-      p.destination,
-      dv.number AS sim_number,
-      datetime('now') <= datetime(c.deadline_at)
-        AS response_window_open
-    FROM sim_balance_checks c
-    JOIN sim_balance_profiles p ON p.id = c.profile_id
-    LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
-    WHERE c.sim_iccid = ?
-      AND c.status IN ('queued', 'awaiting_response', 'failed', 'timed_out')
-      AND datetime(?) >= datetime(COALESCE((
-        SELECT MAX(m.timestamp)
-        FROM messages m
-        WHERE m.balance_check_id = c.id AND m.type = 'sent'
-      ), c.sent_at, c.requested_at))
-      AND datetime(?) <= datetime(c.deadline_at)
-    ORDER BY c.requested_at DESC
-  `,
-      )
-      .bind(phone_iccid, message_timestamp, message_timestamp),
-    PendingCheckRow,
-  );
+  const candidates = await listPendingChecksForReply(db, { phone_iccid, message_timestamp });
 
   return (
     candidates.find((candidate) =>
@@ -866,142 +589,17 @@ export async function linkBalanceReply(
   }
 
   const metrics = parseBalanceMetrics(check.parser_version, content);
-  const statements: D1Statement<'run'>[] = [
-    db
-      .prepare(
-        `
-    UPDATE sim_balance_checks
-    SET status = ?,
-        completed_at = CURRENT_TIMESTAMP,
-        response_message_id = ?,
-        response_sender = ?,
-        raw_response = ?,
-        error = NULL,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-      AND status IN ('queued', 'awaiting_response', 'failed', 'timed_out')
-  `,
-      )
-      .bind(
-        metrics.length ? 'parsed' : 'response_received',
-        message.id,
-        message.phone_number,
-        content,
-        check.id,
-      ),
-  ];
-
-  for (const metric of metrics) {
-    statements.push(
-      db
-        .prepare(
-          `
-      INSERT INTO sim_balance_metrics (
-        check_id, metric_type, value, unit, currency, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(check_id, metric_type) DO UPDATE SET
-        value = excluded.value,
-        unit = excluded.unit,
-        currency = excluded.currency,
-        expires_at = excluded.expires_at,
-        created_at = CURRENT_TIMESTAMP
-    `,
-        )
-        .bind(
-          check.id,
-          metric.metric_type,
-          metric.value,
-          metric.unit,
-          metric.currency,
-          metric.expires_at,
-        ),
-    );
-  }
-
   const skill = parseBalanceSkillConfig(check.skill_config);
-  if (!metrics.length && skill && responseWindowOpen && check.step_index < skill.max_turns) {
-    statements.push(
-      db
-        .prepare(
-          `
-      INSERT OR IGNORE INTO sim_balance_skill_jobs (
-        id, check_id, response_message_id, step_index
-      )
-      SELECT ?, id, ?, step_index
-      FROM sim_balance_checks
-      WHERE id = ?
-        AND status = 'response_received'
-        AND response_message_id = ?
-    `,
-        )
-        .bind(`skill-${nanoid()}`, message.id, check.id, message.id),
-    );
-  }
+  const skillJobId =
+    !metrics.length && skill && responseWindowOpen && check.step_index < skill.max_turns
+      ? `skill-${nanoid()}`
+      : null;
 
-  statements.push(
-    db
-      .prepare(
-        `
-    UPDATE messages
-    SET purpose = 'balance_maintenance',
-        balance_check_id = ?,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-      AND (balance_check_id IS NULL OR balance_check_id = ?)
-      AND EXISTS (
-        SELECT 1
-        FROM sim_balance_checks c
-        WHERE c.id = ?
-          AND c.response_message_id = messages.id
-      )
-  `,
-      )
-      .bind(check.id, message.id, check.id, check.id),
-  );
-
-  const [update] = await db.batch(statements);
-  return { linked: changed(update) };
+  const linked = await recordBalanceReply(db, { check, message, content, metrics, skillJobId });
+  return { linked };
 }
 
-export async function expireStaleBalanceChecks(
-  db: D1<'run'> & D1Batch<'run'>,
-): Promise<{ expired: number; stopped_jobs: number }> {
-  const [checks, jobs] = await db.batch([
-    db.prepare(
-      `
-      UPDATE sim_balance_checks
-      SET status = 'timed_out',
-          completed_at = CURRENT_TIMESTAMP,
-          error = 'No reply received within the configured response window',
-          updated_at = CURRENT_TIMESTAMP
-      WHERE status = 'awaiting_response'
-        AND deadline_at < CURRENT_TIMESTAMP
-    `,
-    ),
-    db.prepare(
-      `
-      UPDATE sim_balance_skill_jobs
-      SET status = 'stopped',
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          last_error = COALESCE(last_error, 'Balance response window expired'),
-          updated_at = CURRENT_TIMESTAMP
-      WHERE status IN ('pending', 'leased')
-        AND EXISTS (
-          SELECT 1
-          FROM sim_balance_checks c
-          WHERE c.id = sim_balance_skill_jobs.check_id
-            AND c.status = 'timed_out'
-        )
-    `,
-    ),
-  ]);
-
-  return {
-    expired: checks?.meta.changes ?? 0,
-    stopped_jobs: jobs?.meta.changes ?? 0,
-  };
-}
+export { expireStaleBalanceChecks };
 
 /** A follow-up step: queued with its outbound message, or lost to a writer that got there first. */
 type FollowUp = { queued: true; message_id: string } | { queued: false; message_id: null };
@@ -1015,61 +613,16 @@ export async function queueBalanceFollowUp(
   extraStatements: readonly D1Statement<'run'>[] = [],
 ): Promise<FollowUp> {
   const messageId = `msg-balance-${nanoid()}`;
-  const [insert] = await db.batch([
-    db
-      .prepare(
-        `
-      INSERT INTO messages (
-        id, phone_iccid, phone_number, content, timestamp, type, recipient,
-        status, filter_status, purpose, balance_check_id
-      )
-      SELECT ?, c.sim_iccid, ?, ?, CURRENT_TIMESTAMP, 'sent', ?,
-        'sending', 'filtered', 'balance_maintenance', c.id
-      FROM sim_balance_checks c
-      WHERE c.id = ? AND c.status = ? AND c.step_index = ?
-    `,
-      )
-      .bind(
-        messageId,
-        check.sim_number,
-        step.command,
-        check.destination,
-        check.id,
-        fromStatus,
-        check.step_index,
-      ),
-    db
-      .prepare(
-        `
-    UPDATE sim_balance_checks
-    SET status = 'queued',
-        step_index = step_index + 1,
-        completed_at = NULL,
-        response_message_id = ?,
-        response_sender = ?,
-        raw_response = ?,
-        deadline_at = NULL,
-        error = NULL,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-      AND status = ?
-      AND step_index = ?
-    `,
-      )
-      .bind(
-        message.id,
-        message.phone_number,
-        message.content,
-        check.id,
-        fromStatus,
-        check.step_index,
-      ),
-    ...extraStatements,
-  ]);
+  const queued = await queueBalanceFollowUpMessage(db, {
+    messageId,
+    check,
+    message,
+    step,
+    fromStatus,
+    extraStatements,
+  });
 
-  return changed(insert)
-    ? { queued: true, message_id: messageId }
-    : { queued: false, message_id: null };
+  return queued ? { queued: true, message_id: messageId } : { queued: false, message_id: null };
 }
 
 export async function updateBalanceCheckForSmsResult(
@@ -1080,122 +633,10 @@ export async function updateBalanceCheckForSmsResult(
 ): Promise<void> {
   const submitted = outcome === 'confirmed' || outcome === 'submitted_unconfirmed';
   const failure = errorMessage === null || errorMessage === '' ? 'SMS send failed' : errorMessage;
-  await db
-    .prepare(
-      `
-    UPDATE sim_balance_checks
-    SET status = ?,
-        sent_at = CASE WHEN ? THEN COALESCE(sent_at, CURRENT_TIMESTAMP) ELSE sent_at END,
-        deadline_at = CASE WHEN ? THEN datetime(
-          CURRENT_TIMESTAMP,
-          '+' || (SELECT p.response_window_minutes
-                  FROM sim_balance_profiles p
-                  WHERE p.id = sim_balance_checks.profile_id) || ' minutes'
-        ) ELSE deadline_at END,
-        completed_at = CASE WHEN ? THEN completed_at ELSE CURRENT_TIMESTAMP END,
-        error = ?,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = (
-      SELECT balance_check_id FROM messages WHERE id = ?
-    )
-      AND status = 'queued'
-  `,
-    )
-    .bind(
-      submitted ? 'awaiting_response' : 'failed',
-      submitted ? 1 : 0,
-      submitted ? 1 : 0,
-      submitted ? 1 : 0,
-      submitted ? null : failure,
-      messageId,
-    )
-    .run();
+  await markBalanceCheckSmsResult(db, messageId, { submitted, failure });
 }
 
-/** Balance checks as the list shows them, newest first. */
-async function loadBalanceChecks(
-  db: D1<'all'>,
-  { where, params, limit }: { where: string; params: string[]; limit: number },
-): Promise<BalanceCheck[]> {
-  const rows = await queryAll(
-    db
-      .prepare(
-        `
-      SELECT
-        c.id,
-        c.sim_iccid,
-        c.profile_id,
-        c.requested_at,
-        c.sent_at,
-        c.completed_at,
-        c.status,
-        c.step_index,
-        c.response_sender,
-        c.raw_response,
-        c.error,
-        c.parser_version,
-        p.country_code,
-        p.carrier AS profile_carrier,
-        p.method,
-        p.command,
-        p.destination,
-        p.conversation_steps,
-        p.skill_config,
-        dv.sim_index,
-        dv.number AS sim_number,
-        dv.carrier AS sim_carrier,
-        dv.country AS sim_country,
-        om.content AS outbound_content,
-        om.recipient AS outbound_recipient,
-        om.timestamp AS outbound_timestamp,
-        om.status AS outbound_status,
-        rm.content AS response_content,
-        rm.phone_number AS response_phone_number,
-        rm.timestamp AS response_timestamp,
-        (
-          SELECT sj.status
-          FROM sim_balance_skill_jobs sj
-          WHERE sj.check_id = c.id
-          ORDER BY sj.created_at DESC, sj.rowid DESC
-          LIMIT 1
-        ) AS skill_job_status,
-        (
-          SELECT wj.status
-          FROM sim_balance_web_jobs wj
-          WHERE wj.check_id = c.id
-          LIMIT 1
-        ) AS web_job_status,
-        (
-          SELECT wj.human_reason
-          FROM sim_balance_web_jobs wj
-          WHERE wj.check_id = c.id
-          LIMIT 1
-        ) AS web_human_reason,
-        COALESCE((
-          SELECT json_group_array(json_object(
-            'metric_type', bm.metric_type,
-            'value', bm.value,
-            'unit', bm.unit,
-            'currency', bm.currency,
-            'expires_at', bm.expires_at
-          ))
-          FROM sim_balance_metrics bm
-          WHERE bm.check_id = c.id
-        ), '[]') AS metrics_json
-      FROM sim_balance_checks c
-      JOIN sim_balance_profiles p ON p.id = c.profile_id
-      LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
-      LEFT JOIN messages om ON om.id = c.outbound_message_id
-      LEFT JOIN messages rm ON rm.id = c.response_message_id
-      ${where}
-      ORDER BY c.requested_at DESC
-      LIMIT ?
-    `,
-      )
-      .bind(...params, limit),
-    ListRow,
-  );
-
+function toBalanceChecks(rows: readonly BalanceCheckListRow[]): BalanceCheck[] {
   return rows.map(({ metrics_json, skill_config, ...record }) => ({
     ...record,
     display_status: displayBalanceStatus(record),
@@ -1210,11 +651,7 @@ async function loadQueuedChecks(db: D1<'all'>, ids: readonly string[]): Promise<
   const chunkSize = D1_MAX_BOUND_PARAMETERS - 1;
   for (let start = 0; start < ids.length; start += chunkSize) {
     const chunk = ids.slice(start, start + chunkSize);
-    const checks = await loadBalanceChecks(db, {
-      where: `WHERE c.id IN (${chunk.map(() => '?').join(', ')})`,
-      params: chunk,
-      limit: chunk.length,
-    });
+    const checks = toBalanceChecks(await listBalanceChecksByIds(db, chunk));
     for (const check of checks) byId.set(check.id, check);
   }
   return ids.map((id) => {
@@ -1234,19 +671,7 @@ export const balanceQueriesHandler = {
     const limit = Number.isFinite(requestedLimit)
       ? Math.min(Math.max(requestedLimit, 1), 500)
       : 100;
-    const conditions: string[] = [];
-    const params: string[] = [];
-
-    if (phoneIccid) {
-      conditions.push('c.sim_iccid = ?');
-      params.push(phoneIccid);
-    }
-
-    const checks = await loadBalanceChecks(env.DB, {
-      where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
-      params,
-      limit,
-    });
+    const checks = toBalanceChecks(await listBalanceChecks(env.DB, { phoneIccid, limit }));
 
     return { success: true, data: checks };
   },
@@ -1268,23 +693,7 @@ export const balanceQueriesHandler = {
         message: 'ids must contain 1 to 100 balance check IDs',
       });
     }
-    const placeholders = ids.map(() => '?').join(', ');
-    const rows = await queryAll(
-      env.DB.prepare(
-        `
-      SELECT c.id, c.status, c.updated_at, c.completed_at,
-        (SELECT sj.status FROM sim_balance_skill_jobs sj
-         WHERE sj.check_id = c.id ORDER BY sj.created_at DESC, sj.rowid DESC LIMIT 1)
-          AS skill_job_status,
-        wj.status AS web_job_status,
-        wj.human_reason AS web_human_reason
-      FROM sim_balance_checks c
-      LEFT JOIN sim_balance_web_jobs wj ON wj.check_id = c.id
-      WHERE c.id IN (${placeholders})
-    `,
-      ).bind(...ids),
-      StatusRow,
-    );
+    const rows = await listBalanceCheckStatuses(env.DB, ids);
     return {
       success: true,
       data: rows.map((record) => ({
@@ -1299,39 +708,11 @@ export const balanceQueriesHandler = {
     if (!id || id.length > 200) {
       throw new ORPCError('BAD_REQUEST', { message: 'Invalid balance check ID' });
     }
-    const check = await queryFirst(
-      env.DB.prepare(
-        `
-      SELECT id FROM sim_balance_checks WHERE id = ?
-    `,
-      ).bind(id),
-      IdRow,
-    );
+    const check = await findBalanceCheckId(env.DB, id);
     if (!check) throw new ORPCError('NOT_FOUND', { message: 'Balance check not found' });
     const [conversation, webEvents] = await Promise.all([
-      queryAll(
-        env.DB.prepare(
-          `
-        SELECT id, type, content, timestamp, status, phone_number, recipient
-        FROM messages
-        WHERE balance_check_id = ?
-        ORDER BY timestamp, id
-      `,
-        ).bind(id),
-        BalanceConversationMessage,
-      ),
-      queryAll(
-        env.DB.prepare(
-          `
-        SELECT e.id, e.event_type, e.detail_json, e.created_at
-        FROM sim_balance_web_events e
-        JOIN sim_balance_web_jobs j ON j.id = e.job_id
-        WHERE j.check_id = ?
-        ORDER BY e.created_at, e.id
-      `,
-        ).bind(id),
-        BalanceWebEvent,
-      ),
+      listBalanceCheckMessages(env.DB, id),
+      listBalanceCheckWebEvents(env.DB, id),
     ]);
     return { success: true, data: { id, conversation, web_events: webEvents } };
   },
@@ -1479,42 +860,9 @@ export const balanceQueriesHandler = {
   ): Promise<BalanceCheckCreateResponse> {
     const db = env.DB;
     const [profile, phone, recent] = await Promise.all([
-      queryFirst(
-        db
-          .prepare(
-            `
-        SELECT ${PROFILE_COLUMNS} FROM sim_balance_profiles
-        WHERE id = ? AND (discovery_enabled = 1 OR enabled = 1)
-      `,
-          )
-          .bind(profile_id),
-        ProfileRow,
-      ),
-      queryFirst(
-        db
-          .prepare(
-            `
-        SELECT iccid, number, carrier, country, sim_status
-        FROM device_view WHERE iccid = ?
-      `,
-          )
-          .bind(phone_iccid),
-        CheckPhoneRow,
-      ),
-      queryFirst(
-        db
-          .prepare(
-            `
-        SELECT id, status, requested_at
-        FROM sim_balance_checks
-        WHERE sim_iccid = ?
-          AND (${BALANCE_COOLDOWN_PREDICATE})
-        ORDER BY requested_at DESC LIMIT 1
-      `,
-          )
-          .bind(phone_iccid),
-        CooldownRow,
-      ),
+      findEnabledBalanceProfile(db, profile_id),
+      findCheckPhone(db, phone_iccid),
+      findRecentBalanceCheck(db, phone_iccid),
     ]);
 
     if (!profile) throw refused('NOT_FOUND', 'Balance profile is not enabled');
@@ -1552,22 +900,7 @@ export const balanceQueriesHandler = {
     { env }: OpsCall,
     { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
   ): Promise<BalanceCheckStepResponse> {
-    const check = await queryFirst(
-      env.DB.prepare(
-        `
-      SELECT
-        c.id, c.status, c.step_index, c.response_message_id,
-        c.response_sender, c.raw_response,
-        p.destination, p.conversation_steps,
-        dv.number AS sim_number
-      FROM sim_balance_checks c
-      JOIN sim_balance_profiles p ON p.id = c.profile_id
-      LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
-      WHERE c.id = ?
-    `,
-      ).bind(check_id),
-      ContinueRow,
-    );
+    const check = await findBalanceCheckToContinue(env.DB, check_id);
 
     if (!check) throw refused('NOT_FOUND', 'Balance check not found');
     if (
@@ -1612,30 +945,7 @@ export const balanceQueriesHandler = {
     { env }: OpsCall,
     { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
   ): Promise<BalanceCheckStepResponse> {
-    const check = await queryFirst(
-      env.DB.prepare(
-        `
-      SELECT
-        c.id, c.status, c.step_index,
-        p.destination, p.conversation_steps,
-        m.id AS message_id, m.content AS message_content,
-        m.recipient AS message_recipient, m.status AS message_status
-      FROM sim_balance_checks c
-      JOIN sim_balance_profiles p ON p.id = c.profile_id
-      JOIN messages m ON m.id = (
-        SELECT latest.id
-        FROM messages latest
-        WHERE latest.balance_check_id = c.id
-          AND latest.type = 'sent'
-          AND latest.purpose = 'balance_maintenance'
-        ORDER BY datetime(latest.timestamp) DESC, latest.rowid DESC
-        LIMIT 1
-      )
-      WHERE c.id = ?
-    `,
-      ).bind(check_id),
-      RetryRow,
-    );
+    const check = await findBalanceCheckToRetry(env.DB, check_id);
 
     const step = check ? attemptedStep(check) : null;
     if (
@@ -1647,27 +957,7 @@ export const balanceQueriesHandler = {
       throw refused('CONFLICT', 'No allowlisted failed step can be retried');
     }
 
-    const [message, requeued] = await env.DB.batch([
-      env.DB.prepare(
-        `
-        UPDATE messages
-        SET status = 'sending', error_message = NULL,
-            processing_session_id = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'failed'
-          AND purpose = 'balance_maintenance'
-      `,
-      ).bind(check.message_id),
-      env.DB.prepare(
-        `
-        UPDATE sim_balance_checks
-        SET status = 'queued', completed_at = NULL, deadline_at = NULL, error = NULL,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'failed' AND step_index = ?
-      `,
-      ).bind(check.id, check.step_index),
-    ]);
-
-    if (!changed(message) || !changed(requeued)) {
+    if (!(await requeueBalanceCheck(env.DB, check))) {
       throw refused('CONFLICT', 'Balance check changed before retry');
     }
 
@@ -1686,42 +976,15 @@ export const balanceQueriesHandler = {
     { env }: OpsCall,
     { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
   ): Promise<BalanceCheckStopResponse> {
-    const check = await queryFirst(
-      env.DB.prepare(
-        `
-      SELECT id, status FROM sim_balance_checks WHERE id = ?
-    `,
-      ).bind(check_id),
-      StopRow,
-    );
+    const check = await findBalanceCheckToStop(env.DB, check_id);
     if (!check) throw refused('NOT_FOUND', 'Balance check not found');
     if (check.status !== 'awaiting_response' && check.status !== 'response_received') {
       throw refused('CONFLICT', 'Balance check is not stoppable');
     }
 
     const finalStatus = check.status === 'awaiting_response' ? 'timed_out' : 'unparsed';
-    const [stopped] = await env.DB.batch([
-      env.DB.prepare(
-        `
-        UPDATE sim_balance_checks
-        SET status = ?, completed_at = CURRENT_TIMESTAMP,
-            error = CASE WHEN ? = 'timed_out' THEN 'Stopped by operator' ELSE error END,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = ?
-      `,
-      ).bind(finalStatus, finalStatus, check.id, check.status),
-      env.DB.prepare(
-        `
-        UPDATE sim_balance_skill_jobs
-        SET status = 'stopped', lease_owner = NULL, lease_expires_at = NULL,
-            last_error = COALESCE(last_error, 'Stopped by operator'),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE check_id = ? AND status IN ('pending', 'leased')
-      `,
-      ).bind(check.id),
-    ]);
-
-    if (!changed(stopped)) throw refused('CONFLICT', 'Balance check changed before stop');
+    if (!(await stopBalanceCheck(env.DB, check, finalStatus)))
+      throw refused('CONFLICT', 'Balance check changed before stop');
 
     return { success: true, check: { id: check.id, status: finalStatus } };
   },
