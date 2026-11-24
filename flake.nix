@@ -713,6 +713,13 @@
                 files = "^sms-dashboard/.*\\.(ts|svelte)$";
                 stages = [ "pre-commit" ];
               };
+              doc-links = {
+                enable = true;
+                name = "links in docs lead to files that exist";
+                entry = "${lib.getExe in-project} sms-dashboard bun run check:doc-links";
+                pass_filenames = false;
+                stages = [ "pre-commit" ];
+              };
               daemon-format = {
                 enable = true;
                 name = "cargo fmt (daemon)";
