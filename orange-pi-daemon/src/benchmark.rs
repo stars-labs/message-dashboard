@@ -9,6 +9,7 @@ fn elapsed_millis(elapsed: Duration) -> f64 {
 use tokio::process::Command;
 use tracing::{info, warn};
 
+#[derive(Debug)]
 pub struct PerformanceBenchmark;
 
 impl PerformanceBenchmark {

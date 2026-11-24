@@ -35,7 +35,7 @@ impl CachedPort {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ModemManager {
     at_modem: Arc<AtModemManager>,
     /// Only loaded in `DBus` mode.

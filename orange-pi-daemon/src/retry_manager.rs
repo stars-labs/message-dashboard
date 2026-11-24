@@ -2,6 +2,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
+#[derive(Debug)]
 pub struct RetryManager {
     max_retries: u32,
     base_delay_ms: u64,

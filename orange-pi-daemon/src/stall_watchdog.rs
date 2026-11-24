@@ -40,7 +40,7 @@ pub fn stall_reason(uptime: Duration, last_read_age: Option<Duration>) -> String
 
 /// Unix seconds of the last completed read cycle; zero means never. Atomic so
 /// the watchdog needs nothing from the async runtime.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Heartbeat(Arc<AtomicU64>);
 
 impl Heartbeat {

@@ -67,6 +67,7 @@ impl FromSql for MessageStatus {
     }
 }
 
+#[derive(Debug)]
 pub struct Segment<'a> {
     pub iccid: &'a Iccid,
     pub sender: &'a SmsAddress,
@@ -95,6 +96,7 @@ pub type RecoverySegment = (
     u32,
 );
 
+#[derive(Debug)]
 pub struct MessageStore {
     conn: Arc<Mutex<Connection>>,
 }

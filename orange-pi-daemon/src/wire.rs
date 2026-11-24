@@ -208,7 +208,7 @@ pub struct ModemReport {
 }
 
 /// `POST /api/control/devices`
-#[derive(Serialize, TS)]
+#[derive(Debug, Serialize, TS)]
 #[ts(export)]
 pub struct ModemReportsRequest<'a> {
     pub modem_reports: &'a [ModemReport],
@@ -218,7 +218,7 @@ pub struct ModemReportsRequest<'a> {
     pub timestamp: &'a str,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Debug, Serialize, TS)]
 #[ts(export)]
 pub struct UploadedMessage<'a> {
     pub content: &'a str,
@@ -230,7 +230,7 @@ pub struct UploadedMessage<'a> {
 }
 
 /// `POST /api/control/messages`
-#[derive(Serialize, TS)]
+#[derive(Debug, Serialize, TS)]
 #[ts(export)]
 pub struct MessageBatchRequest<'a> {
     pub messages: Vec<UploadedMessage<'a>>,
@@ -255,7 +255,7 @@ pub struct UploadResponse {
 }
 
 /// `POST /api/control/calls/incoming`
-#[derive(Serialize, TS)]
+#[derive(Debug, Serialize, TS)]
 #[ts(export)]
 pub struct IncomingCallRequest<'a> {
     pub from: Option<&'a str>,
@@ -263,7 +263,7 @@ pub struct IncomingCallRequest<'a> {
 }
 
 /// `POST /api/control/calls/ended`
-#[derive(Serialize, TS)]
+#[derive(Debug, Serialize, TS)]
 #[ts(export)]
 pub struct EndedCallRequest<'a> {
     pub call_id: Option<&'a str>,

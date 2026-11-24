@@ -14,6 +14,7 @@ struct TaskState {
     last_success: Option<Instant>,
 }
 
+#[derive(Debug)]
 pub struct HealthTracker {
     started_at: Instant,
     session_id: String,

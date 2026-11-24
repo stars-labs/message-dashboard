@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+#[derive(Debug)]
 pub struct SmsSender {
     api_client: crate::api_client::ApiClient,
     modem_manager: Arc<crate::modem_manager::ModemManager>,

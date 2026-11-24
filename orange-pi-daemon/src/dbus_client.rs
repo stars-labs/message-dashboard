@@ -8,6 +8,7 @@ use crate::native_dbus::NativeDBusClient;
 use crate::types::ModemState;
 
 /// Native D-Bus client; falls back to the `busctl` CLI if native D-Bus is unavailable.
+#[derive(Debug)]
 pub struct DBusClient {
     native_client: Option<NativeDBusClient>,
     busctl_enabled: bool,

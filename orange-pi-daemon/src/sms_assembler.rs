@@ -33,6 +33,7 @@ pub struct AssembledMessage {
     pub sms_indices: Vec<u32>,
 }
 
+#[derive(Debug)]
 pub struct SmsAssembler {
     buffer: HashMap<MessageGroupKey, Vec<MessagePart>>,
     timeout: Duration,

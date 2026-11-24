@@ -20,6 +20,7 @@ struct CacheEntry {
     timestamp: Instant,
 }
 
+#[derive(Debug)]
 pub struct SignalCache {
     cache: Arc<RwLock<HashMap<String, CacheEntry>>>,
     ttl: Duration,

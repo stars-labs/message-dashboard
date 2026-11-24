@@ -24,7 +24,7 @@ impl<'a> From<&'a StoredMessage> for UploadedMessage<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ApiClient {
     client: Client,
     pub config: Config,

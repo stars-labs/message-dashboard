@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use zbus::{proxy, Connection};
 
+#[derive(Debug)]
 pub struct NativeDBusClient {
     connection: Option<Connection>,
 }
@@ -425,6 +426,7 @@ impl NativeDBusClient {
     }
 }
 
+#[derive(Debug)]
 pub struct DeviceDetails {
     pub imei: Option<Imei>,
     pub manufacturer: Option<String>,
@@ -433,6 +435,7 @@ pub struct DeviceDetails {
     pub hardware_revision: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct SmsMessage {
     pub path: String,
     pub text: String,

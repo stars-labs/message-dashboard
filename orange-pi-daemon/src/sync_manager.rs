@@ -87,6 +87,7 @@ pub fn device_delta(previous: &[ModemReport], current: &[ModemReport]) -> Device
     }
 }
 
+#[derive(Debug)]
 pub struct SyncManager {
     full_sync_completed: bool,
     consecutive_failures: u32,

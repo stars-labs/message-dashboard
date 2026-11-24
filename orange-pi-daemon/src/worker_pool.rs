@@ -83,6 +83,7 @@ impl Drop for ProcessingGuard {
     }
 }
 
+#[derive(Debug)]
 pub struct WorkerPool {
     config: WorkerPoolConfig,
     modem_manager: Arc<ModemManager>,

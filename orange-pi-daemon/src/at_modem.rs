@@ -116,6 +116,7 @@ pub struct VoicePorts {
     pub modem: String,
 }
 
+#[derive(Debug)]
 pub struct AtModemManager {
     modems: Arc<RwLock<HashMap<String, AtModemInfo>>>,
     /// One lock per AT port. A complete SMS submission holds this lock so the reader

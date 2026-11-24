@@ -84,7 +84,7 @@ impl VoiceBridgeConfig {
 }
 
 /// Handles shared by the tasks of the one active call.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct CallHandles {
     call_id: String,
     stop: watch::Receiver<bool>,
@@ -94,6 +94,7 @@ struct CallHandles {
     down_seen: Arc<AtomicBool>,
 }
 
+#[derive(Debug)]
 struct ActiveCall {
     handles: CallHandles,
     stop: watch::Sender<bool>,
@@ -103,12 +104,13 @@ struct ActiveCall {
     modem_id: String,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct BridgeState {
     active: Option<ActiveCall>,
     ended: VecDeque<String>,
 }
 
+#[derive(Debug)]
 pub struct VoiceBridge {
     api_key: ApiKey,
     modems: Arc<ModemManager>,
