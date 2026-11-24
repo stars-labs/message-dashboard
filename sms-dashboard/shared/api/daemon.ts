@@ -20,8 +20,6 @@ const MESSAGE_FIELDS_REQUIRED = 'Every message requires phone_iccid and content'
 const MESSAGE_FIELDS_NOT_TEXT = 'phone_number and timestamp must be text';
 const MESSAGE_ID_MISSING = 'message_id is required';
 const INVALID_OUTCOME = 'outcome must be confirmed, submitted_unconfirmed, or failed';
-const PHONE_IDS_REQUIRED = 'phoneIds must be an array';
-const PHONE_IDS_INVALID = 'phoneIds must be a non-empty array of ICCIDs';
 
 /** Required text whose absence answers the same message as a wrong type or an empty value. */
 function requiredText(message: string) {
@@ -118,27 +116,6 @@ export type UploadResponse = v.InferOutput<typeof UploadResponse>;
 export const ClearMessagesResponse = v.object({ success: v.literal(true), message: v.string() });
 
 export type ClearMessagesResponse = v.InferOutput<typeof ClearMessagesResponse>;
-
-/** POST /api/control/cleanup-test-data. */
-export const CleanupBody = bodyObject(
-  {
-    phoneIds: v.pipe(
-      v.array(requiredText(PHONE_IDS_INVALID), PHONE_IDS_REQUIRED),
-      v.minLength(1, PHONE_IDS_INVALID),
-    ),
-  },
-  { phoneIds: PHONE_IDS_REQUIRED },
-  PHONE_IDS_REQUIRED,
-);
-
-export const CleanupResponse = v.object({
-  success: v.literal(true),
-  deleted: v.number(),
-  cleanedNullIccid: v.number(),
-  message: v.string(),
-});
-
-export type CleanupResponse = v.InferOutput<typeof CleanupResponse>;
 
 /** GET /api/control/pending-sms: the daemon process names itself; the handler checks the name. */
 export const PendingSmsHeaders = v.object({ 'x-daemon-session-id': v.optional(v.string()) });

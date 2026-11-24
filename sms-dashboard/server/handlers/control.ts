@@ -8,8 +8,6 @@ import type { PendingSms } from '../../shared/daemon-wire/PendingSms.js';
 import {
   INVALID_REMOVED,
   INVALID_SYNC,
-  type CleanupBody,
-  type CleanupResponse,
   type ClearMessagesResponse,
   type DevicesBody,
   type DevicesResponse,
@@ -487,35 +485,6 @@ export const controlHandler = {
     } catch (error) {
       console.error('[control] Upload messages error:', error);
       failed(error, `Failed to upload messages: ${errorText(error)}`);
-    }
-  },
-
-  // Cleanup test data
-  async cleanupTestData(
-    { env }: DaemonCall<D1<'run'>>,
-    { phoneIds }: v.InferOutput<typeof CleanupBody>,
-  ): Promise<CleanupResponse> {
-    try {
-      // Delete test SIMs by ICCID
-      const placeholders = phoneIds.map(() => '?').join(',');
-      const result = await env.DB.prepare(`DELETE FROM sims WHERE iccid IN (${placeholders})`)
-        .bind(...phoneIds)
-        .run();
-
-      // Also delete any SIMs without ICCID
-      const cleanupNullIccid = await env.DB.prepare(
-        `DELETE FROM sims WHERE iccid IS NULL OR iccid = ''`,
-      ).run();
-
-      return {
-        success: true,
-        deleted: result.meta.changes,
-        cleanedNullIccid: cleanupNullIccid.meta.changes,
-        message: `Deleted ${String(result.meta.changes)} test SIMs and ${String(cleanupNullIccid.meta.changes)} SIMs without ICCID`,
-      };
-    } catch (error) {
-      console.error('Cleanup error:', error);
-      failed(error, 'Failed to cleanup test data');
     }
   },
 

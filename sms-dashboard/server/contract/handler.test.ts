@@ -99,7 +99,6 @@ describe('contract routes', () => {
       { method: 'POST', path: '/api/control/devices' },
       { method: 'POST', path: '/api/control/messages' },
       { method: 'DELETE', path: '/api/control/messages' },
-      { method: 'POST', path: '/api/control/cleanup-test-data' },
       { method: 'GET', path: '/api/control/pending-sms' },
       { method: 'POST', path: '/api/control/sms-result' },
       { method: 'POST', path: '/api/control/calls/incoming' },

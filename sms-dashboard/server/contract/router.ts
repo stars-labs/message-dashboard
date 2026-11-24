@@ -65,9 +65,6 @@ export const router = os.router({
     clearMessages: os.control.clearMessages.handler(({ context }) =>
       controlHandler.clearMessages(context.request),
     ),
-    cleanupTestData: os.control.cleanupTestData.handler(({ context, input }) =>
-      controlHandler.cleanupTestData(context.request, input),
-    ),
     pendingSms: os.control.pendingSms.handler(({ context, input }) =>
       controlHandler.getPendingSMS(context.request, input.headers['x-daemon-session-id']),
     ),

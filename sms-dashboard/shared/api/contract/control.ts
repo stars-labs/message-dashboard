@@ -6,8 +6,6 @@ import {
   IncomingCallResponse,
 } from '../calls.js';
 import {
-  CleanupBody,
-  CleanupResponse,
   ClearMessagesResponse,
   DevicesBody,
   DevicesResponse,
@@ -55,9 +53,6 @@ export const control = {
     .input(UploadBody)
     .output(UploadResponse),
   clearMessages: route(DAEMON, 'DELETE', '/api/control/messages').output(ClearMessagesResponse),
-  cleanupTestData: route(DAEMON, 'POST', '/api/control/cleanup-test-data')
-    .input(CleanupBody)
-    .output(CleanupResponse),
   pendingSms: route(DAEMON, 'GET', '/api/control/pending-sms')
     .route({ inputStructure: 'detailed' })
     .input(v.object({ headers: PendingSmsHeaders }))
