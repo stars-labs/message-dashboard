@@ -46,7 +46,8 @@ automatic; the result shows in 余额 → 查询记录.
   steps 1–2 make it one through production paths. Never write `sims` or `modems` with
   `d1()` to set this up.
 - The balance page keeps the SIM list it loaded; after the edit in step 2 it still
-  shows S03 as a secondary until reloaded.
+  shows S03 as a secondary until reloaded
+  ([GRA-229](https://linear.app/gray-arrow/issue/GRA-229)).
 - With no agent signed in when the query is queued, the page asks 查询助手未就绪;
   仍然排队 queues it anyway.
 - `ai.prompts` holds the exact prompt, including `menu_options` and the carrier text:

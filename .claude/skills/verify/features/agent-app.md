@@ -51,5 +51,5 @@ Proof: the window's text and `settings.json` in `app.userData`.
   is unit-tested instead.
 - The app does not quit when Playwright asks it to; the driver kills it after 10s and
   the report carries a NOTE. Whether a user's 退出 has the same problem is not yet
-  known.
+  known ([GRA-230](https://linear.app/gray-arrow/issue/GRA-230)).
 - Closing the window only hides it.
