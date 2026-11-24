@@ -79,3 +79,5 @@ no longer reported fails too, so remove it once fixed.
 - [Voice calls](docs/voice-calls.md): EC20 voice-over-USB facts, call flow and
   endpoint security
 - [USB topology](docs/usb-topology-explained.md)
+- [NetBird](docs/netbird.md): the control plane on the Pi, its Auth0 objects and
+  the 443 SNI router
