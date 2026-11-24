@@ -1,0 +1,3 @@
+# `bun add` writes the exact version, as every dependency in package.json is pinned.
+[install]
+exact = true

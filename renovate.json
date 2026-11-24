@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "baseBranchPatterns": ["dev"],
+  "rangeStrategy": "pin",
+  "minimumReleaseAge": "14 days",
+  "internalChecksFilter": "strict",
+  "nix": { "enabled": true },
+  "lockFileMaintenance": { "enabled": true },
+  "vulnerabilityAlerts": { "minimumReleaseAge": null }
+}
