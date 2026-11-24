@@ -1,11 +1,12 @@
 // A local stand-in for the company AI gateway the Balance Agent's sms-ai
 // capability calls (balance-agent/src/runner/company-ai.ts), in both wire formats.
 // Journeys queue the decisions it returns; with none queued it gives the
-// connection check's answer, which no balance job accepts as a decision.
+// connection checks' answer, which no balance job accepts as a decision.
 import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.ts';
 
-const CONNECTION_CHECK_ANSWER = { status: 'ok' };
+/** Satisfies ai-connection.ts ({ ok: true }) and the sms-ai capability ({ status: 'ok' }). */
+const CONNECTION_CHECK_ANSWER = { ok: true, status: 'ok' };
 
 const Prompt = v.object({
   messages: v.array(v.object({ role: v.string(), content: v.string() })),

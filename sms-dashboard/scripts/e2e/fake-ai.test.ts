@@ -68,7 +68,8 @@ describe('fake company AI', () => {
       selected_option: '1',
     });
     expect(JSON.parse(await messagesText('menu two'))).toEqual({ action: 'stop' });
-    expect(JSON.parse(await messagesText('check'))).toEqual({ status: 'ok' });
+    // Both checks: ai-connection.ts wants { ok: true }, the sms-ai capability { status: 'ok' }.
+    expect(JSON.parse(await messagesText('check'))).toEqual({ ok: true, status: 'ok' });
     expect(ai.prompts).toEqual(['menu one', 'menu two', 'check']);
   });
 
