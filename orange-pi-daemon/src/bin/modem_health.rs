@@ -1,4 +1,8 @@
 //! Usage: cargo run --bin `modem_health` <`modem_id`>
+#![expect(
+    clippy::print_stdout,
+    reason = "a diagnostic CLI: printing is its output"
+)]
 
 use anyhow::Result;
 use orange_pi_daemon_rust::at_modem::{AtModemManager, ModemHealth};

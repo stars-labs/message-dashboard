@@ -1,4 +1,8 @@
 //! Debug tool to test AT commands directly
+#![expect(
+    clippy::print_stdout,
+    reason = "a diagnostic CLI: printing is its output"
+)]
 
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};

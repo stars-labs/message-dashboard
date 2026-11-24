@@ -64,6 +64,10 @@ fn unix_now() -> u64 {
 
 /// Runs on its own OS thread: a stall can be every tokio worker spinning, which
 /// would starve a tokio-based watchdog too.
+#[expect(
+    clippy::print_stderr,
+    reason = "the exit notice must not depend on the logging pipeline of a stalled process; systemd puts stderr in the journal"
+)]
 pub fn spawn(heartbeat: Heartbeat) -> std::io::Result<()> {
     let started = Instant::now();
     std::thread::Builder::new()
@@ -72,7 +76,6 @@ pub fn spawn(heartbeat: Heartbeat) -> std::io::Result<()> {
             std::thread::sleep(Duration::from_secs(30));
             let (uptime, age) = (started.elapsed(), heartbeat.age());
             if should_restart(uptime, age) {
-                // eprintln, not tracing: needs no runtime.
                 eprintln!(
                     "stall watchdog: {}. Exiting so systemd restarts the daemon.",
                     stall_reason(uptime, age)

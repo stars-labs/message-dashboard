@@ -8,6 +8,7 @@ use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
 
+#[expect(clippy::print_stdout, reason = "--help writes its text to stdout")]
 pub(crate) fn print_help(program: &str) {
     println!(
         "SMS Daemon v{} - Direct AT Commands for 100+ modems",
