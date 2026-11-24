@@ -130,7 +130,16 @@
           sms-daemon = pkgs.rustPlatform.buildRustPackage {
             pname = "sms-daemon";
             version = daemonVersion;
-            src = ./orange-pi-daemon;
+            # The daemon's tests replay the Worker's control fixtures, which live
+            # with the dashboard.
+            src = lib.fileset.toSource {
+              root = ./.;
+              fileset = lib.fileset.unions [
+                ./orange-pi-daemon
+                ./sms-dashboard/shared/control-fixtures/daemon
+              ];
+            };
+            sourceRoot = "source/orange-pi-daemon";
 
             cargoLock = {
               lockFile = ./orange-pi-daemon/Cargo.lock;
