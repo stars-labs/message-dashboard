@@ -4,6 +4,7 @@
     ".": {
       "entry": [
         "scripts/*.ts",
+        "scripts/verify/journeys/*.ts",
         "svelte.config.ts",
         "test/setup.ts",
         "tailwindcss-forms.d.ts",

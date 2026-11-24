@@ -6,17 +6,28 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as v from 'valibot';
+import { parseJson } from '../shared/parse-json.ts';
 import { sessionRecord } from './page-visit.ts';
-import { startFakeAuth0 } from './e2e/fake-auth0.ts';
+import { startFakeAuth0, type FakeAuth0 } from './e2e/fake-auth0.ts';
 
 const READY_TIMEOUT_MS = 90_000;
 const SESSION_TTL_S = 60 * 60;
 const WRANGLER = ['node_modules/wrangler/bin/wrangler.js'];
 
+const API_KEY = 'e2e-api-key';
+
+const D1Answer = v.tuple([v.object({ results: v.array(v.record(v.string(), v.unknown())) })]);
+
 export interface LocalStack {
   baseUrl: string;
   /** The admin session, sent as the `auth_token` cookie. */
   token: string;
+  /** What the daemon sends as `x-api-key`. */
+  apiKey: string;
+  auth0: Pick<FakeAuth0, 'domain' | 'audience' | 'nativeClientId'>;
+  /** Runs one SQL statement on the stack's local D1 and returns its rows. */
+  d1(sql: string): Promise<Record<string, unknown>[]>;
   stop(): Promise<void>;
 }
 
@@ -34,13 +45,15 @@ function freePort(): Promise<number> {
   });
 }
 
-async function run(command: string[], label: string): Promise<void> {
+async function run(command: string[], label: string): Promise<string> {
   const proc = Bun.spawn(command, { stdout: 'pipe', stderr: 'pipe' });
-  const code = await proc.exited;
-  if (code !== 0) {
-    const output = `${await new Response(proc.stdout).text()}${await new Response(proc.stderr).text()}`;
-    throw new Error(`${label} failed (${String(code)}):\n${output}`);
-  }
+  const [code, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  if (code !== 0) throw new Error(`${label} failed (${String(code)}):\n${stdout}${stderr}`);
+  return stdout;
 }
 
 // Wrangler runs workerd as a child; a process group lets one signal stop both.
@@ -128,7 +141,7 @@ export async function startLocalStack(): Promise<LocalStack> {
         'AUTH0_CLIENT_SECRET=e2e-client-secret',
         'AUTH0_M2M_CLIENT_ID=e2e-m2m',
         'AUTH0_M2M_CLIENT_SECRET=e2e-m2m-secret',
-        'API_KEY=e2e-api-key',
+        `API_KEY=${API_KEY}`,
         '',
       ].join('\n'),
     );
@@ -154,7 +167,36 @@ export async function startLocalStack(): Promise<LocalStack> {
     worker.stderr?.on('data', (chunk: Buffer) => (workerLog += chunk.toString()));
     await waitUntilServing(baseUrl, worker, () => workerLog);
 
-    return { baseUrl, token, stop };
+    const d1 = async (sql: string) => {
+      const answer = parseJson(
+        await run(
+          [
+            'node',
+            ...WRANGLER,
+            'd1',
+            'execute',
+            'sms-dashboard',
+            ...local,
+            '--command',
+            sql,
+            '--json',
+          ],
+          `D1 query ${sql}`,
+        ),
+        D1Answer,
+      );
+      if (!answer.ok) throw new Error(`D1 query ${sql} answered unreadable JSON: ${answer.error}`);
+      return answer.value[0].results;
+    };
+    const { domain, audience, nativeClientId } = auth0;
+    return {
+      baseUrl,
+      token,
+      apiKey: API_KEY,
+      auth0: { domain, audience, nativeClientId },
+      d1,
+      stop,
+    };
   } catch (error) {
     await stop();
     throw error;

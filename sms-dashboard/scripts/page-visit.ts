@@ -28,7 +28,7 @@ export async function signedIn(context: BrowserContext, baseUrl: string): Promis
   throw new Error(`/api/auth/me answered ${String(response.status())}; is the Worker running?`);
 }
 
-function recordIssues(page: Page, issues: PageIssue[]): void {
+export function recordIssues(page: Page, issues: PageIssue[]): void {
   page.on('console', (message) => {
     if (message.type() === 'error' || message.type() === 'warning') {
       issues.push({ kind: 'console', text: `${message.type()}: ${message.text()}` });
