@@ -1,5 +1,4 @@
-// The Svelte 5 SPA. DOM only: nothing in client/ runs under Node. tsc reads
-// the .ts files and skips the .svelte ones, which svelte-check reads.
+// tsc skips the .svelte files, which svelte-check reads.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {

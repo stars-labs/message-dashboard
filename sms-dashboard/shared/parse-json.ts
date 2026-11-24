@@ -21,7 +21,7 @@ export function parseJson<T>(text: string, schema: Schema<T>): Parsed<T> {
   return validate(input, schema);
 }
 
-/** Reads a Request or Response body. Bodies are read as text so a JSON error is reported, not thrown. */
+/** Bodies are read as text so a JSON error is reported, not thrown. */
 export async function readJson<T>(
   body: { text(): Promise<string> },
   schema: Schema<T>,

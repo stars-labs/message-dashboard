@@ -24,8 +24,7 @@ function clean(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
-// Extract the API's own error message from the thrown error string, which has
-// the form "Company AI request failed (401): <body up to 500 chars>".
+// The thrown message has the form "Company AI request failed (401): <body up to 500 chars>".
 function extractApiDetail(message: string): string | null {
   const match = /\(\d+\):\s*(.+)$/s.exec(message);
   return match?.[1]?.trim() ?? null;
@@ -38,8 +37,7 @@ export function describeAIConnectionError(error: unknown): string {
     return detail ? `认证失败：${detail}` : '认证失败，请检查 AI token';
   }
   if (/\b403\b/.test(message)) {
-    // 403 covers both "wrong token" and "token valid but no model access" —
-    // always surface the API's own message so the user knows which it is.
+    // 403 covers both a wrong token and a valid token without model access.
     return detail ? `权限不足：${detail}` : '请求被拒绝，请检查 AI token 和模型权限';
   }
   if (/\b404\b/.test(message)) return '接口不存在，请检查 AI URL 和协议';

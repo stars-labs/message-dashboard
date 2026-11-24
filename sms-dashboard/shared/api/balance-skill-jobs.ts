@@ -2,7 +2,6 @@ import * as v from 'valibot';
 import { bodyObject } from './body.js';
 import { RUNNER_ID_REQUIRED } from './runner-jobs.js';
 
-/** A validated balance-skill configuration: the limits the runner holds an AI decision to. */
 const BalanceSkillConfig = v.object({
   id: v.string(),
   version: v.string(),
@@ -13,10 +12,8 @@ const BalanceSkillConfig = v.object({
   forbidden_intents: v.array(v.string()),
 });
 
-/** One numbered option found in a carrier reply. */
 const BalanceMenuOption = v.object({ value: v.string(), label: v.string() });
 
-/** GET /api/control/balance-skills/jobs/claim, when a job was leased. */
 export const BalanceSkillJob = v.object({
   id: v.string(),
   check_id: v.string(),
@@ -31,7 +28,7 @@ export type BalanceSkillJob = v.InferOutput<typeof BalanceSkillJob>;
 
 const DECISION_REQUIRED = 'runner_id and decision are required';
 
-/** POST /api/control/balance-skills/jobs/{id}/decision: the decision is the validator's to judge. */
+/** The decision is the validator's to judge. */
 export const SkillDecisionBody = bodyObject(
   {
     runner_id: v.string(DECISION_REQUIRED),
@@ -46,7 +43,6 @@ export const SkillDecisionBody = bodyObject(
   DECISION_REQUIRED,
 );
 
-/** What a decision did: queued the reply it chose (202), parsed the balance, or stopped. */
 export const SkillDecisionResponse = v.union([
   v.object({
     status: v.literal(202),
@@ -71,7 +67,6 @@ export const SkillDecisionResponse = v.union([
 
 export type SkillDecisionResponse = v.InferOutput<typeof SkillDecisionResponse>;
 
-/** POST /api/control/balance-skills/jobs/{id}/release. */
 export const SkillReleaseBody = bodyObject(
   {
     runner_id: v.string(RUNNER_ID_REQUIRED),

@@ -1,4 +1,3 @@
-// The strict gate for the dashboard; balance-agent has its own, run by `check`.
 {
   "files": [],
   "references": [

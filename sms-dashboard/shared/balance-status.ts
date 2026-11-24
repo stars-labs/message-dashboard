@@ -9,7 +9,6 @@ export const CHECK_STATUSES = [
   'unparsed',
 ] as const;
 
-/** The sim_balance_web_jobs statuses of a job a runner holds. */
 export const ACTIVE_WEB_JOB_STATUSES = [
   'leased',
   'awaiting_otp',
@@ -30,10 +29,7 @@ export const WEB_JOB_STATUSES = [
 /** sim_balance_skill_jobs.status, as the table's CHECK constraint lists it. */
 export const SKILL_JOB_STATUSES = ['pending', 'leased', 'completed', 'stopped'] as const;
 
-/**
- * The status the dashboard shows for a check: its own status, or the stage of
- * the skill or web job working on it.
- */
+/** A check's own status, or the stage of the skill or web job working on it. */
 export const DISPLAY_STATUSES = [
   ...CHECK_STATUSES,
   'skill_pending',

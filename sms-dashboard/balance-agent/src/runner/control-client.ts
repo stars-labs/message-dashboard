@@ -6,10 +6,8 @@ import { runnerContract } from '../../../shared/api/contract/runner.js';
 
 export type FetchImpl = (url: string, init: RequestInit) => Promise<Response>;
 
-/** The Dashboard's runner routes, typed from the contract the Worker serves. */
 export type ControlClient = ContractRouterClient<typeof runnerContract>;
 
-/** A route that refused or failed: the status it answered and its body as sent. */
 export class ControlError extends Error {
   readonly status: number;
   readonly body: string;
@@ -61,7 +59,6 @@ export function createControlClient({
     return { Authorization: `Bearer ${token.trim()}` };
   }
 
-  /** Sends a request the contract client built, with the runner's credentials. */
   async function send(request: Request): Promise<Response> {
     const headers = new Headers(request.headers);
     for (const [name, value] of Object.entries(await authorizationHeaders())) {

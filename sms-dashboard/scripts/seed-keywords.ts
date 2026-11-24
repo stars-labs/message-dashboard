@@ -1,5 +1,3 @@
-// Script to seed test keywords directly via control API
-
 import * as v from 'valibot';
 import { readJson } from '../shared/parse-json.js';
 
@@ -18,9 +16,7 @@ const UploadResultSchema = v.object({
   error: v.unknown(),
 });
 
-// Test keywords to seed
 const testKeywords = [
-  // Authentication keywords
   {
     keyword: 'verification',
     tag: 'AUTH',
@@ -54,7 +50,6 @@ const testKeywords = [
     whole_word: true,
   },
 
-  // Financial keywords
   {
     keyword: 'payment',
     tag: 'PAY',
@@ -80,7 +75,6 @@ const testKeywords = [
     whole_word: true,
   },
 
-  // Alert keywords
   {
     keyword: 'URGENT',
     tag: 'ALERT',
@@ -106,7 +100,6 @@ const testKeywords = [
     whole_word: true,
   },
 
-  // Spam/Marketing
   {
     keyword: 'unsubscribe',
     tag: 'SPAM',
@@ -136,9 +129,7 @@ const testKeywords = [
 async function seedKeywords() {
   console.log('🌱 Seeding keywords for testing...\n');
 
-  // Note: Since we don't have a direct endpoint to create keywords via control API,
-  // we'll document the keywords that should be added via the UI
-
+  // The control API has no endpoint to create keywords, so they are added in the UI.
   console.log('Please add the following keywords via the Keywords tab in the UI:\n');
 
   testKeywords.forEach((kw, index) => {
@@ -155,7 +146,6 @@ async function seedKeywords() {
     '\nAfter adding these keywords, messages containing these terms will be automatically highlighted with their respective tags and colors.',
   );
 
-  // Test message upload to verify keyword processing
   console.log('\n📨 Uploading test messages to verify keyword processing...\n');
 
   const testMessages = [
@@ -209,5 +199,4 @@ async function seedKeywords() {
   }
 }
 
-// Run the seeding
 await seedKeywords();

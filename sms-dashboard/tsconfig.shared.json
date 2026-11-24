@@ -1,7 +1,6 @@
-// Runs in both the Worker and the browser, so it assumes neither: ES2023 only,
-// no DOM and no Node globals. worker-configuration.d.ts is deliberately absent:
-// its Durable Object types import server/index.ts, which would drag the whole
-// server (still on the legacy gate) into this project.
+// Runs in both the Worker and the browser, so it assumes neither: ES2023 only, no DOM and
+// no Node globals. worker-configuration.d.ts is absent: its Durable Object types import
+// server/index.ts, which would drag the whole server into this project.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {

@@ -1,6 +1,3 @@
-// The OpenAPI document of the contract (shared/api/contract/). oRPC writes the
-// paths, parameters and answers; this adds what the contract states and the
-// generator cannot see: who may call each route, and the error format it answers.
 import { OpenAPIGenerator, type OpenAPI } from '@orpc/openapi';
 import { traverseContractProcedures } from '@orpc/server';
 import { experimental_ValibotToJsonSchemaConverter } from '@orpc/valibot';
@@ -9,7 +6,6 @@ import packageJson from '../package.json' with { type: 'json' };
 import { contract } from '../shared/api/contract/index.js';
 import { Method, RouteMeta, type Access } from '../shared/api/contract/route.js';
 
-// The prefix the Worker's contract entry uses to pick the daemon's error format.
 const CONTROL_PREFIX = '/api/control/';
 
 const securitySchemes: Record<string, OpenAPI.SecuritySchemeObject> = {
@@ -56,7 +52,6 @@ const responses: Record<string, OpenAPI.ResponseObject> = {
   },
 };
 
-/** Security requirements for `access`; a permission is listed as the requirement's role. */
 function security(access: Access): OpenAPI.SecurityRequirementObject[] {
   switch (access.kind) {
     case 'public':
@@ -74,11 +69,10 @@ function security(access: Access): OpenAPI.SecurityRequirementObject[] {
 
 export async function openapiDocument() {
   const doc = await new OpenAPIGenerator({
-    // OpenAPI 3.1 schemas are JSON Schema 2020-12. The converter's default is to
-    // drop what it cannot convert; a schema left out of the document would hide
-    // its changes from the compatibility check, so that fails the generation.
-    // Checks and transforms, trim among them, are named: they refine a value
-    // whose type the document already states, and JSON Schema cannot express them.
+    // The converter drops what it cannot convert by default; a schema missing from the
+    // document would hide its changes from the compatibility check, so that fails the
+    // generation. Checks and transforms are named: they refine a type the document
+    // already states, and JSON Schema cannot express them.
     schemaConverters: [
       new experimental_ValibotToJsonSchemaConverter({
         target: 'draft-2020-12',

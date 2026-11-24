@@ -16,7 +16,6 @@ import {
 } from '../carrier-bills.js';
 import { route } from './route.js';
 
-/** An action on one bill, retried under its Idempotency-Key header. */
 function billAction(path: `/api/carrier-bills/{id}/${string}`) {
   return route({ kind: 'user', permission: 'bills.write' }, 'POST', path)
     .route({ inputStructure: 'detailed' })
@@ -30,14 +29,12 @@ function billAction(path: `/api/carrier-bills/{id}/${string}`) {
     .output(CarrierBillMutationResponse);
 }
 
-/** Postpaid carrier bills, the billing accounts they belong to, and what an operator did with them. */
 export const carrierBills = {
   accounts: route(
     { kind: 'user', permission: 'bills.read' },
     'GET',
     '/api/carrier-billing/accounts',
   ).output(CarrierBillingAccountsResponse),
-  /** The account's historical bill messages a backfill would store. */
   backfillPreview: route(
     { kind: 'user', permission: 'bills.write' },
     'POST',
@@ -45,7 +42,7 @@ export const carrierBills = {
   )
     .input(BackfillPreviewBody)
     .output(BackfillPreviewResponse),
-  /** Stores exactly the preview the operator saw, retried under its Idempotency-Key header. */
+  /** Stores exactly the preview the operator saw. */
   backfillExecute: route(
     { kind: 'user', permission: 'bills.write' },
     'POST',

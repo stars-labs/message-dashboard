@@ -15,13 +15,10 @@ import {
 /** sim_balance_profiles.method, as the table's CHECK constraint lists it. */
 export const PROFILE_METHODS = ['sms', 'ussd', 'api', 'browser'] as const;
 
-/** The sim_balance_profiles.method values the query planner can run. */
 export const QUERY_METHODS = ['sms', 'browser'] as const;
 
-/** The ways a batch can query a SIM: plain SMS, SMS with the AI skill, or the carrier website. */
 export const BATCH_METHODS = ['direct_sms', 'sms_ai', 'browser'] as const;
 
-/** Why a SIM cannot be queried now. */
 export const INELIGIBLE_REASONS = [
   'secondary',
   'offline',
@@ -31,7 +28,6 @@ export const INELIGIBLE_REASONS = [
   'cooldown',
 ] as const;
 
-/** A balance figure parsed from a carrier reply. */
 export const BalanceMetric = v.object({
   metric_type: v.string(),
   value: v.nullable(v.number()),
@@ -42,7 +38,6 @@ export const BalanceMetric = v.object({
 
 export type BalanceMetric = v.InferOutput<typeof BalanceMetric>;
 
-/** A balance check as GET /api/balance-checks lists it, with its messages and parsed metrics. */
 export const BalanceCheck = v.object({
   id: v.string(),
   sim_iccid: v.string(),
@@ -83,13 +78,13 @@ export const BalanceCheck = v.object({
 
 export type BalanceCheck = v.InferOutput<typeof BalanceCheck>;
 
-/** GET /api/balance-checks. The limit is clamped by the handler, which keeps any text. */
+/** The limit is clamped by the handler, which keeps any text. */
 export const BalanceChecksQuery = v.object({
   phone_iccid: v.optional(v.string()),
   limit: v.optional(v.string()),
 });
 
-/** GET /api/balance-checks/status: comma-separated check ids, checked by the handler. */
+/** Comma-separated check ids, checked by the handler. */
 export const BalanceCheckStatusQuery = v.object({ ids: v.optional(v.string()) });
 
 export const BalanceChecksResponse = v.object({
@@ -99,7 +94,6 @@ export const BalanceChecksResponse = v.object({
 
 export type BalanceChecksResponse = v.InferOutput<typeof BalanceChecksResponse>;
 
-/** Where a balance check stands, as GET /api/balance-checks/status reports it for polling. */
 const BalanceCheckStatus = v.object({
   id: v.string(),
   status: v.picklist(CHECK_STATUSES),
@@ -118,7 +112,6 @@ export const BalanceCheckStatusResponse = v.object({
 
 export type BalanceCheckStatusResponse = v.InferOutput<typeof BalanceCheckStatusResponse>;
 
-/** One message a balance check sent or received. */
 export const BalanceConversationMessage = v.object({
   id: v.string(),
   type: v.nullable(v.picklist(['sent', 'received'])),
@@ -131,7 +124,6 @@ export const BalanceConversationMessage = v.object({
 
 export type BalanceConversationMessage = v.InferOutput<typeof BalanceConversationMessage>;
 
-/** One step the Balance Agent reported while it worked a carrier website. */
 export const BalanceWebEvent = v.object({
   id: v.number(),
   event_type: v.string(),
@@ -139,7 +131,6 @@ export const BalanceWebEvent = v.object({
   created_at: v.string(),
 });
 
-/** GET /api/balance-checks/:id: the messages and web events of one check. */
 export const BalanceCheckDetail = v.object({
   id: v.string(),
   conversation: v.array(BalanceConversationMessage),
@@ -155,7 +146,6 @@ export const BalanceCheckDetailResponse = v.object({
 
 export type BalanceCheckDetailResponse = v.InferOutput<typeof BalanceCheckDetailResponse>;
 
-/** How a profile is queried, and the runner capability it needs. */
 export const BalanceMethod = v.object({
   category: v.picklist([...BATCH_METHODS, 'unsupported']),
   capability: v.nullable(v.picklist(RUNNER_CAPABILITIES)),
@@ -164,7 +154,6 @@ export const BalanceMethod = v.object({
 
 export type BalanceMethod = v.InferOutput<typeof BalanceMethod>;
 
-/** GET /api/balance-checks/query-preflight: whether one SIM can be queried now, and how. */
 export const BalanceQueryPreflightResponse = v.object({
   success: v.literal(true),
   eligible: v.boolean(),
@@ -195,7 +184,6 @@ export const BalanceQueryPreflightResponse = v.object({
 
 export type BalanceQueryPreflightResponse = v.InferOutput<typeof BalanceQueryPreflightResponse>;
 
-/** How many SIMs a query plan covers, and how many fell into each ineligible reason. */
 const BalanceQueryPlanSummary = v.object({
   total: v.number(),
   eligible: v.number(),
@@ -207,7 +195,6 @@ const BalanceQueryPlanSummary = v.object({
   service_type: v.number(),
 });
 
-/** POST /api/balance-checks/query-preview: the SIMs a batch would query, counted by method. */
 export const BalanceQueryPreviewResponse = v.object({
   success: v.literal(true),
   summary: BalanceQueryPlanSummary,
@@ -241,10 +228,7 @@ const QueuedCheckBase = {
   requested_at: v.string(),
 };
 
-/**
- * A balance check just queued: an SMS check names its outbound message, a
- * browser check its web job. Its keys are in the order the Worker writes them.
- */
+/** Keys are in the order the Worker writes them. */
 export const QueuedBalanceCheck = v.union([
   v.object({
     ...QueuedCheckBase,
@@ -262,14 +246,12 @@ export const QueuedBalanceCheck = v.union([
 
 export type QueuedBalanceCheck = v.InferOutput<typeof QueuedBalanceCheck>;
 
-// The ops scripts' /api/control/balance-checks routes. Their messages are the
-// ones those routes have always answered; shared/control-fixtures/ops/ records
-// each exchange.
+// The ops scripts' /api/control/balance-checks routes: their messages are recorded in
+// shared/control-fixtures/ops/.
 const INVALID_JSON = 'Invalid JSON body';
 const CHECK_REQUIRED = 'phone_iccid and profile_id are required';
 const CHECK_ID_REQUIRED = 'check_id is required';
 
-/** POST /api/control/balance-checks. */
 export const BalanceCheckCreateBody = bodyObject(
   { phone_iccid: v.string(CHECK_REQUIRED), profile_id: v.string(CHECK_REQUIRED) },
   { phone_iccid: CHECK_REQUIRED, profile_id: CHECK_REQUIRED },
@@ -284,7 +266,6 @@ export const BalanceCheckCreateResponse = v.object({
 
 export type BalanceCheckCreateResponse = v.InferOutput<typeof BalanceCheckCreateResponse>;
 
-/** POST /api/control/balance-checks/continue, /retry and /stop. */
 export const BalanceCheckIdBody = bodyObject(
   { check_id: v.string(CHECK_ID_REQUIRED) },
   { check_id: CHECK_ID_REQUIRED },
@@ -292,7 +273,6 @@ export const BalanceCheckIdBody = bodyObject(
   INVALID_JSON,
 );
 
-/** A check's next step, queued by /continue or requeued by /retry. */
 export const BalanceCheckStepResponse = v.object({
   success: v.literal(true),
   check: v.object({
@@ -312,7 +292,6 @@ export const BalanceCheckStopResponse = v.object({
 
 export type BalanceCheckStopResponse = v.InferOutput<typeof BalanceCheckStopResponse>;
 
-/** POST /api/balance-checks/query: the check just queued, as the list shows it. */
 export const BalanceQueryResponse = v.object({
   success: v.literal(true),
   check: BalanceCheck,
@@ -320,7 +299,6 @@ export const BalanceQueryResponse = v.object({
 
 export type BalanceQueryResponse = v.InferOutput<typeof BalanceQueryResponse>;
 
-/** POST /api/balance-checks/query-batch: the checks queued, and the SIMs that failed to queue. */
 export const BalanceQueryBatchResponse = v.object({
   success: v.literal(true),
   batch_id: v.string(),
@@ -343,7 +321,6 @@ export const BalanceQueryBatchResponse = v.object({
 
 export type BalanceQueryBatchResponse = v.InferOutput<typeof BalanceQueryBatchResponse>;
 
-/** The check that put a SIM in its query cooldown. */
 export const RecentBalanceCheck = v.object({
   sim_iccid: v.string(),
   profile_id: v.string(),
@@ -354,10 +331,6 @@ export const RecentBalanceCheck = v.object({
 
 export type RecentBalanceCheck = v.InferOutput<typeof RecentBalanceCheck>;
 
-/**
- * POST /api/balance-checks/query, 409 or 429: the members the problem adds to
- * say why the SIM cannot be queried now.
- */
 export const BalanceQueryRefusal = v.object({
   reason: v.picklist(INELIGIBLE_REASONS),
   previous_check: v.nullable(RecentBalanceCheck),
@@ -367,7 +340,6 @@ const SCOPE_REQUIRED = 'A unique non-empty SIM scope is required';
 const METHODS_REQUIRED = 'A unique list of supported methods is required';
 export const PHONE_ICCID_REQUIRED = 'phone_iccid is required';
 
-/** The most SIMs one preview or batch may name. */
 const MAX_BATCH_SCOPE = 500;
 
 function unique(items: readonly unknown[]): boolean {
@@ -389,17 +361,14 @@ const Scope = v.pipe(
   v.check((iccids) => unique(iccids), SCOPE_REQUIRED),
 );
 
-/** POST /api/balance-checks/query-preview. */
 export const BalanceQueryPreviewBody = bodyObject(
   { phone_iccids: Scope },
   { phone_iccids: SCOPE_REQUIRED },
   SCOPE_REQUIRED,
 );
 
-/** GET /api/balance-checks/query-preflight. */
 export const BalanceQueryPreflightQuery = v.object({ phone_iccid: v.optional(v.string()) });
 
-/** POST /api/balance-checks/query. */
 export const BalanceQueryBody = bodyObject(
   {
     phone_iccid: v.pipe(v.string(PHONE_ICCID_REQUIRED), v.minLength(1, PHONE_ICCID_REQUIRED)),
@@ -408,7 +377,7 @@ export const BalanceQueryBody = bodyObject(
   PHONE_ICCID_REQUIRED,
 );
 
-/** POST /api/balance-checks/query-batch. The methods are checked before the scope. */
+/** The methods are checked before the scope. */
 export const BalanceQueryBatchBody = bodyObject(
   {
     methods: v.pipe(

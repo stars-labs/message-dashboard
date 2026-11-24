@@ -38,10 +38,8 @@ const BalanceSkillSchema = v.pipe(
   })),
 );
 
-/** A validated balance-skill configuration row. */
 export type BalanceSkill = v.InferOutput<typeof BalanceSkillSchema>;
 
-/** One numbered option found in a carrier reply. */
 interface MenuOption {
   value: string;
   label: string;
@@ -52,10 +50,8 @@ const DecisionActionSchema = v.picklist(['reply', 'complete', 'stop']);
 export type DecisionAction = v.InferOutput<typeof DecisionActionSchema>;
 
 /**
- * The validated AI decision. `balance` and `currency` are only meaningful for
- * `complete`; `selected_option` only for `reply`. Keeping them nullable on one
- * shape matches what gets written to sim_balance_skill_decisions, which stores
- * every field regardless of action.
+ * `balance` and `currency` are only meaningful for `complete`; `selected_option` only for
+ * `reply`. One nullable shape matches sim_balance_skill_decisions, which stores every field.
  */
 export interface BalanceDecision {
   action: DecisionAction;
@@ -197,11 +193,8 @@ function stopped(decision: BalanceDecision, reason: string): BalanceDecision {
 }
 
 /**
- * Validate an AI decision against the skill and the carrier reply it is about.
- *
- * Throws only for a malformed payload (not an object, unknown action); every
- * policy violation returns a `stop` decision instead, so an over-eager model
- * degrades to "do not act" rather than to an error the runner must handle.
+ * Throws only for a malformed payload (not an object, unknown action); every policy
+ * violation returns a `stop` decision, so an over-eager model degrades to "do not act".
  */
 export function validateBalanceSkillDecision({
   decision,
@@ -281,7 +274,6 @@ export function validateBalanceSkillDecision({
   return normalized;
 }
 
-/** The job fields buildBalanceSkillPrompt reads. */
 interface SkillPromptJob {
   skill: BalanceSkill;
   step_index: number;

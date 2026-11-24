@@ -20,13 +20,9 @@ const SUMMARY_PRIORITY = [
   'expiry_unknown',
 ] as const;
 
-/** Headline verdict for a SIM. `healthy` is the absence of every reason above. */
 export type SummaryStatus = (typeof SUMMARY_PRIORITY)[number] | 'healthy' | 'not_applicable';
 
-/**
- * Reasons a health rule can fire. `automation_unsupported` is deliberately not
- * in SUMMARY_PRIORITY: it is evidence for the UI, never a headline status.
- */
+/** `automation_unsupported` is not in SUMMARY_PRIORITY: it is evidence for the UI, never a headline status. */
 type HealthReason = (typeof SUMMARY_PRIORITY)[number] | 'automation_unsupported';
 
 interface Money {
@@ -167,9 +163,8 @@ export function evaluatePrepaidHealth({
   } else {
     const today = regionalDate(now, country);
     if (!today) {
-      // Unreachable while COUNTRY_TIME_ZONES holds valid ICU identifiers, but
-      // a bad entry there would otherwise throw on .time and take the caller
-      // down. Degrade to "we do not know" instead.
+      // Unreachable while COUNTRY_TIME_ZONES holds valid ICU identifiers; a bad entry
+      // would otherwise throw on .time.
       reasons.add('expiry_unknown');
     } else {
       const daysRemaining = Math.round((expiry.time - today.time) / DAY_MS);

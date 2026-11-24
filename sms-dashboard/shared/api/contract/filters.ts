@@ -6,7 +6,6 @@ import { route } from './route.js';
 
 const Id = v.object({ id: v.string() });
 
-/** Spam and marketing filter rules. Changes apply to new messages; history is explicit. */
 export const filters = {
   list: route({ kind: 'user', permission: 'filters.read' }, 'GET', '/api/filters').output(
     FiltersResponse,

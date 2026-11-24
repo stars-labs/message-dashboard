@@ -28,9 +28,8 @@ import { abortableSleep, type RunOutcome } from '../serial-runner.js';
 
 const LOGIN_ORIGIN = 'https://imgxx.client.10010.com';
 const QUERY_ORIGIN = 'https://www.10010.com';
-// The portal moved its read-only balance call off www.10010.com to
-// mxx.client.10010.com. The old host stays allowed so an in-flight profile still
-// validates; both are carrier-controlled and only ever receive the balance request.
+// The portal's read-only balance call moved from www.10010.com to mxx.client.10010.com;
+// both hosts are allowed, and both only ever receive the balance request.
 const BALANCE_API_ORIGINS = Object.freeze([QUERY_ORIGIN, 'https://mxx.client.10010.com']);
 const M1_ORIGIN = 'https://mcardaccount.m1.com.sg';
 
@@ -260,13 +259,10 @@ export function createCarrierBrowserJobProcessor({
   logger?: Logger;
 }) {
   let activePage: Page | null = null;
-  // The authenticated account the portal reported for the current task. Set by
-  // the checklogin interception, read by queryBalance.
   let sessionIdentity: string | null = null;
 
   type OtpPoll = Awaited<ReturnType<ControlClient['carrierWebJobs']['otp']>>;
 
-  /** Waits for a job action the Worker was sent; a refusal is reported with the action's name. */
   async function postJob(action: string, sent: Promise<unknown>): Promise<void> {
     try {
       await sent;
@@ -692,10 +688,8 @@ export function createCarrierBrowserJobProcessor({
     const nativeResponse = await nativeResponsePromise;
     await sessionIdentityPromise;
 
-    // After login, Unicom sometimes redirects to #/errorpage instead of
-    // serving balance data — their backend is temporarily unavailable.
-    // Check the active page URL before attempting the API post so we can
-    // release (retry later) rather than fail the job permanently.
+    // After login, Unicom sometimes redirects to #/errorpage while its backend is down;
+    // release the job to retry later rather than fail it.
     const page = context.pages()[0];
     if (page && isUnicomErrorPage(page.url())) {
       throw new Error(
@@ -726,9 +720,8 @@ export function createCarrierBrowserJobProcessor({
       throw new Error('China Unicom balance endpoint did not return JSON');
     }
     const payload = parsedPayload.value;
-    // The balance payload carries no account number, so the session identity is
-    // merged in. The extractor still matches it against the SIM; this supplies the
-    // proof, it does not bypass the check.
+    // The balance payload carries no account number, so the session identity is merged in;
+    // the extractor still matches it against the SIM.
     const payloadObject = v.safeParse(JsonObject, payload);
     const payloadWithIdentity = sessionIdentity
       ? {
@@ -811,8 +804,7 @@ export function createCarrierBrowserJobProcessor({
       sessionIdentity = null;
       let parsed: CarrierBalance;
       if (target.provider === 'unicom') {
-        // The portal calls this endpoint before login (answered with a logged-out
-        // payload) and again after. Wait for the authenticated one.
+        // The portal calls this endpoint before login (logged-out payload) and again after.
         const nativeResponsePromise = page
           .waitForResponse(
             async (response) => {
@@ -820,14 +812,11 @@ export function createCarrierBrowserJobProcessor({
               if (response.request().method() !== 'POST') return false;
               if (!response.ok()) return false;
               const body = await response.text().catch(() => '');
-              // Only the authenticated response carries the balance.
               return parseJson(body, AuthenticatedBalanceBody).ok;
             },
             { timeout: 120_000 },
           )
           .catch(() => null);
-        // The balance payload has no account field, so capture the signed-in number
-        // the portal reports separately on checklogin.
         const sessionIdentityPromise = page
           .waitForResponse(
             async (response) => {

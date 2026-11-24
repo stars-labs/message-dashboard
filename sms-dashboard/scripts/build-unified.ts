@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Read all files from dist directory
 function readDistFiles() {
   const distPath = path.join(__dirname, '../dist');
   const files = new Map<string, Buffer>();
@@ -35,7 +34,6 @@ function readDistFiles() {
   return files;
 }
 
-// Generate the assets module
 function generateAssetsModule() {
   const files = readDistFiles();
 
@@ -48,11 +46,9 @@ function generateAssetsModule() {
       mimeType.startsWith('text/') || mimeType.includes('javascript') || mimeType.includes('json');
 
     if (isText) {
-      // For text files, store as string
       const escaped = JSON.stringify(content.toString('utf-8'));
       code += `  '${assetPath}': { content: ${escaped}, type: '${mimeType}' },\n`;
     } else {
-      // For binary files, store as base64
       const base64 = content.toString('base64');
       code += `  '${assetPath}': { content: '${base64}', type: '${mimeType}', encoding: 'base64' },\n`;
     }
@@ -60,7 +56,6 @@ function generateAssetsModule() {
 
   code += '};\n';
 
-  // Write to file
   fs.writeFileSync(path.join(__dirname, '../server/frontend-assets.js'), code);
   console.log('Generated frontend-assets.js with', files.size, 'files');
 }
@@ -72,8 +67,8 @@ function getMimeType(filename: string) {
     ['.js', 'application/javascript'],
     ['.css', 'text/css'],
     ['.json', 'application/json'],
-    // Without this the manifest falls through to application/octet-stream, which
-    // both stores it as base64 and serves a MIME type browsers reject.
+    // Otherwise the manifest is stored as base64 and served as application/octet-stream,
+    // which browsers reject.
     ['.webmanifest', 'application/manifest+json'],
     ['.png', 'image/png'],
     ['.jpg', 'image/jpeg'],
@@ -89,5 +84,4 @@ function getMimeType(filename: string) {
   return mimeTypes.get(ext) ?? 'application/octet-stream';
 }
 
-// Run the build
 generateAssetsModule();

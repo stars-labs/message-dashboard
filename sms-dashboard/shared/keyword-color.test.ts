@@ -24,8 +24,6 @@ describe('normalizeKeywordColor — valid hex', () => {
   });
 });
 
-// The payloads from the security review. Even though the client no longer uses
-// {@html}, these must not reach the database.
 describe('normalizeKeywordColor — XSS payloads', () => {
   test('rejects an attribute break-out with an event handler', () => {
     const payload =
@@ -46,8 +44,6 @@ describe('normalizeKeywordColor — XSS payloads', () => {
   });
 });
 
-// CSS-level abuse of the --kw-color custom property, which is a real sink even without
-// any HTML injection.
 describe('normalizeKeywordColor — CSS injection', () => {
   test('rejects url() and image references', () => {
     expect(normalizeKeywordColor('url(https://evil.example/pixel)').ok).toBe(false);

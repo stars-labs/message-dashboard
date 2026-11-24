@@ -1,10 +1,8 @@
 import * as v from 'valibot';
 import { bodyObject } from './body.js';
 
-/** The work a Balance Agent runner can take on. */
 export const RUNNER_CAPABILITIES = ['sms_ai', 'carrier_browser'] as const;
 
-/** The states a runner reports for one capability. */
 export const RUNNER_STATES = [
   'starting',
   'ready',
@@ -14,7 +12,6 @@ export const RUNNER_STATES = [
   'stopping',
 ] as const;
 
-/** A capability joined with its installation's heartbeat. */
 export const BalanceRunnerCapability = v.object({
   runner_id: v.string(),
   capability: v.picklist(RUNNER_CAPABILITIES),
@@ -28,7 +25,7 @@ export const BalanceRunnerCapability = v.object({
 
 export type BalanceRunnerCapability = v.InferOutput<typeof BalanceRunnerCapability>;
 
-/** One capability across all runners: the runner chosen for it, or offline when none is. */
+/** The runner chosen for the capability, or offline when none is. */
 export const BalanceRunnerCapabilitySummary = v.object({
   available: v.boolean(),
   state: v.picklist([...RUNNER_STATES, 'offline']),
@@ -40,7 +37,6 @@ export const BalanceRunnerCapabilitySummary = v.object({
 
 export type BalanceRunnerCapabilitySummary = v.InferOutput<typeof BalanceRunnerCapabilitySummary>;
 
-/** The summary of each capability, keyed by capability name. */
 export const BalanceRunnerCapabilities = v.object({
   sms_ai: BalanceRunnerCapabilitySummary,
   carrier_browser: BalanceRunnerCapabilitySummary,
@@ -48,7 +44,6 @@ export const BalanceRunnerCapabilities = v.object({
 
 export type BalanceRunnerCapabilities = v.InferOutput<typeof BalanceRunnerCapabilities>;
 
-/** A device installation of a dashboard user's Balance Agent, with its capabilities. */
 export const BalanceRunner = v.object({
   id: v.string(),
   display_name: v.string(),
@@ -63,7 +58,6 @@ export const BalanceRunner = v.object({
 
 export type BalanceRunner = v.InferOutput<typeof BalanceRunner>;
 
-/** GET /api/balance-runners. */
 export const BalanceRunnersResponse = v.object({
   success: v.literal(true),
   online_seconds: v.number(),
@@ -103,7 +97,7 @@ const HeartbeatCapability = v.object(
   INVALID_HEARTBEAT,
 );
 
-/** POST /api/control/balance-runners/heartbeat: each capability at most once. */
+/** Each capability at most once. */
 export const RunnerHeartbeatBody = bodyObject(
   {
     runner_id: boundedText(200),
@@ -137,7 +131,6 @@ export const RunnerHeartbeatResponse = v.object({
 
 export type RunnerHeartbeatResponse = v.InferOutput<typeof RunnerHeartbeatResponse>;
 
-/** GET /api/control/balance-runners/check: the Agent's credentials are good. */
 export const RunnerCheckResponse = v.object({ success: v.literal(true) });
 
 export type RunnerCheckResponse = v.InferOutput<typeof RunnerCheckResponse>;

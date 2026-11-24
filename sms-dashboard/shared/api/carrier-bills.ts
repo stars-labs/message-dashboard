@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import { bodyObject } from './body.js';
 import { CarrierBillingLinkedSim, CarrierBillingNotificationSim } from './carrier-billing.js';
 
-/** carrier_bills.action_status: what the operator has done about a bill. */
+/** carrier_bills.action_status. */
 const BILL_ACTION_STATUSES = [
   'unpaid',
   'payment_planned',
@@ -11,7 +11,7 @@ const BILL_ACTION_STATUSES = [
   'needs_review',
 ] as const;
 
-/** How pressing a bill is, derived from its action status and due date. */
+/** Derived from the action status and due date. */
 export const BILL_URGENCIES = [
   'needs_review',
   'paid',
@@ -21,7 +21,6 @@ export const BILL_URGENCIES = [
   'open',
 ] as const;
 
-/** A carrier bill with its account, notification SIM, and urgency. */
 export const CarrierBill = v.object({
   id: v.string(),
   billing_account_id: v.string(),
@@ -51,7 +50,6 @@ export const CarrierBill = v.object({
 
 export type CarrierBill = v.InferOutput<typeof CarrierBill>;
 
-/** GET /api/carrier-bills. */
 export const CarrierBillsResponse = v.object({
   success: v.literal(true),
   today: v.string(),
@@ -60,7 +58,6 @@ export const CarrierBillsResponse = v.object({
 
 export type CarrierBillsResponse = v.InferOutput<typeof CarrierBillsResponse>;
 
-/** The message a bill was parsed from. */
 export const CarrierBillSourceMessage = v.object({
   id: v.string(),
   sender: v.nullable(v.string()),
@@ -68,7 +65,7 @@ export const CarrierBillSourceMessage = v.object({
   timestamp: v.nullable(v.string()),
 });
 
-/** One audited change to a bill; the metadata is the JSON the server stored with it. */
+/** The metadata is the JSON the server stored with the change. */
 export const CarrierBillEvent = v.object({
   id: v.string(),
   event_type: v.string(),
@@ -79,7 +76,6 @@ export const CarrierBillEvent = v.object({
   metadata: v.unknown(),
 });
 
-/** A carrier bill with its linked SIMs, source message, and audit events. */
 const CarrierBillDetail = v.object({
   ...CarrierBill.entries,
   linked_sims: v.array(CarrierBillingLinkedSim),
@@ -87,7 +83,6 @@ const CarrierBillDetail = v.object({
   events: v.array(CarrierBillEvent),
 });
 
-/** GET /api/carrier-bills/:id. */
 export const CarrierBillResponse = v.object({
   success: v.literal(true),
   bill: CarrierBillDetail,
@@ -95,7 +90,7 @@ export const CarrierBillResponse = v.object({
 
 export type CarrierBillResponse = v.InferOutput<typeof CarrierBillResponse>;
 
-/** POST /api/carrier-bills/:id/<action>; `idempotent` marks a replayed request. */
+/** `idempotent` marks a replayed request. */
 export const CarrierBillMutationResponse = v.object({
   success: v.literal(true),
   idempotent: v.optional(v.literal(true)),
@@ -104,16 +99,12 @@ export const CarrierBillMutationResponse = v.object({
 
 export type CarrierBillMutationResponse = v.InferOutput<typeof CarrierBillMutationResponse>;
 
-/**
- * POST /api/carrier-bills/:id/<action>, 409: the members the problem adds when
- * the bill changed, which answer the bill as it now stands.
- */
 export const CarrierBillConflict = v.object({
   current_version: v.number(),
   bill: CarrierBill,
 });
 
-/** GET /api/carrier-bills. The handler checks the dates and filters by status. */
+/** The handler checks the dates and filters by status. */
 export const CarrierBillsQuery = v.object({
   carrier: v.optional(v.string()),
   account_id: v.optional(v.string()),
@@ -125,7 +116,7 @@ export const CarrierBillsQuery = v.object({
 const VERSION_MESSAGE = 'expected_version must be a positive integer';
 const NOTE_MESSAGE = 'note must be a string of at most 1000 characters';
 
-/** The body of the four bill actions; the note is stored trimmed. */
+/** The note is stored trimmed. */
 export const CarrierBillMutationBody = bodyObject(
   {
     expected_version: v.pipe(
@@ -141,7 +132,7 @@ export const CarrierBillMutationBody = bodyObject(
   VERSION_MESSAGE,
 );
 
-/** The header a bill action or a backfill execution is retried under; the handler bounds it. */
+/** The handler bounds the key. */
 export const IdempotencyHeaders = v.object({ 'idempotency-key': v.optional(v.string()) });
 
 export type CarrierBillConflict = v.InferOutput<typeof CarrierBillConflict>;

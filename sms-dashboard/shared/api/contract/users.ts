@@ -2,7 +2,6 @@ import * as v from 'valibot';
 import { SetRoleResponse, UsersResponse } from '../users.js';
 import { route } from './route.js';
 
-/** User + role administration, admin-only. */
 export const users = {
   list: route({ kind: 'user', permission: 'users.read' }, 'GET', '/api/users').output(
     UsersResponse,

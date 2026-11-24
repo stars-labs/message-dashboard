@@ -1,8 +1,6 @@
-// What the Pi daemon sends to its /api/control/ routes and what it is answered.
-// Each request schema is bound to the Rust wire type it accepts (ts-rs, under
-// daemon-wire/), and its messages are the ones the daemon's logs have always
-// shown. Each answer lists its keys in the order the Worker writes them:
-// shared/control-fixtures/ compares the bytes.
+// Each request schema is bound to the Rust wire type it accepts (ts-rs, under daemon-wire/).
+// Each answer lists its keys in the order the Worker writes them: shared/control-fixtures/
+// compares the bytes.
 import * as v from 'valibot';
 import type { MessageBatchRequest } from '../daemon-wire/MessageBatchRequest.js';
 import type { ModemReportsRequest } from '../daemon-wire/ModemReportsRequest.js';
@@ -21,7 +19,6 @@ const MESSAGE_FIELDS_NOT_TEXT = 'phone_number and timestamp must be text';
 const MESSAGE_ID_MISSING = 'message_id is required';
 const INVALID_OUTCOME = 'outcome must be confirmed, submitted_unconfirmed, or failed';
 
-/** Required text whose absence answers the same message as a wrong type or an empty value. */
 function requiredText(message: string) {
   return v.pipe(v.optional(v.string(message), ''), v.minLength(1, message));
 }
@@ -29,7 +26,7 @@ function requiredText(message: string) {
 const ReportText = v.nullish(v.string(INVALID_REPORT));
 const ReportInteger = v.nullish(v.pipe(v.number(INVALID_REPORT), v.integer(INVALID_REPORT)));
 
-/** One entry of the daemon's modem_reports array (orange-pi-daemon types.rs ModemReport). */
+/** orange-pi-daemon types.rs ModemReport. */
 const ModemReport = v.object(
   {
     equipment_id: v.string(INVALID_REPORT),
@@ -50,7 +47,6 @@ const ModemReport = v.object(
   INVALID_REPORT,
 );
 
-/** POST /api/control/devices. */
 export const DevicesBody = acceptsWire<ModemReportsRequest, 'timestamp'>()(
   bodyObject(
     {
@@ -73,7 +69,6 @@ export const DevicesResponse = v.object({
 
 export type DevicesResponse = v.InferOutput<typeof DevicesResponse>;
 
-/** POST /api/control/messages. */
 export const UploadBody = acceptsWire<MessageBatchRequest, 'direction'>()(
   bodyObject(
     {
@@ -96,7 +91,7 @@ export const UploadBody = acceptsWire<MessageBatchRequest, 'direction'>()(
   ),
 );
 
-/** One uploaded message's verdict (daemon-wire UploadResult). */
+/** daemon-wire UploadResult. */
 const UploadResult = v.object({
   id: v.string(),
   status: v.picklist(['stored', 'already_stored', 'rejected']),
@@ -112,15 +107,14 @@ export const UploadResponse = v.object({
 
 export type UploadResponse = v.InferOutput<typeof UploadResponse>;
 
-/** DELETE /api/control/messages. */
 export const ClearMessagesResponse = v.object({ success: v.literal(true), message: v.string() });
 
 export type ClearMessagesResponse = v.InferOutput<typeof ClearMessagesResponse>;
 
-/** GET /api/control/pending-sms: the daemon process names itself; the handler checks the name. */
+/** The daemon process names itself; the handler checks the name. */
 export const PendingSmsHeaders = v.object({ 'x-daemon-session-id': v.optional(v.string()) });
 
-/** One SMS for the daemon to send (daemon-wire PendingSms), with the SIM's number. */
+/** daemon-wire PendingSms plus the SIM's number. */
 const PendingMessage = v.object({
   id: v.string(),
   phone_iccid: v.string(),
@@ -138,7 +132,6 @@ export const PendingSmsResponse = v.object({
 
 export type PendingSmsResponse = v.InferOutput<typeof PendingSmsResponse>;
 
-/** POST /api/control/sms-result. */
 export const SmsResultBody = acceptsWire<SmsResult>()(
   bodyObject(
     {

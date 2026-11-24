@@ -1,7 +1,6 @@
 import * as v from 'valibot';
 import { parseJson, readJson } from '../../../shared/parse-json.js';
 
-/** The two-part prompt every call sends. */
 interface CompanyAIPrompt {
   system: string;
   user: string;
@@ -14,19 +13,16 @@ export interface CompanyAIRequest {
   signal: AbortSignal;
 }
 
-/** The part of `fetch` a model call uses; the real `fetch` satisfies it. */
 export type CompanyAIFetch = (
   url: string,
   init: CompanyAIRequest,
 ) => Promise<Pick<Response, 'ok' | 'status' | 'text'>>;
 
-/** The part of `fetch` the liveness probe uses. */
 export type CompanyAIProbeFetch = (
   url: string,
   init: CompanyAIRequest,
 ) => Promise<Pick<Response, 'status'>>;
 
-/** The chat protocols the company gateway exposes. Settings are parsed with this schema. */
 export const CompanyAIProtocol = v.picklist(['anthropic', 'openai']);
 export type CompanyAIProtocol = v.InferOutput<typeof CompanyAIProtocol>;
 
@@ -41,10 +37,8 @@ interface CompanyAICall {
 
 const TextPart = v.object({ type: v.string(), text: v.optional(v.string()) });
 
-/** Anthropic Messages: the reply is a list of content blocks. */
 const MessagesResponse = v.object({ content: v.array(TextPart) });
 
-/** OpenAI Chat Completions: the reply is the first choice's message content. */
 const ChatResponse = v.object({
   choices: v.tupleWithRest(
     [v.object({ message: v.object({ content: v.union([v.string(), v.array(TextPart)]) }) })],
@@ -199,14 +193,11 @@ export async function callCompanyAI({
   return parseCompanyAIContent(payload.value);
 }
 
-// Liveness probe for the company AI endpoint. It must hit the route callAI uses:
-// a GET on the bare base URL is not a route here, so it answered 404 and the
-// sms_ai loop stopped claiming work while real model calls were succeeding. An
+// The probe must hit a real model route: a GET on the bare base URL answers 404. An
 // unauthenticated POST distinguishes a reachable gateway (4xx) from a dead one.
 const PROBE_PATH = '/v1/messages';
 
-// This gateway answers the route in ~3.9s, so the previous 5s budget reported a
-// healthy endpoint as unreachable on any wobble.
+// The gateway answers this route in ~3.9s.
 const PROBE_TIMEOUT_MS = 15_000;
 
 export async function companyAIReachable(

@@ -22,7 +22,6 @@ import {
 import { BalanceRunnersResponse } from '../balance-runners.js';
 import { route } from './route.js';
 
-/** The balance checks the dashboard lists, polls and opens. */
 export const balanceChecks = {
   list: route({ kind: 'user', permission: 'messages.read' }, 'GET', '/api/balance-checks')
     .route({ inputStructure: 'detailed' })
@@ -32,13 +31,11 @@ export const balanceChecks = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ query: BalanceCheckStatusQuery }))
     .output(BalanceCheckStatusResponse),
-  /** Every SIM's plan. */
   previewAll: route(
     { kind: 'user', permission: 'balances.query' },
     'GET',
     '/api/balance-checks/query-preview',
   ).output(BalanceQueryPreviewResponse),
-  /** The plan of the SIMs the operator named. */
   preview: route(
     { kind: 'user', permission: 'balances.query' },
     'POST',
@@ -73,10 +70,8 @@ export const balanceChecks = {
     .output(BalanceCheckDetailResponse),
 };
 
-/** The ops scripts' API key; these routes refuse in { success: false, error }. */
 const OPS = { kind: 'daemon', errors: 'flagged' } as const;
 
-/** The balance checks the ops scripts queue, continue, retry and stop. */
 export const balanceCheckControl = {
   // 202: the check is queued; its SMS or browser job runs later.
   create: route(OPS, 'POST', '/api/control/balance-checks')
@@ -96,7 +91,6 @@ export const balanceCheckControl = {
     .output(BalanceCheckStopResponse),
 };
 
-/** The signed-in user's Balance Agent runners and what they can do now. */
 export const balanceRunners = {
   status: route(
     { kind: 'user', permission: 'messages.read' },

@@ -1,9 +1,5 @@
-// Screenshots every dashboard view at desktop and mobile width against a running
-// dev server, and writes report.html beside the images with what the browser
-// reported on each page. It signs in with a short-lived admin session it writes
-// to local KV, and deletes that session when it is done.
-//
-//   bun run screenshots -- --out <dir>
+// bun run screenshots -- --out <dir>: needs a running dev server; signs in with a
+// short-lived admin session written to local KV and deleted afterwards.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -38,7 +34,6 @@ function required(value: string | undefined, flag: string): string {
 const baseUrl = values['base-url'];
 const out = required(values.out, 'out');
 
-/** Runs wrangler against the local state dev-server uses; fails loudly. */
 async function wrangler(args: string[]): Promise<void> {
   const proc = Bun.spawn(['bunx', 'wrangler', ...args], { stdout: 'ignore', stderr: 'pipe' });
   const code = await proc.exited;
@@ -100,8 +95,8 @@ async function capture(
     });
   }
   const file = `${view}-${viewport}.png`;
-  // The viewport, as the operator sees it: on mobile the page itself scrolls,
-  // so a full-page shot of a long message list is tens of thousands of pixels.
+  // Viewport only: on mobile the page itself scrolls, so a full-page shot of a long
+  // message list is tens of thousands of pixels.
   await page.screenshot({ path: join(out, file) });
   const finalHash = new URL(page.url()).hash;
   await page.close();
@@ -110,8 +105,7 @@ async function capture(
 
 await mkdir(out, { recursive: true });
 
-// A session written straight into the local SESSIONS namespace, shaped like the
-// one the Auth0 callback stores, so no person or identity provider takes part.
+// Written straight into the local SESSIONS namespace, shaped like the Auth0 callback's.
 const token = `screenshots-${crypto.randomUUID()}`;
 await wrangler([
   'kv',
@@ -134,7 +128,7 @@ await wrangler([
   }),
 ]);
 
-// The full Chromium build, also headless: the repo installs no headless shell.
+// The repo installs no headless shell, so launch the full Chromium build.
 const browser = await chromium.launch({ channel: 'chromium' });
 const captures: PageCapture[] = [];
 try {

@@ -1,4 +1,3 @@
-/** The OAuth scopes a Balance Agent asks Auth0 for; each runner route requires one. */
 export const RUNNER_SCOPES = Object.freeze({
   heartbeat: 'balance:runners:heartbeat',
   smsAi: 'balance:skills:run',

@@ -15,7 +15,6 @@ import { route } from './route.js';
 
 const Id = v.object({ id: v.string() });
 
-/** Keyword highlighting rules, and the tags they have put on messages. */
 export const keywords = {
   list: route({ kind: 'user', permission: 'keywords.read' }, 'GET', '/api/keywords').output(
     KeywordsResponse,

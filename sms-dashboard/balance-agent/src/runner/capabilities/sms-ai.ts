@@ -27,7 +27,6 @@ interface Logger {
   error(message: string): void;
 }
 
-/** A Dashboard refusal as this capability has always reported it; any other failure as it is. */
 function rejected(prefix: string, error: unknown): unknown {
   if (!(error instanceof ControlError)) return error;
   return new Error(`${prefix} (${String(error.status)}): ${error.body.slice(0, 500)}`, {

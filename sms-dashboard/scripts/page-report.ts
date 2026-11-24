@@ -52,7 +52,6 @@ ${list}
 </section>`;
 }
 
-/** A self-contained page that shows every screenshot beside what the browser reported. */
 export function renderReport(captures: PageCapture[], meta: ReportMeta): string {
   const withIssues = captures.filter((capture) => allIssues(capture).length > 0).length;
   return `<!doctype html>

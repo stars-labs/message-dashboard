@@ -1,4 +1,3 @@
-// Run with: bun test config/auth0-roles.test.ts
 import { describe, expect, test } from 'bun:test';
 import {
   ALL_PERMISSIONS,
@@ -42,8 +41,7 @@ describe('rolesFromToken', () => {
     expect(rolesFromToken({ [CLAIM]: ['admin'] }, config)).toEqual(['admin']);
   });
 
-  // Finding 5: the unnamespaced claim must be ignored entirely, because Auth0 only
-  // guarantees that *namespaced* claims cannot be set by the user.
+  // Auth0 only guarantees that namespaced claims cannot be set by the user.
   test('ignores a top-level roles claim', () => {
     expect(rolesFromToken({ roles: ['admin'] }, config)).toEqual([]);
     expect(rolesFromToken({ roles: ['admin'], other: 1 }, config)).toEqual([]);
@@ -90,19 +88,14 @@ describe('permissionsForRoles', () => {
   test('honours renamed roles', () => {
     const c = createRoleConfig({ AUTH0_ADMIN_ROLE: 'superuser' });
     expect(permissionsForRoles(['superuser'], c).sort()).toEqual([...ALL_PERMISSIONS].sort());
-    // The default name must no longer work once renamed.
     expect(permissionsForRoles(['admin'], c)).toEqual([]);
   });
 
-  // The old `sms` role is gone; existing sessions carrying it must grant nothing.
   test('the retired sms role grants nothing', () => {
     expect(permissionsForRoles(['sms'], config)).toEqual([]);
   });
 });
 
-// P0 regression: routes use `phones.write` but the old SMS_PERMISSIONS list omitted it,
-// so it silently fell through the includes() wrapper. It must be a known permission,
-// admin-only.
 describe('permission coverage', () => {
   const USED_BY_ROUTES: Permission[] = [
     'phones.read',
@@ -183,7 +176,6 @@ describe('hasAnyRole', () => {
   });
 });
 
-// The domain allowlist is a real gate, so it has to resist the obvious dodges.
 describe('isEmailAllowed', () => {
   const env = { ALLOWED_EMAIL_DOMAINS: 'poloniex.com,bitgc.io,tron.network,htx-inc.com' };
   const ok = (email: string, verified = true) =>

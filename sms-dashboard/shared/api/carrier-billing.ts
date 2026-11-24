@@ -1,7 +1,6 @@
 import * as v from 'valibot';
 import { bodyObject } from './body.js';
 
-/** The SIM that receives a billing account's bill messages. */
 export const CarrierBillingNotificationSim = v.object({
   iccid: v.string(),
   sim_index: v.nullable(v.number()),
@@ -10,7 +9,6 @@ export const CarrierBillingNotificationSim = v.object({
 
 export type CarrierBillingNotificationSim = v.InferOutput<typeof CarrierBillingNotificationSim>;
 
-/** A SIM verified as belonging to a billing account. */
 export const CarrierBillingLinkedSim = v.object({
   iccid: v.string(),
   sim_index: v.nullable(v.number()),
@@ -22,7 +20,6 @@ export const CarrierBillingLinkedSim = v.object({
 
 export type CarrierBillingLinkedSim = v.InferOutput<typeof CarrierBillingLinkedSim>;
 
-/** A carrier billing account with its notification SIM and linked SIMs. */
 const CarrierBillingAccount = v.object({
   id: v.string(),
   country_code: v.string(),
@@ -37,7 +34,6 @@ const CarrierBillingAccount = v.object({
   linked_sims: v.array(CarrierBillingLinkedSim),
 });
 
-/** GET /api/carrier-billing/accounts. */
 export const CarrierBillingAccountsResponse = v.object({
   success: v.literal(true),
   accounts: v.array(CarrierBillingAccount),
@@ -50,14 +46,12 @@ const PREVIEW_MESSAGE = 'expected_version must be an integer and preview_digest 
 
 const AccountId = v.pipe(v.string(ACCOUNT_MESSAGE), v.nonEmpty(ACCOUNT_MESSAGE));
 
-/** POST /api/carrier-billing/backfill/preview. */
 export const BackfillPreviewBody = bodyObject(
   { account_id: AccountId },
   { account_id: ACCOUNT_MESSAGE },
   ACCOUNT_MESSAGE,
 );
 
-/** POST /api/carrier-billing/backfill/execute: the preview the operator saw. */
 export const BackfillExecuteBody = bodyObject(
   {
     account_id: AccountId,
@@ -72,7 +66,6 @@ export const BackfillExecuteBody = bodyObject(
   ACCOUNT_MESSAGE,
 );
 
-/** The billing account a backfill preview is for. */
 export const BackfillAccount = v.object({
   id: v.string(),
   display_name: v.string(),
@@ -83,7 +76,6 @@ export const BackfillAccount = v.object({
 
 export type BackfillAccount = v.InferOutput<typeof BackfillAccount>;
 
-/** One historical bill message a backfill would store, and what storing it would do. */
 export const BackfillCandidate = v.object({
   source_message_ids: v.array(v.string()),
   source_kind: v.picklist(['complete', 'reassembled']),
@@ -109,7 +101,6 @@ export const BackfillSummary = v.object({
 
 export type BackfillSummary = v.InferOutput<typeof BackfillSummary>;
 
-/** POST /api/carrier-billing/backfill/preview: the candidates, without their message text. */
 export const BackfillPreviewResponse = v.object({
   success: v.literal(true),
   account: BackfillAccount,
@@ -120,7 +111,7 @@ export const BackfillPreviewResponse = v.object({
 
 export type BackfillPreviewResponse = v.InferOutput<typeof BackfillPreviewResponse>;
 
-/** The outcomes an execution counts; processing can also report 'ignored' and 'failed'. */
+/** Processing can also report 'ignored' and 'failed'. */
 export const BackfillExecuteSummary = v.object({
   detected: v.number(),
   duplicate_detected: v.number(),
@@ -131,10 +122,9 @@ export const BackfillExecuteSummary = v.object({
 export type BackfillExecuteSummary = v.InferOutput<typeof BackfillExecuteSummary>;
 
 /**
- * POST /api/carrier-billing/backfill/execute. A retry with the same key replays
- * the stored summary, which is null when the execution stored none. The replay
- * comes first: an object schema drops keys it does not name, so the plain
- * answer would match a replay and lose its idempotent flag.
+ * A retry with the same key replays the stored summary (null when none was stored). The
+ * replay comes first: an object schema drops unnamed keys, so the plain answer would
+ * match a replay and lose its idempotent flag.
  */
 export const BackfillExecuteResponse = v.union([
   v.object({
@@ -147,7 +137,6 @@ export const BackfillExecuteResponse = v.union([
 
 export type BackfillExecuteResponse = v.InferOutput<typeof BackfillExecuteResponse>;
 
-/** POST /api/carrier-billing/backfill/execute, 409: the members the problem adds for a stale version. */
 export const BackfillVersionConflict = v.object({ current_version: v.number() });
 
 export type BackfillVersionConflict = v.InferOutput<typeof BackfillVersionConflict>;

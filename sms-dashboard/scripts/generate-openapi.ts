@@ -1,5 +1,4 @@
-// Writes openapi.json from the contract. With --check it writes nothing and
-// fails when openapi.json is not what it would write, edited by hand included.
+// --check writes nothing and fails when openapi.json differs, hand edits included.
 import { openapiDocument } from './openapi.js';
 
 const file = Bun.file(new URL('../openapi.json', import.meta.url));

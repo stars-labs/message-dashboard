@@ -1,7 +1,7 @@
 import * as v from 'valibot';
 import { bodyObject } from './body.js';
 
-/** A message as GET /api/messages returns it: the row plus its SIM's device fields. */
+/** The row plus its SIM's device fields. */
 export const ApiMessage = v.object({
   id: v.string(),
   phone_iccid: v.nullable(v.string()),
@@ -31,7 +31,7 @@ export const ApiMessage = v.object({
 
 export type ApiMessage = v.InferOutput<typeof ApiMessage>;
 
-/** GET /api/messages. An incremental page (`since` given) pages by cursor, a full one by offset. */
+/** An incremental page (`since` given) pages by cursor, a full one by offset. */
 export const MessagePage = v.object({
   success: v.literal(true),
   data: v.array(ApiMessage),
@@ -52,7 +52,6 @@ export const MessagePage = v.object({
 
 export type MessagePage = v.InferOutput<typeof MessagePage>;
 
-/** POST /api/messages/send: the queued outbound message. */
 export const SendMessageResponse = v.object({
   success: v.literal(true),
   messageId: v.string(),
@@ -69,10 +68,7 @@ export const SendMessageResponse = v.object({
 
 export type SendMessageResponse = v.InferOutput<typeof SendMessageResponse>;
 
-/**
- * GET /api/messages query. Every value stays text: the route bounds limit and
- * offset, and checks the timestamps and cursor, as it always has.
- */
+/** Every value stays text: the route bounds limit and offset and checks the timestamps and cursor. */
 export const MessagesQuery = v.object({
   phone_iccid: v.optional(v.string()),
   limit: v.optional(v.string()),
@@ -89,7 +85,7 @@ const SEND_REQUIRED_MESSAGE =
 
 const SendField = v.pipe(v.string(SEND_REQUIRED_MESSAGE), v.nonEmpty(SEND_REQUIRED_MESSAGE));
 
-/** POST /api/messages/send. The recipient is checked further by normalizeRecipient. */
+/** The recipient is checked further by normalizeRecipient. */
 export const SendMessageBody = bodyObject(
   { phone_iccid: SendField, recipient: SendField, content: SendField },
   {

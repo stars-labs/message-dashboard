@@ -15,10 +15,8 @@ import {
 } from '../calls.js';
 import { route } from './route.js';
 
-/** Whoever may read SMS may call. */
 const CALLER = { kind: 'user', permission: 'messages.read' } as const;
 
-/** Voice calls from the dashboard, through the Realtime SFU to a modem on the Pi. */
 export const calls = {
   state: route(CALLER, 'GET', '/api/calls/state').output(CallStateResponse),
   history: route(CALLER, 'GET', '/api/calls/history')

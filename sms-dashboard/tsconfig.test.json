@@ -1,4 +1,3 @@
-// Tests of the areas that have joined the strict gate. They run under Bun.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {

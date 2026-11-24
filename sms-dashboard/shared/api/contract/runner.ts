@@ -25,15 +25,13 @@ import { JobParams, RunnerIdQuery } from '../runner-jobs.js';
 import { RUNNER_SCOPES } from '../runner-scopes.js';
 import { route } from './route.js';
 
-// The routes the Balance Agent calls. It is a desktop app already shipped, so
-// their wire format is pinned by shared/control-fixtures/runner/, which the
-// Agent is tested against too.
+// The Balance Agent is a shipped desktop app: these routes' wire format is pinned by
+// shared/control-fixtures/runner/.
 
 const PRESENCE = { kind: 'runner', scope: RUNNER_SCOPES.heartbeat } as const;
 
 const SMS_AI = { kind: 'runner', scope: RUNNER_SCOPES.smsAi } as const;
 
-/** The SMS menu replies the Agent's company AI decides on, one leased job at a time. */
 const balanceSkillJobs = {
   // 204: no job is waiting for this runner's account.
   claim: route(SMS_AI, 'GET', '/api/control/balance-skills/jobs/claim')
@@ -59,7 +57,6 @@ const BROWSER = { kind: 'runner', scope: RUNNER_SCOPES.carrierBrowser } as const
 
 const WEB_JOBS = '/api/control/carrier-web-balance/jobs';
 
-/** The carrier portal queries the Agent runs in a browser, one leased job at a time. */
 const carrierWebJobs = {
   // 204: no job is waiting for this runner's account.
   claim: route(BROWSER, 'GET', `${WEB_JOBS}/claim`)
@@ -103,7 +100,6 @@ const carrierWebJobs = {
     .output(WebJobActionResponse),
 };
 
-/** The Agent's sign-in check and its presence. */
 const balanceRunnerControl = {
   check: route(PRESENCE, 'GET', '/api/control/balance-runners/check').output(RunnerCheckResponse),
   heartbeat: route(PRESENCE, 'POST', '/api/control/balance-runners/heartbeat')
@@ -111,5 +107,4 @@ const balanceRunnerControl = {
     .output(RunnerHeartbeatResponse),
 };
 
-/** Every route the Balance Agent calls: its client is built from this alone. */
 export const runnerContract = { balanceRunnerControl, balanceSkillJobs, carrierWebJobs };

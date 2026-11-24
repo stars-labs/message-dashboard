@@ -98,10 +98,8 @@ describe('prepaid health policy', () => {
   });
 
   test('unknown countries fall back to UTC instead of failing', () => {
-    // country comes from D1 unvalidated. Only CN/SG/HK have a zone; anything
-    // else (including a future country) must still produce a verdict. This
-    // pins the fallback so a future COUNTRY_TIME_ZONES entry with a bad ICU
-    // identifier cannot turn into a thrown RangeError here.
+    // country comes from D1 unvalidated; only CN/SG/HK have a zone, and any other must
+    // still produce a verdict.
     const result = evaluate({
       country: 'ZZ',
       accountExpiry: { date: '2099-12-31' },

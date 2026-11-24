@@ -1,6 +1,3 @@
-// The agent's side of the runner fixtures the Worker is replayed against
-// (sms-dashboard/server/control-fixtures.test.ts): the agent must send the
-// recorded requests and act on the recorded answers.
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
 import {
@@ -16,7 +13,6 @@ import { createSmsAiCapability } from './capabilities/sms-ai.js';
 import type { ControlClient } from './control-client.js';
 import { createRunnerPresence } from './presence.js';
 
-/** A control client that answers with the given fixtures, in order, and records what it was sent. */
 function replaying(...fixtures: ControlFixture[]): { client: ControlClient; sent: Sent[] } {
   const queue = [...fixtures];
   return fakeControlClient(({ path }) => {

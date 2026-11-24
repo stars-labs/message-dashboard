@@ -32,12 +32,9 @@ import {
 import { createSecureStore } from './secure-store.js';
 import { createSettingsStore } from './settings-store.js';
 
-// Write to ~/Library/Logs/Balance Agent/main.log (macOS).
-// Errors and above are also echoed to the terminal.
 log.initialize();
 log.transports.file.level = 'debug';
 log.transports.console.level = 'warn';
-// Catch any uncaught exceptions / unhandled rejections before app is ready.
 log.errorHandler.startCatching({ showDialog: false });
 
 const gotLock = app.requestSingleInstanceLock();

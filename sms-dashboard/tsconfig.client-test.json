@@ -1,5 +1,4 @@
-// Tests of the client. They run under
-// Bun with happy-dom installing the DOM (bunfig.client.toml), so they see both.
+// Run under Bun with happy-dom installing the DOM (bunfig.client.toml), so they see both.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {

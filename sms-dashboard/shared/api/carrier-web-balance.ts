@@ -3,7 +3,6 @@ import { ACTIVE_WEB_JOB_STATUSES } from '../balance-status.js';
 import { bodyObject } from './body.js';
 import { RUNNER_ID_REQUIRED } from './runner-jobs.js';
 
-/** The portal configuration a job carries; each provider reads its own fields. */
 const CarrierWebBalanceSkill = v.looseObject({
   id: v.string(),
   query_origin: v.optional(v.unknown()),
@@ -13,7 +12,6 @@ const CarrierWebBalanceSkill = v.looseObject({
   cooldown_seconds: v.optional(v.number()),
 });
 
-/** GET /api/control/carrier-web-balance/jobs/claim, when a job was leased. */
 export const CarrierWebBalanceJob = v.object({
   id: v.string(),
   check_id: v.string(),
@@ -27,14 +25,9 @@ export const CarrierWebBalanceJob = v.object({
 
 export type CarrierWebBalanceJob = v.InferOutput<typeof CarrierWebBalanceJob>;
 
-/** Where the runner stopped reading candidate messages; the next poll starts after it. */
 const OtpCursor = v.object({ created_at: v.string(), source_message_id: v.string() });
 
-/**
- * GET .../claim on the wire. The skill is the stored configuration passed on
- * as it is: a record keeps its key order, which an object schema would
- * rewrite. CarrierWebBalanceJob is how the Agent reads it.
- */
+/** The skill is a record so its stored key order survives; an object schema would rewrite it. */
 export const CarrierWebBalanceJobWire = v.object({
   ...CarrierWebBalanceJob.entries,
   skill: v.pipe(
@@ -45,7 +38,6 @@ export const CarrierWebBalanceJobWire = v.object({
 
 export type CarrierWebBalanceJobWire = v.InferOutput<typeof CarrierWebBalanceJobWire>;
 
-/** GET .../otp on the wire: the code, or where the next poll starts when none matched. */
 export const CarrierWebBalanceOtpWire = v.union([
   v.object({ code: v.null(), cursor: OtpCursor }),
   v.object({ code: v.string() }),
@@ -53,7 +45,6 @@ export const CarrierWebBalanceOtpWire = v.union([
 
 export type CarrierWebBalanceOtpWire = v.InferOutput<typeof CarrierWebBalanceOtpWire>;
 
-/** ?runner_id=&after_created_at=&after_source_message_id= on an OTP poll. */
 export const WebJobOtpQuery = v.object(
   {
     runner_id: v.pipe(v.string(RUNNER_ID_REQUIRED), v.trim()),
@@ -63,10 +54,8 @@ export const WebJobOtpQuery = v.object(
   RUNNER_ID_REQUIRED,
 );
 
-// A job action's body as the contract reads it: runner_id, which picks the
-// lease, and the action's own fields unread. The handler reads those with the
-// action's Fields schema once the lease holds, so a runner without the lease is
-// refused as such whatever else its body gets wrong.
+// The contract reads only runner_id; the handler parses the action's own fields once the
+// lease holds, so a runner without the lease is refused as such whatever else its body gets wrong.
 const RunnerId = v.string(RUNNER_ID_REQUIRED);
 const Unread = v.optional(v.unknown());
 const NEEDS_RUNNER_ID = { runner_id: RUNNER_ID_REQUIRED } as const;
@@ -75,7 +64,6 @@ const INVALID_STATUS = 'Invalid web job status';
 const INVALID_BALANCE = 'balance is invalid';
 const ERROR_NOT_TEXT = 'error must be text';
 
-/** POST .../otp-requested. */
 export const WebJobLeaseBody = bodyObject(
   { runner_id: RunnerId },
   NEEDS_RUNNER_ID,
@@ -83,7 +71,6 @@ export const WebJobLeaseBody = bodyObject(
   RUNNER_ID_REQUIRED,
 );
 
-/** POST .../heartbeat. */
 export const WebJobHeartbeatBody = bodyObject(
   { runner_id: RunnerId, status: Unread, reason: Unread },
   NEEDS_RUNNER_ID,
@@ -99,10 +86,9 @@ export const WebJobHeartbeatFields = v.object(
   INVALID_STATUS,
 );
 
-/** A completion field whose wrong type means the same as its absence: the handler's checks answer it. */
+/** A wrong type means the same as absence: the handler's checks answer it. */
 const OptionalText = v.fallback(v.optional(v.string()), undefined);
 
-/** POST .../complete. */
 export const WebJobCompleteBody = bodyObject(
   {
     runner_id: RunnerId,
@@ -130,7 +116,6 @@ export const WebJobCompleteFields = v.object(
   INVALID_BALANCE,
 );
 
-/** POST .../fail and .../release. */
 export const WebJobErrorBody = bodyObject(
   { runner_id: RunnerId, error: Unread },
   NEEDS_RUNNER_ID,

@@ -3,7 +3,6 @@ import { MessagePage, MessagesQuery, SendMessageBody, SendMessageResponse } from
 import { PhonesResponse } from '../phones.js';
 import { route } from './route.js';
 
-/** The SIMs, their messages, and sending one. */
 export const messages = {
   phones: route({ kind: 'user', permission: 'phones.read' }, 'GET', '/api/phones').output(
     PhonesResponse,

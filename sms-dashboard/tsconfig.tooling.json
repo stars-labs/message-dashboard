@@ -1,5 +1,3 @@
-// Build and lint tooling: ESLint's own config runs under Bun, not in the Worker
-// or the browser.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {

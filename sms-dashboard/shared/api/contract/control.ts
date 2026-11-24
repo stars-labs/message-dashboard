@@ -19,7 +19,6 @@ import {
 import { NOT_JSON_MESSAGE } from '../body.js';
 import { route } from './route.js';
 
-/** The daemon's API key; the route refuses in { success: false, error }. */
 const DAEMON = { kind: 'daemon', errors: 'flagged' } as const;
 
 export const HeartbeatResponse = v.object({
@@ -30,13 +29,10 @@ export const HeartbeatResponse = v.object({
 
 export type HeartbeatResponse = v.InferOutput<typeof HeartbeatResponse>;
 
-/**
- * The routes the Pi daemon calls. Their wire format is pinned by
- * shared/control-fixtures/, which the daemon is tested against too.
- */
+/** The Pi daemon's routes; their wire format is pinned by shared/control-fixtures/. */
 export const control = {
-  // The snapshot is read field by field (normalizeHealthSnapshot), so a daemon
-  // a version ahead or behind gets the refusal it always got.
+  // The snapshot is read field by field (normalizeHealthSnapshot), so a daemon a version
+  // ahead or behind gets the same refusal.
   heartbeat: route(DAEMON, 'POST', '/api/control/heartbeat')
     .input(
       v.pipe(
@@ -45,7 +41,7 @@ export const control = {
       ),
     )
     .output(HeartbeatResponse),
-  // The one route that refuses a report in { error }, as it always has.
+  // Refuses a report in { error }.
   devices: route({ kind: 'daemon', errors: 'plain' }, 'POST', '/api/control/devices')
     .input(DevicesBody)
     .output(DevicesResponse),
@@ -60,8 +56,8 @@ export const control = {
   smsResult: route(DAEMON, 'POST', '/api/control/sms-result')
     .input(SmsResultBody)
     .output(SmsResultResponse),
-  // The call reports refuse in { error }; a ring while another call is active
-  // answers 409 { ok: false, reason }, which the daemon expects.
+  // The call reports refuse in { error }; a ring while another call is active answers
+  // 409 { ok: false, reason }, which the daemon expects.
   callIncoming: route({ kind: 'daemon', errors: 'plain' }, 'POST', '/api/control/calls/incoming')
     .input(IncomingCallBody)
     .output(IncomingCallResponse),

@@ -4,14 +4,10 @@ import { ALL_PERMISSIONS } from '../../../config/auth0-roles.js';
 import { ALL_RUNNER_SCOPES } from '../runner-scopes.js';
 
 /**
- * Who may call a route: anyone (`public`), anyone signed in whatever their role
- * (`session`), a signed-in user holding a permission (`user`), the API key the
- * Pi daemon and the ops scripts hold (`daemon`), or a Balance Agent holding the
- * API key or an Auth0 token with the route's scope (`runner`). A daemon route
- * also says how it refuses a request: `{ error }` (`plain`) or
- * `{ success: false, error }` (`flagged`), as each did before the contract; a
- * runner route refuses in `{ error }`. shared/control-fixtures/ and the route
- * tests pin them.
+ * `session`: signed in, any role. `daemon`: the API key the Pi daemon and ops scripts hold.
+ * `runner`: the API key or an Auth0 token with the route's scope. A daemon route says how
+ * it refuses: `{ error }` (`plain`) or `{ success: false, error }` (`flagged`); a runner
+ * route refuses in `{ error }`. shared/control-fixtures/ pins them.
  */
 export const Access = v.variant('kind', [
   v.strictObject({ kind: v.literal('public') }),
@@ -29,10 +25,7 @@ export const Method = v.picklist(['GET', 'POST', 'PUT', 'DELETE']);
 
 type Method = v.InferOutput<typeof Method>;
 
-/**
- * A route of the contract. The only way to declare one, so no route exists
- * without saying who may call it.
- */
+/** The only way to declare a route, so none exists without saying who may call it. */
 export function route(access: Access, method: Method, path: `/api/${string}`) {
   return oc.$meta<v.InferOutput<typeof RouteMeta>>({ access }).route({ method, path });
 }

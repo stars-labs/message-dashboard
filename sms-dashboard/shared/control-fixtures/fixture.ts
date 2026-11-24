@@ -1,12 +1,9 @@
 import * as v from 'valibot';
 
 /**
- * One exchange on a /api/control/ route as the Pi daemon or the Balance Agent
- * performs it today. The Worker must answer the request with exactly this
- * response, and each client must send the body and read the answer, so a
- * change on either side fails a test. A response without a body has none.
- * A request carries the API key unless it is `anonymous`; `text` is a body
- * sent as is, for requests that are not JSON.
+ * One exchange on a /api/control/ route: the Worker must answer exactly this, and each
+ * client must send the body and read the answer. A request carries the API key unless it
+ * is `anonymous`; `text` is a body sent as is, for requests that are not JSON.
  */
 export const ControlFixture = v.strictObject({
   request: v.strictObject({

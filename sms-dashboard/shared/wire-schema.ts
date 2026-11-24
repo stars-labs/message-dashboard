@@ -4,11 +4,7 @@ type Primitive = string | number | boolean | null | undefined;
 
 type Present<T> = NonNullable<T>;
 
-/**
- * The keys of `Wire`, at any depth, that `Input` does not declare and that are
- * not listed in `Ignored`. A Rust field the schema never names would otherwise
- * be stripped by valibot without anyone noticing.
- */
+/** Valibot would strip a Rust field the schema never names without anyone noticing. */
 type UndeclaredKeys<Wire, Input, Ignored extends string> = [Present<Wire>] extends [Primitive]
   ? never
   : [Present<Wire>] extends [readonly (infer WireItem)[]]
@@ -32,10 +28,8 @@ type WireCheck<Wire, Schema extends v.GenericSchema, Ignored extends string> = [
   : { readonly schemaRejectsTheWireType: Wire };
 
 /**
- * Binds a schema to the Rust wire type the daemon sends. The schema may be more
- * tolerant than Rust (a missing nullable field, a looser enum), so the check is
- * that every value of the wire type is an input the schema accepts, and that the
- * schema names every field Rust sends except those in `Ignored`.
+ * The schema may be more tolerant than Rust, so the check is that every wire value is an
+ * accepted input and that the schema names every field Rust sends except `Ignored`.
  */
 export function acceptsWire<Wire, Ignored extends string = never>() {
   return <Schema extends v.GenericSchema>(

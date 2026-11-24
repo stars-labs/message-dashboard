@@ -2,7 +2,6 @@ import * as v from 'valibot';
 import { DEFAULT_KEYWORD_COLOR, normalizeKeywordColor } from '../keyword-color.js';
 import { bodyObject } from './body.js';
 
-/** A keyword_tags row, every column. */
 export const Keyword = v.object({
   id: v.number(),
   keyword: v.string(),
@@ -19,17 +18,14 @@ export const Keyword = v.object({
 
 export type Keyword = v.InferOutput<typeof Keyword>;
 
-/** A keyword with how many messages it has tagged. */
 export const KeywordWithUsage = v.object({ ...Keyword.entries, usage_count: v.number() });
 
 export type KeywordWithUsage = v.InferOutput<typeof KeywordWithUsage>;
 
-/** GET /api/keywords. */
 export const KeywordsResponse = v.object({ keywords: v.array(KeywordWithUsage) });
 
 export type KeywordsResponse = v.InferOutput<typeof KeywordsResponse>;
 
-/** POST /api/keywords and PUT /api/keywords/:id. */
 export const KeywordResponse = v.object({ keyword: Keyword });
 
 export type KeywordResponse = v.InferOutput<typeof KeywordResponse>;
@@ -48,9 +44,8 @@ const Required = v.pipe(v.string(REQUIRED_MESSAGE), v.nonEmpty(REQUIRED_MESSAGE)
 const Priority = v.pipe(v.number(PRIORITY_MESSAGE), v.integer(PRIORITY_MESSAGE));
 
 /**
- * A colour is applied to a CSS custom property in every operator's browser, so
- * a supplied one must be a hex literal. null and '' mean "not supplied" and
- * resolve to `blank`.
+ * A colour reaches a CSS custom property in every operator's browser, so it must be a hex
+ * literal. null and '' mean "not supplied" and resolve to `blank`.
  */
 function colour<Blank>(blank: Blank) {
   return v.pipe(
@@ -65,7 +60,6 @@ function colour<Blank>(blank: Blank) {
   );
 }
 
-/** POST /api/keywords. */
 export const CreateKeywordBody = bodyObject(
   {
     keyword: Required,
@@ -78,7 +72,7 @@ export const CreateKeywordBody = bodyObject(
   { keyword: REQUIRED_MESSAGE, tag: REQUIRED_MESSAGE },
 );
 
-/** PUT /api/keywords/:id. Only tag, colour, priority and is_active may change. */
+/** Only tag, colour, priority and is_active may change. */
 export const UpdateKeywordBody = bodyObject(
   {
     keyword: v.optional(v.string(KEYWORD_MESSAGE)),
@@ -92,13 +86,11 @@ export const UpdateKeywordBody = bodyObject(
   {},
 );
 
-/** POST /api/messages/batch-tags. */
 export const BatchTagsBody = bodyObject(
   { messageIds: v.array(v.string(MESSAGE_IDS_MESSAGE), MESSAGE_IDS_MESSAGE) },
   { messageIds: MESSAGE_IDS_MESSAGE },
 );
 
-/** A keyword match in one message, as the batch answer lists it. */
 const BatchTag = v.object({
   id: v.number(),
   keyword: v.string(),
@@ -109,7 +101,6 @@ const BatchTag = v.object({
   length: v.number(),
 });
 
-/** POST /api/messages/batch-tags: each message's matches, by message id. */
 export const BatchTagsResponse = v.object({
   success: v.literal(true),
   data: v.record(v.string(), v.array(BatchTag)),
@@ -117,7 +108,6 @@ export const BatchTagsResponse = v.object({
 
 export type BatchTagsResponse = v.InferOutput<typeof BatchTagsResponse>;
 
-/** A stored keyword match, with the keyword it came from. */
 export const MessageTag = v.object({
   message_id: v.string(),
   keyword_tag_id: v.number(),
@@ -129,7 +119,6 @@ export const MessageTag = v.object({
   color: v.nullable(v.string()),
 });
 
-/** GET /api/messages/:id/tags. */
 export const MessageTagsResponse = v.object({ tags: v.array(MessageTag) });
 
 export type MessageTagsResponse = v.InferOutput<typeof MessageTagsResponse>;

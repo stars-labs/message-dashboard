@@ -1,12 +1,10 @@
 import * as v from 'valibot';
 import { bodyObject } from './body.js';
 
-/** Keyset cursor for the next page of a history run. */
 export const HistoryCursor = v.object({ created_at: v.string(), id: v.string() });
 
 export type HistoryCursor = v.InferOutput<typeof HistoryCursor>;
 
-/** POST /api/filters/:id/history: one page of applying or releasing a rule. */
 export const RuleHistoryPage = v.object({
   mode: v.picklist(['apply', 'release']),
   processed: v.number(),
@@ -17,7 +15,6 @@ export const RuleHistoryPage = v.object({
 
 export type RuleHistoryPage = v.InferOutput<typeof RuleHistoryPage>;
 
-/** POST /api/keywords/:id/history: one page of tagging history with a keyword. */
 export const KeywordHistoryPage = v.object({
   processed: v.number(),
   eligible: v.number(),
@@ -49,7 +46,6 @@ const HistoryCursorBody = v.object(
   CURSOR_MESSAGE,
 ) satisfies v.GenericSchema<unknown, HistoryCursor>;
 
-/** Body of the one-page-at-a-time history routes for filter rules and keywords. */
 export const HistoryRequestBody = v.pipe(
   bodyObject(
     { since: Instant, until: Instant, cursor: v.nullish(HistoryCursorBody) },

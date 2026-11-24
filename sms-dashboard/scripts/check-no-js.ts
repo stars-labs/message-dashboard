@@ -1,7 +1,5 @@
-// Fails when the dashboard holds a JavaScript source file, tracked or about to
-// be: every area is TypeScript, and a .js file would sit outside every tsconfig
-// and lint rule. Generated and ignored files (dist/, server/frontend-assets.js)
-// are not listed by git, so they do not count.
+// A .js file would sit outside every tsconfig and lint rule. Ignored generated files
+// (dist/, server/frontend-assets.js) are not listed by git, so they do not count.
 import { join } from 'node:path';
 
 const listed = Bun.spawnSync(

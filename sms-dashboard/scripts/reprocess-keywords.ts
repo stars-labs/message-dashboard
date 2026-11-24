@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-// This script requires Auth0 authentication
 console.log('The reprocess endpoint requires Auth0 authentication.');
 console.log('Please use the web interface to reprocess keywords:');
 console.log('1. Go to https://sexy.itoken.world');

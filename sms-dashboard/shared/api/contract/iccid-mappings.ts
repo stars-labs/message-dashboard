@@ -15,7 +15,6 @@ import { route } from './route.js';
 
 const Id = v.object({ id: v.string() });
 
-/** The SIM inventory: which ICCID is which number, card slot and service. */
 export const iccidMappings = {
   list: route({ kind: 'user', permission: 'phones.read' }, 'GET', '/api/iccid-mappings')
     .route({ inputStructure: 'detailed' })

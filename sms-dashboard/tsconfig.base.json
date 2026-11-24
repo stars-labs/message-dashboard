@@ -1,7 +1,4 @@
-// Compiler options shared by every area's project; tsconfig.json lists the
-// projects and `bun run typecheck` (tsc -b) checks them all. Nothing here
-// emits: Bun, Vite and wrangler strip types themselves, so only syntax they
-// can erase is allowed (erasableSyntaxOnly).
+// Bun, Vite and wrangler strip types themselves, so only erasable syntax is allowed.
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {

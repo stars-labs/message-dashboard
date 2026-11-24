@@ -1,6 +1,6 @@
 import type { Permission } from '../config/auth0-roles.js';
 
-/** The dashboard's hash routes, in navigation order, and the permission each requires. */
+/** In navigation order. */
 export const VIEW_PERMISSION = {
   dashboard: 'messages.read',
   send: 'messages.send',

@@ -1,6 +1,5 @@
 import * as v from 'valibot';
 
-/** One SIM slot as GET /api/phones returns it: a device_view row under the client's names. */
 export const Phone = v.object({
   id: v.string(),
   imei: v.nullable(v.string()),

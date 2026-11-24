@@ -1,6 +1,5 @@
 import * as v from 'valibot';
 
-/** The user the login callback stores in the session and the middleware attaches to requests. */
 export const SessionUser = v.object({
   id: v.string(),
   sub: v.optional(v.string()),
@@ -13,7 +12,6 @@ export const SessionUser = v.object({
 
 export type SessionUser = v.InferOutput<typeof SessionUser>;
 
-/** GET /api/auth/me: the signed-in user with the permissions their roles grant. */
 export const MeResponse = v.object({
   success: v.literal(true),
   user: v.object({ ...SessionUser.entries, permissions: v.array(v.string()) }),

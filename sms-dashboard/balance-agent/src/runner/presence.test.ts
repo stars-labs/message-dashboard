@@ -20,7 +20,6 @@ function heartbeatBody({ body }: { body: unknown }): Heartbeat {
   return v.parse(Heartbeat, body);
 }
 
-/** A control client that accepts every heartbeat, as the Worker answers it. */
 function accepting() {
   return fakeControlClient(() => jsonAnswer({ success: true, runner_id: 'workstation' }));
 }

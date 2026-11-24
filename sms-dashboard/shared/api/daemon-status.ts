@@ -4,10 +4,10 @@ import { acceptsWire } from '../wire-schema.js';
 
 export const HEALTH_SCHEMA_VERSION = 3;
 
-/** Ages in seconds. `null` means "never happened"; the daemon omits them on first boot. */
+/** Seconds. `null` means "never happened"; the daemon omits them on first boot. */
 const Age = v.nullable(v.number());
 
-/** The normalized snapshot the daemon uploads, stored as JSON in daemon_health.metadata. */
+/** Stored as JSON in daemon_health.metadata. */
 export const HealthSnapshot = acceptsWire<WireHealthSnapshot>()(
   v.object({
     schema_version: v.literal(HEALTH_SCHEMA_VERSION),
@@ -31,10 +31,6 @@ export const DAEMON_HEALTH_STATUSES = ['unknown', 'offline', 'degraded', 'health
 
 const DaemonHealthStatus = v.picklist(DAEMON_HEALTH_STATUSES);
 
-/**
- * GET /api/daemon/status: the daemon's last heartbeat, or, before it has ever
- * connected, why there is none.
- */
 export const DaemonStatusResponse = v.union([
   v.object({
     status: DaemonHealthStatus,

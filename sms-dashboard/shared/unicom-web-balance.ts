@@ -1,16 +1,13 @@
-/** A candidate balance and where it was found, for diagnostics. */
 interface BalanceCandidate {
   amount: number;
   path: string;
 }
 
-/** A candidate account number and where it was found. */
 interface AccountCandidate {
   value: string;
   path: string;
 }
 
-/** What a Unicom web balance query proves. */
 interface UnicomWebBalance {
   balance: number;
   currency: 'CNY';
@@ -107,13 +104,10 @@ function parseMoney(value: unknown): number | null {
   return amountText === undefined ? null : Number(amountText);
 }
 
-// The portal's balance endpoint answers with a flat object whose account balance
-// is `curntbalancecust`. Its itemised bill breakdown nests unrelated `balance`
-// fields, so this is read by exact key instead of joining BALANCE_KEYS — the
-// generic scan would otherwise collect several candidates and refuse the response.
+// The itemised bill breakdown nests unrelated `balance` fields, so the account balance is
+// read by exact key; the generic BALANCE_KEYS scan would collect several candidates.
 const ACCOUNT_BALANCE_KEY = 'curntbalancecust';
 
-// Exported so the browser workflow can identify the authenticated response.
 export const UNICOM_BALANCE_FIELD = ACCOUNT_BALANCE_KEY;
 
 function explicitAccountBalance(payload: unknown): BalanceCandidate | null {
@@ -143,8 +137,6 @@ export function extractUnicomWebBalance(
   }
   walk(payload, (key, value, path) => {
     const normalized = normalizedKey(key);
-    // Skipped once the exact key matched: the nested bill breakdown repeats
-    // `balance` for individual charge items, which are not account balances.
     if (!explicit && BALANCE_KEYS.has(normalized)) {
       const amount = parseMoney(value);
       if (amount !== null) balances.push({ amount, path: path.join('.') });

@@ -69,8 +69,7 @@ describe('company AI liveness probe', () => {
   });
 
   test('waits long enough for the slow gateway, and not forever', async () => {
-    // The live gateway answers in ~3.9s. Capture the real abort timing so a
-    // regression back to a tight budget fails here instead of in production.
+    // The live gateway answers in ~3.9s; a tight probe budget must fail here.
     let abortedAt: number | null = null;
     const fetchImpl: CompanyAIProbeFetch = async (_url, options) => {
       const started = Date.now();
@@ -87,7 +86,6 @@ describe('company AI liveness probe', () => {
     };
     const reachable = await companyAIReachable('https://ai.example.com/api/cc', fetchImpl);
     expect(reachable).toBe(true);
-    // It must not have aborted at the old 5s budget boundary mid-flight.
     expect(abortedAt).toBeNull();
   });
 });
