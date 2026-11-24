@@ -120,7 +120,7 @@ touch a modem:
   fields joined by newlines; segments are percent-encoded. A path cannot be
   changed to dial another number, expires after an hour, and a finished call id
   cannot be restarted. The same test vector is asserted in
-  `orange-pi-daemon/src/voice_auth.rs` and `sms-dashboard/server/api/calls.test.js`.
+  `orange-pi-daemon/src/voice_auth.rs` and `sms-dashboard/server/handlers/calls.test.ts`.
 
 ### Components
 
@@ -133,7 +133,7 @@ touch a modem:
 | Packet framing, resampling | `orange-pi-daemon/src/voice_codec.rs` |
 | Host-side pacing and `+QPCMV` flow control | `orange-pi-daemon/src/voice_pacer.rs` |
 | Enable switch | NixOS `services.sms-daemon.voiceBridgeDomain` (adds `CAP_NET_BIND_SERVICE`) |
-| Worker routes | `sms-dashboard/server/api/calls.js` |
+| Worker routes | `sms-dashboard/server/handlers/calls.ts` |
 | Call log schema | `sms-dashboard/migrations/077_add_call_log.sql` |
 | Browser orchestration | `sms-dashboard/client/lib/call-session.js`, `call-client.js` |
 | UI | `sms-dashboard/client/lib/CallPanel.svelte`, wired in `App.svelte` |

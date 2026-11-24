@@ -9,7 +9,7 @@
 //!    `SMS_API_KEY`, binding the call id, leg, action, SIM, number and expiry.
 //!    A path cannot be altered to dial a different number or reused after expiry.
 //!
-//! Path shape, built by `sms-dashboard/server/api/calls.js`:
+//! Path shape, built by `sms-dashboard/server/handlers/calls.ts`:
 //! `/voice/{callId}/{leg}/{action}/{iccid}/{number}/{exp}/{sig}`
 
 use crate::identifiers::{Iccid, PhoneNumber};
@@ -224,7 +224,7 @@ pub fn is_cloudflare_ip(ip: IpAddr) -> bool {
 mod tests {
     use super::*;
 
-    /// Shared with `sms-dashboard/server/api/calls.test.js`; computed with
+    /// Shared with `sms-dashboard/server/handlers/calls.test.ts`; computed with
     /// `openssl dgst -sha256 -hmac test-key`.
     const VECTOR_PATH: &str = "/voice/11111111-1111-4111-8111-111111111111/up/dial/8965012306052373985/+6592953543/1800000000/2228b401ad42d60138d9f2131e8b4056a77fe21d77ab41810698a0bae6f1e325";
 

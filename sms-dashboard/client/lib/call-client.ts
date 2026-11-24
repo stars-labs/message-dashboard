@@ -41,7 +41,7 @@ export async function fetchCallState(): Promise<LiveCall | null> {
 }
 
 /**
- * Same rule the Worker enforces in server/api/calls.ts. Checking it here first
+ * Same rule the Worker enforces in server/handlers/calls.ts. Checking it here first
  * gives an instant message instead of a round trip that is certain to fail.
  */
 export function isValidE164(value: unknown): boolean {
