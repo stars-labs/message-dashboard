@@ -29,9 +29,8 @@ bun run check:schema-drift
 
 ## Orange Pi Daemon
 
-This file is the **single source of truth** for the Orange Pi host. Keep the
-derived command examples in `README.md`, `docs/README.md`, and
-`docs/INVENTORY-README.md` synchronized with it.
+This file is the **single source of truth** for the Orange Pi host: other docs
+link here rather than repeat its address or commands.
 
 Target: `root@10.171.150.102` (fixed LAN address, NixOS aarch64).
 
