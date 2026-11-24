@@ -1,7 +1,20 @@
 import { ORPCError } from '@orpc/server';
 import { json } from '../lib/response.js';
 import * as v from 'valibot';
-import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
+import type { D1, D1Batch } from '../lib/d1.js';
+import {
+  deleteAllMessages,
+  failUnsendableMessages,
+  insertReceivedMessage,
+  listMessagesByIds,
+  listSendingMessageIds,
+  markMessagesProcessing,
+  markStaleProcessingMessagesUnknown,
+  updateSmsResult,
+  upsertDaemonHeartbeat,
+} from '../db/daemon.js';
+import { insertKeywordMatches, listActiveKeywordMatchers } from '../db/keywords.js';
+import { disconnectModems, disconnectModemsAbsentFrom, upsertModemReports } from '../db/modems.js';
 import { secretMatches } from '../lib/secret.js';
 import { textOr } from '../../shared/text.js';
 import type { PendingSms } from '../../shared/daemon-wire/PendingSms.js';
@@ -46,25 +59,6 @@ interface StoredMessage {
   purpose: 'user' | 'balance_maintenance';
   balance_check_id: string | null;
 }
-
-const IdRow = v.object({ id: v.string() });
-
-const PendingMessageRow = v.object({
-  id: v.string(),
-  phone_iccid: v.string(),
-  phone_number: v.nullable(v.string()),
-  content: v.string(),
-  recipient: v.pipe(v.string(), v.brand('SmsAddress')),
-  purpose: v.picklist(['user', 'balance_maintenance']),
-  created_at: v.string(),
-});
-
-const KeywordRow = v.object({
-  id: v.number(),
-  keyword: v.string(),
-  case_sensitive: v.nullable(v.number()),
-  whole_word: v.nullable(v.number()),
-});
 
 const SMS_STATUS_FOR_OUTCOME: Readonly<Record<SmsOutcome, string>> = {
   confirmed: 'sent',
@@ -173,145 +167,19 @@ export const controlHandler = {
       const verificationStatus = sync_mode === 'full' ? 'verified' : null;
       const lastVerifiedSession = sync_mode === 'full' ? session_id : null;
 
-      const statements = acceptedReports.map((report) =>
-        env.DB.prepare(
-          `
-        INSERT INTO modems (
-          equipment_id, manufacturer, model, firmware_revision,
-          hardware_revision, detected_iccid, detected_phone_number,
-          detected_operator, signal_percent, rssi,
-          modem_index, usb_port, usb_path, last_usb_path, status,
-          verification_status, last_verified_session, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(equipment_id) DO UPDATE SET
-          manufacturer = excluded.manufacturer,
-          model = excluded.model,
-          firmware_revision = excluded.firmware_revision,
-          hardware_revision = excluded.hardware_revision,
-          detected_iccid = excluded.detected_iccid,
-          detected_phone_number = excluded.detected_phone_number,
-          detected_operator = excluded.detected_operator,
-          signal_percent = excluded.signal_percent,
-          rssi = excluded.rssi,
-          modem_index = excluded.modem_index,
-          usb_port = excluded.usb_port,
-          usb_path = excluded.usb_path,
-          last_usb_path = COALESCE(excluded.last_usb_path, modems.last_usb_path),
-          status = excluded.status,
-          verification_status = COALESCE(excluded.verification_status, modems.verification_status),
-          last_verified_session = COALESCE(excluded.last_verified_session, modems.last_verified_session),
-          updated_at = CURRENT_TIMESTAMP
-        WHERE modems.manufacturer IS NOT excluded.manufacturer
-          OR modems.model IS NOT excluded.model
-          OR modems.firmware_revision IS NOT excluded.firmware_revision
-          OR modems.hardware_revision IS NOT excluded.hardware_revision
-          OR modems.detected_iccid IS NOT excluded.detected_iccid
-          OR modems.detected_phone_number IS NOT excluded.detected_phone_number
-          OR modems.detected_operator IS NOT excluded.detected_operator
-          OR modems.modem_index IS NOT excluded.modem_index
-          OR modems.usb_port IS NOT excluded.usb_port
-          OR modems.usb_path IS NOT excluded.usb_path
-          OR modems.last_usb_path IS NOT COALESCE(excluded.last_usb_path, modems.last_usb_path)
-          OR modems.status IS NOT excluded.status
-          OR (excluded.verification_status IS NOT NULL
-              AND modems.verification_status IS NOT excluded.verification_status)
-          OR (excluded.last_verified_session IS NOT NULL
-              AND modems.last_verified_session IS NOT excluded.last_verified_session)
-          OR modems.signal_percent IS NOT excluded.signal_percent
-          OR modems.rssi IS NOT excluded.rssi
-      `,
-        ).bind(
-          report.equipment_id,
-          textOr(report.manufacturer, null),
-          textOr(report.model, null),
-          textOr(report.firmware_revision, null),
-          textOr(report.hardware_revision, null),
-          textOr(report.detected_iccid, null),
-          textOr(report.detected_phone_number, null),
-          textOr(report.detected_operator, null),
-          report.signal_percent ?? null,
-          report.rssi ?? null,
-          report.modem_index ?? null,
-          report.usb_port ?? null,
-          report.usb_path ?? null,
-          report.usb_path ?? null,
-          textOr(report.status, 'active'),
-          verificationStatus,
-          lastVerifiedSession,
-        ),
-      );
-
-      if (statements.length > 0) await env.DB.batch(statements);
+      await upsertModemReports(env.DB, acceptedReports, verificationStatus, lastVerifiedSession);
 
       let explicitlyDisconnected = 0;
       if (removedIds.length > 0) {
-        const placeholders = removedIds.map(() => '?').join(',');
-        const result = await env.DB.prepare(
-          `
-          UPDATE modems
-          SET status = 'disconnected',
-              verification_status = 'absent',
-              detected_iccid = NULL,
-              detected_phone_number = NULL,
-              detected_operator = NULL,
-              signal_percent = NULL,
-              rssi = NULL,
-              usb_path = NULL,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE equipment_id IN (${placeholders})
-            AND (
-              status IS NOT 'disconnected'
-              OR verification_status IS NOT 'absent'
-              OR detected_iccid IS NOT NULL
-              OR detected_phone_number IS NOT NULL
-              OR detected_operator IS NOT NULL
-              OR signal_percent IS NOT NULL
-              OR rssi IS NOT NULL
-              OR usb_path IS NOT NULL
-            )
-        `,
-        )
-          .bind(...removedIds)
-          .run();
-        explicitlyDisconnected = result.meta.changes;
+        explicitlyDisconnected = await disconnectModems(env.DB, removedIds);
       }
 
       let reconciledDisconnected = 0;
       if (sync_mode === 'full') {
-        const presentEquipmentIds = JSON.stringify(
+        reconciledDisconnected = await disconnectModemsAbsentFrom(
+          env.DB,
           acceptedReports.map((report) => report.equipment_id),
         );
-        const disconnectResult = await env.DB.prepare(
-          `
-          UPDATE modems
-          SET status = 'disconnected',
-              verification_status = 'absent',
-              detected_iccid = NULL,
-              detected_phone_number = NULL,
-              detected_operator = NULL,
-              signal_percent = NULL,
-              rssi = NULL,
-              usb_path = NULL,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE NOT EXISTS (
-            SELECT 1 FROM json_each(?) AS present
-            WHERE present.value = modems.equipment_id
-          )
-          AND (
-            status IS NOT 'disconnected'
-            OR verification_status IS NOT 'absent'
-            OR detected_iccid IS NOT NULL
-            OR detected_phone_number IS NOT NULL
-            OR detected_operator IS NOT NULL
-            OR signal_percent IS NOT NULL
-            OR rssi IS NOT NULL
-            OR usb_path IS NOT NULL
-          )
-        `,
-        )
-          .bind(presentEquipmentIds)
-          .run();
-        reconciledDisconnected = disconnectResult.meta.changes;
       }
 
       return {
@@ -342,18 +210,6 @@ export const controlHandler = {
       let processed = 0;
       const results: UploadResponse['results'] = [];
       const newMessages: StoredMessage[] = [];
-
-      const insertStmt = env.DB.prepare(`
-        INSERT INTO messages (
-          id, phone_iccid, phone_number, content, timestamp, type,
-          verification_code, status, created_at, updated_at,
-          filter_status, filter_rule_id, purpose, balance_check_id
-        )
-        VALUES (
-          ?, ?, ?, ?, ?, 'received', ?, 'received',
-          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?
-        ) ON CONFLICT(id) DO NOTHING
-      `);
 
       // Spam rules are loaded ONCE per upload, not per message. Classification is
       // done inline rather than in ctx.waitUntil: the row must never be readable
@@ -411,22 +267,20 @@ export const controlHandler = {
 
           // D1's primary key is the sole idempotency boundary. No content/timestamp
           // comparison is valid here: two equal SMS payloads may be distinct SMS.
-          const result = await insertStmt
-            .bind(
-              messageId,
-              msg.phone_iccid,
-              phoneNumber,
-              msg.content,
-              timestamp,
-              verificationCode,
-              verdict.filter_status,
-              verdict.filter_rule_id,
-              record.purpose,
-              record.balance_check_id,
-            )
-            .run();
+          const changes = await insertReceivedMessage(env.DB, {
+            id: messageId,
+            phone_iccid: msg.phone_iccid,
+            phone_number: phoneNumber,
+            content: msg.content,
+            timestamp,
+            verification_code: verificationCode,
+            filter_status: verdict.filter_status,
+            filter_rule_id: verdict.filter_rule_id,
+            purpose: record.purpose,
+            balance_check_id: record.balance_check_id,
+          });
 
-          if (result.meta.changes === 0) {
+          if (changes === 0) {
             results.push({ id: messageId, status: 'already_stored' });
             continue;
           }
@@ -515,96 +369,24 @@ export const controlHandler = {
       // The NULL branch safely adopts records created by pre-session daemons,
       // after allowing their normal send/report window to expire.
       if (daemonSessionId) {
-        await env.DB.prepare(
-          `
-          UPDATE messages
-          SET status = 'unknown',
-              error_message = 'Daemon restarted before confirming SMS delivery; delivery status is unknown',
-              processing_session_id = NULL,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE type = 'sent'
-            AND status = 'processing'
-            AND (
-              (processing_session_id IS NOT NULL AND processing_session_id <> ?)
-              OR (
-                processing_session_id IS NULL
-                AND datetime(updated_at) <= datetime('now', '-5 minutes')
-              )
-            )
-        `,
-        )
-          .bind(daemonSessionId)
-          .run();
+        await markStaleProcessingMessagesUnknown(env.DB, daemonSessionId);
       }
 
       // A message with nothing to send to or from can never be sent, and the
       // daemon's PendingSms requires both: fail it rather than put it on the wire.
-      await env.DB.prepare(
-        `
-        UPDATE messages
-        SET status = 'failed',
-            error_message = 'Message has no recipient or SIM to send from',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE type = 'sent' AND status = 'sending'
-          AND (recipient IS NULL OR phone_iccid IS NULL OR created_at IS NULL)
-      `,
-      ).run();
+      await failUnsendableMessages(env.DB);
 
       // Claim pending messages by marking them 'processing', so a poll that
       // arrives before this batch is reported cannot send them twice.
-      const pending = await queryAll(
-        env.DB.prepare(
-          `
-        SELECT id
-        FROM (
-          SELECT
-            id,
-            purpose,
-            created_at,
-            ROW_NUMBER() OVER (PARTITION BY purpose ORDER BY created_at, id) AS purpose_rank
-          FROM messages
-          WHERE type = 'sent' AND status = 'sending'
-        ) pending
-        WHERE purpose != 'balance_maintenance' OR purpose_rank <= 5
-        ORDER BY CASE WHEN purpose = 'balance_maintenance' THEN 1 ELSE 0 END,
-                 created_at,
-                 id
-        LIMIT 50
-      `,
-        ),
-        IdRow,
-      );
+      const ids = await listSendingMessageIds(env.DB);
 
-      if (pending.length === 0) {
+      if (ids.length === 0) {
         return { success: true, pending_messages: [] };
       }
 
-      const ids = pending.map((row) => row.id);
-      const placeholders = ids.map(() => '?').join(',');
+      await markMessagesProcessing(env.DB, daemonSessionId, ids);
 
-      await env.DB.prepare(
-        `
-        UPDATE messages
-        SET status = 'processing',
-            processing_session_id = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id IN (${placeholders})
-      `,
-      )
-        .bind(daemonSessionId, ...ids)
-        .run();
-
-      const messages = await queryAll(
-        env.DB.prepare(
-          `
-        SELECT id, phone_iccid, phone_number, content, recipient, purpose, created_at
-        FROM messages
-        WHERE id IN (${placeholders})
-        ORDER BY created_at ASC
-      `,
-        ).bind(...ids),
-        PendingMessageRow,
-      );
+      const messages = await listMessagesByIds(env.DB, ids);
 
       const pendingMessages = messages satisfies PendingSms[];
       return { success: true, pending_messages: pendingMessages };
@@ -620,23 +402,15 @@ export const controlHandler = {
     { message_id, outcome, error_message, sms_id }: v.InferOutput<typeof SmsResultBody>,
   ): Promise<SmsResultResponse> {
     try {
-      const result = await env.DB.prepare(
-        `
-        UPDATE messages
-        SET status = ?, error_message = ?, sms_id = ?,
-            processing_session_id = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      )
-        .bind(
-          SMS_STATUS_FOR_OUTCOME[outcome],
-          textOr(error_message, null),
-          textOr(sms_id, null),
-          message_id,
-        )
-        .run();
+      const changes = await updateSmsResult(
+        env.DB,
+        message_id,
+        SMS_STATUS_FOR_OUTCOME[outcome],
+        textOr(error_message, null),
+        textOr(sms_id, null),
+      );
 
-      if (result.meta.changes === 0) {
+      if (changes === 0) {
         throw refused('NOT_FOUND', 'Message not found');
       }
 
@@ -652,8 +426,8 @@ export const controlHandler = {
   // Clear all messages (admin endpoint)
   async clearMessages({ env }: DaemonCall<D1<'run'>>): Promise<ClearMessagesResponse> {
     try {
-      const result = await env.DB.prepare('DELETE FROM messages').run();
-      return { success: true, message: `Cleared ${String(result.meta.changes)} messages` };
+      const changes = await deleteAllMessages(env.DB);
+      return { success: true, message: `Cleared ${String(changes)} messages` };
     } catch (error) {
       console.error('[control] Clear messages error:', error);
       failed(error, `Failed to clear messages: ${errorText(error)}`);
@@ -690,28 +464,12 @@ export async function recordHeartbeat(
       headers.get('CF-Connecting-IP'),
       textOr(headers.get('X-Forwarded-For'), 'unknown'),
     );
-    await env.DB.prepare(
-      `
-        INSERT INTO daemon_health (
-          daemon_id, last_heartbeat, status, last_ip, version,
-          error_count, metadata, current_session_id, updated_at
-        ) VALUES (
-          'orange-pi-main', CURRENT_TIMESTAMP, 'online', ?, ?,
-          0, ?, ?, CURRENT_TIMESTAMP
-        )
-        ON CONFLICT(daemon_id) DO UPDATE SET
-          last_heartbeat = CURRENT_TIMESTAMP,
-          status = 'online',
-          last_ip = excluded.last_ip,
-          version = excluded.version,
-          error_count = excluded.error_count,
-          metadata = excluded.metadata,
-          current_session_id = excluded.current_session_id,
-          updated_at = CURRENT_TIMESTAMP
-    `,
-    )
-      .bind(clientIp, snapshot.version, JSON.stringify(snapshot), snapshot.session_id)
-      .run();
+    await upsertDaemonHeartbeat(env.DB, {
+      clientIp,
+      version: snapshot.version,
+      metadata: JSON.stringify(snapshot),
+      sessionId: snapshot.session_id,
+    });
 
     console.log(
       `[control] Health snapshot received: session=${snapshot.session_id}, version=${snapshot.version}`,
@@ -732,17 +490,7 @@ async function processMessageKeywords(
   message: StoredMessage,
 ): Promise<void> {
   try {
-    const keywords = await queryAll(
-      db.prepare(
-        `
-      SELECT id, keyword, case_sensitive, whole_word
-      FROM keyword_tags
-      WHERE is_active = TRUE
-      ORDER BY priority DESC
-    `,
-      ),
-      KeywordRow,
-    );
+    const keywords = await listActiveKeywordMatchers(db);
 
     if (keywords.length === 0) return;
 
@@ -756,16 +504,7 @@ async function processMessageKeywords(
     );
 
     if (matches.length > 0) {
-      const placeholders = matches.map(() => '(?, ?, ?, ?)').join(',');
-      await db
-        .prepare(
-          `
-        INSERT OR IGNORE INTO message_tags (message_id, keyword_tag_id, matched_text, position)
-        VALUES ${placeholders}
-      `,
-        )
-        .bind(...matches.flat())
-        .run();
+      await insertKeywordMatches(db, matches);
 
       console.log(
         `[control] Processed ${String(matches.length)} keyword matches for message ${message.id}`,

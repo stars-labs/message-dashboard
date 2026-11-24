@@ -1,6 +1,6 @@
 import { ORPCError } from '@orpc/server';
-import * as v from 'valibot';
-import { queryFirst, type D1 } from '../lib/d1.js';
+import type { D1 } from '../lib/d1.js';
+import { getDaemonHealth } from '../db/daemon.js';
 import type { DaemonStatusResponse } from '../../shared/api/daemon-status.js';
 import type { HealthResponse, LiveResponse } from '../../shared/api/health.js';
 import { deriveDaemonHealth } from '../utils/daemon-health.js';
@@ -12,20 +12,6 @@ interface HealthCall {
   /** Headers to add to the answer, error or not. */
   resHeaders: Headers;
 }
-const DAEMON_HEALTH_SELECT = `
-  SELECT daemon_id, last_heartbeat, metadata,
-    CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER) AS seconds_since_heartbeat
-  FROM daemon_health
-  WHERE daemon_id = 'orange-pi-main'
-`;
-
-/** julianday() of an unreadable last_heartbeat is NULL, so the age can be null. */
-const DaemonHealthRow = v.object({
-  daemon_id: v.string(),
-  last_heartbeat: v.string(),
-  metadata: v.nullable(v.string()),
-  seconds_since_heartbeat: v.nullable(v.number()),
-});
 
 /** Health answers describe this moment; nothing between here and the monitor may keep one. */
 function uncached(resHeaders: Headers): void {
@@ -76,7 +62,7 @@ export const healthHandler = {
     try {
       // One indexed application-table read proves D1 is usable and supplies the
       // daemon state. A constant SELECT 1 can succeed after table reads are blocked.
-      daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
+      daemonHealth = await getDaemonHealth(env.DB);
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('health_readiness', error, classification);
@@ -114,7 +100,7 @@ export const healthHandler = {
 
     let daemonHealth;
     try {
-      daemonHealth = await queryFirst(env.DB.prepare(DAEMON_HEALTH_SELECT), DaemonHealthRow);
+      daemonHealth = await getDaemonHealth(env.DB);
     } catch (error) {
       const classification = classifyD1Error(error);
       logD1Error('daemon_status', error, classification);

@@ -1,11 +1,25 @@
 import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
-import { queryAll, queryFirst, queryOne, type D1 } from '../lib/d1.js';
+import type { D1 } from '../lib/d1.js';
+import {
+  countIccidMappings,
+  getIccidMappingDetail,
+  getSavedIccidMapping,
+  listIccidMappings,
+} from '../db/iccid-mappings.js';
+import {
+  deleteSim,
+  getExistingSim,
+  getSimRole,
+  insertSim,
+  insertSimFromImport,
+  updateSim,
+  updateSimByUpsert,
+  updateSimFromImport,
+  type ExistingSim,
+} from '../db/sims.js';
 import { errorText } from '../../shared/error-text.js';
 import {
-  IccidMapping,
-  IccidMappingDetail,
-  SavedIccidMapping,
   SimMapping,
   type BulkIccidMappingsBody,
   type BulkIccidMappingsResponse,
@@ -35,20 +49,6 @@ const SimRole = v.picklist(SIM_ROLES);
 type SimServiceType = v.InferOutput<typeof ServiceType>;
 type SimServiceTypeSource = v.InferOutput<typeof ServiceTypeSource>;
 type SimRole = v.InferOutput<typeof SimRole>;
-
-const ExistingSimRow = v.object({
-  iccid: v.string(),
-  service_type: v.string(),
-  service_type_source: v.nullable(v.string()),
-  sim_role: v.string(),
-  primary_iccid: v.nullable(v.string()),
-});
-
-type ExistingSim = v.InferOutput<typeof ExistingSimRow>;
-
-const PrimaryTargetRow = v.object({ sim_role: v.string() });
-
-const TotalRow = v.object({ total: v.number() });
 
 const PositiveIntegerText = v.pipe(v.string(), v.regex(/^[1-9]\d*$/), v.transform(Number));
 
@@ -172,10 +172,7 @@ export async function resolveSimRole(
     if (primaryIccid === null) {
       return { error: 'primary_iccid is required for a secondary SIM' };
     }
-    const target = await queryFirst(
-      env.DB.prepare('SELECT sim_role FROM sims WHERE iccid = ?').bind(primaryIccid),
-      PrimaryTargetRow,
-    );
+    const target = await getSimRole(env.DB, primaryIccid);
     if (!target) return { error: 'primary_iccid does not match any SIM' };
     if (target.sim_role !== 'primary') {
       return { error: `primary_iccid points to a ${target.sim_role} SIM, not a primary` };
@@ -184,23 +181,6 @@ export async function resolveSimRole(
 
   return { role: role.output, primaryIccid, roleProvided };
 }
-
-const EXISTING_SIM_SELECT = `
-  SELECT iccid, service_type, service_type_source, sim_role, primary_iccid
-  FROM sims WHERE iccid = ?
-`;
-
-const DETAIL_SELECT = `
-  SELECT
-    iccid as id, iccid, sim_index, number as phone_number,
-    country, carrier, service_type, service_type_source,
-    service_type_verified_at, equipment_id, notes,
-    sim_status as is_active, signal_quality, modem_status, detected_iccid,
-    operator, usb_path, last_usb_path, sim_role, primary_iccid,
-    created_at, updated_at
-  FROM device_view
-  WHERE iccid = ?
-`;
 
 export const iccidMappingsHandler = {
   async list(
@@ -216,61 +196,8 @@ export const iccidMappingsHandler = {
     const offset = (page - 1) * limit;
 
     try {
-      let sql = `
-        SELECT
-          iccid as id,
-          iccid,
-          sim_index,
-          number as phone_number,
-          country,
-          carrier,
-          service_type,
-          service_type_source,
-          service_type_verified_at,
-          sim_role,
-          primary_iccid,
-          balance_threshold,
-          equipment_id,
-          notes,
-          sim_status as is_active,
-          signal_quality,
-          modem_status,
-          detected_iccid,
-          operator,
-          usb_path,
-          last_usb_path,
-          created_at,
-          updated_at
-        FROM device_view
-        WHERE 1=1
-      `;
-      const params: unknown[] = [];
-
-      if (search) {
-        sql += ` AND (iccid LIKE ? OR number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
-        const searchPattern = `%${search}%`;
-        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
-      }
-
-      sql += ` ORDER BY sim_index ASC LIMIT ? OFFSET ?`;
-      params.push(limit, offset);
-
-      const mappings = await queryAll(env.DB.prepare(sql).bind(...params), IccidMapping);
-
-      let countQuery = `SELECT COUNT(*) as total FROM device_view WHERE 1=1`;
-      const countParams: unknown[] = [];
-
-      if (search) {
-        countQuery += ` AND (iccid LIKE ? OR number LIKE ? OR carrier LIKE ? OR notes LIKE ?)`;
-        const searchPattern = `%${search}%`;
-        countParams.push(searchPattern, searchPattern, searchPattern, searchPattern);
-      }
-
-      const totalResult = await queryFirst(
-        env.DB.prepare(countQuery).bind(...countParams),
-        TotalRow,
-      );
-      const total = totalResult?.total ?? 0;
+      const mappings = await listIccidMappings(env.DB, search, limit, offset);
+      const total = await countIccidMappings(env.DB, search);
 
       return {
         success: true,
@@ -293,7 +220,7 @@ export const iccidMappingsHandler = {
 
   async get({ env }: ReadCall, id: string): Promise<IccidMappingDetailResponse> {
     try {
-      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), IccidMappingDetail);
+      const mapping = await getIccidMappingDetail(env.DB, id);
       if (!mapping) throw new ORPCError('NOT_FOUND', { message: 'ICCID mapping not found' });
       return { success: true, data: mapping };
     } catch (error) {
@@ -303,10 +230,7 @@ export const iccidMappingsHandler = {
 
   async getByIccid({ env }: ReadCall, iccid: string): Promise<IccidMappingDetailResponse> {
     try {
-      const mapping = await queryFirst(
-        env.DB.prepare(DETAIL_SELECT).bind(iccid),
-        IccidMappingDetail,
-      );
+      const mapping = await getIccidMappingDetail(env.DB, iccid);
       if (!mapping) throw new ORPCError('NOT_FOUND', { message: 'ICCID not found' });
       return { success: true, data: mapping };
     } catch (error) {
@@ -322,103 +246,34 @@ export const iccidMappingsHandler = {
       const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = data.balance_threshold ?? null;
 
-      const simExists = await queryFirst(
-        env.DB.prepare(EXISTING_SIM_SELECT).bind(iccid),
-        ExistingSimRow,
-      );
+      const simExists = await getExistingSim(env.DB, iccid);
       const service = resolveServiceType(data, simExists);
       if ('error' in service) throw badRequest(service.error);
       const role = await resolveSimRole(data, simExists, env);
       if ('error' in role) throw badRequest(role.error);
 
+      const sim = {
+        sim_index,
+        phone_number,
+        country_code: emptyToNull(country_code),
+        carrier: emptyToNull(carrier),
+        imei: emptyToNull(imei),
+        notes: emptyToNull(notes),
+        serviceType: service.serviceType,
+        serviceTypeSource: service.serviceTypeSource,
+        serviceTypeProvided: service.serviceTypeProvided,
+        role: role.role,
+        primaryIccid: role.primaryIccid,
+        balanceThreshold,
+        updatedBy: updatedBy(user),
+      };
       if (!simExists) {
-        await env.DB.prepare(
-          `
-          INSERT INTO sims (
-            iccid, sim_index, phone_number, country_code, carrier, imei, notes,
-            service_type, service_type_source, service_type_verified_at,
-            sim_role, primary_iccid, balance_threshold,
-            updated_at, updated_by
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-            CASE WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL ELSE CURRENT_TIMESTAMP END,
-            ?, ?, ?,
-            CURRENT_TIMESTAMP, ?)
-        `,
-        )
-          .bind(
-            iccid,
-            sim_index,
-            phone_number,
-            emptyToNull(country_code),
-            emptyToNull(carrier),
-            emptyToNull(imei),
-            emptyToNull(notes),
-            service.serviceType,
-            service.serviceTypeSource,
-            service.serviceType,
-            service.serviceType,
-            role.role,
-            role.primaryIccid,
-            balanceThreshold,
-            updatedBy(user),
-          )
-          .run();
+        await insertSim(env.DB, iccid, sim);
       } else {
-        await env.DB.prepare(
-          `
-          UPDATE sims
-          SET sim_index = ?, phone_number = ?, country_code = ?, carrier = ?, imei = ?, notes = ?,
-              service_type = ?, service_type_source = ?,
-              service_type_verified_at = CASE
-                WHEN ? = 0 THEN service_type_verified_at
-                WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL
-                ELSE CURRENT_TIMESTAMP
-              END,
-              sim_role = ?,
-              primary_iccid = ?,
-              balance_threshold = ?,
-              updated_at = CURRENT_TIMESTAMP, updated_by = ?
-          WHERE iccid = ?
-        `,
-        )
-          .bind(
-            sim_index,
-            phone_number,
-            emptyToNull(country_code),
-            emptyToNull(carrier),
-            emptyToNull(imei),
-            emptyToNull(notes),
-            service.serviceType,
-            service.serviceTypeSource,
-            service.serviceTypeProvided ? 1 : 0,
-            service.serviceType,
-            service.serviceType,
-            role.role,
-            role.primaryIccid,
-            balanceThreshold,
-            updatedBy(user),
-            iccid,
-          )
-          .run();
+        await updateSimByUpsert(env.DB, iccid, sim);
       }
 
-      const mapping = await queryOne(
-        env.DB.prepare(
-          `
-        SELECT
-          iccid, sim_index, number as phone_number,
-          country as country_code, carrier, equipment_id as imei,
-          notes, service_type, service_type_source, service_type_verified_at,
-          sim_role, primary_iccid, balance_threshold,
-          sim_status as status, usb_path, last_usb_path,
-          created_at, updated_at
-        FROM device_view
-        WHERE iccid = ?
-      `,
-        ).bind(iccid),
-        SavedIccidMapping,
-      );
+      const mapping = await getSavedIccidMapping(env.DB, iccid);
 
       return { status: simExists ? 200 : 201, body: { success: true, data: mapping } };
     } catch (error) {
@@ -439,62 +294,30 @@ export const iccidMappingsHandler = {
       const { phone_number, sim_index, country_code, carrier, imei, notes } = data;
       const balanceThreshold = data.balance_threshold ?? null;
 
-      const existing = await queryFirst(
-        env.DB.prepare(EXISTING_SIM_SELECT).bind(id),
-        ExistingSimRow,
-      );
+      const existing = await getExistingSim(env.DB, id);
       if (!existing) throw new ORPCError('NOT_FOUND', { message: 'ICCID mapping not found' });
       const service = resolveServiceType(data, existing);
       if ('error' in service) throw badRequest(service.error);
       const role = await resolveSimRole(data, existing, env);
       if ('error' in role) throw badRequest(role.error);
 
-      await env.DB.prepare(
-        `
-        UPDATE sims
-        SET
-          phone_number = ?,
-          sim_index = ?,
-          country_code = ?,
-          carrier = ?,
-          imei = ?,
-          notes = ?,
-          service_type = ?,
-          service_type_source = ?,
-          service_type_verified_at = CASE
-            WHEN ? = 0 THEN service_type_verified_at
-            WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL
-            ELSE CURRENT_TIMESTAMP
-          END,
-          sim_role = ?,
-          primary_iccid = ?,
-          balance_threshold = ?,
-          updated_at = CURRENT_TIMESTAMP,
-          updated_by = ?
-        WHERE iccid = ?
-      `,
-      )
-        .bind(
-          phone_number,
-          sim_index,
-          emptyToNull(country_code),
-          emptyToNull(carrier),
-          emptyToNull(imei),
-          emptyToNull(notes),
-          service.serviceType,
-          service.serviceTypeSource,
-          service.serviceTypeProvided ? 1 : 0,
-          service.serviceType,
-          service.serviceType,
-          role.role,
-          role.primaryIccid,
-          balanceThreshold,
-          updatedBy(user),
-          id,
-        )
-        .run();
+      await updateSim(env.DB, id, {
+        sim_index,
+        phone_number,
+        country_code: emptyToNull(country_code),
+        carrier: emptyToNull(carrier),
+        imei: emptyToNull(imei),
+        notes: emptyToNull(notes),
+        serviceType: service.serviceType,
+        serviceTypeSource: service.serviceTypeSource,
+        serviceTypeProvided: service.serviceTypeProvided,
+        role: role.role,
+        primaryIccid: role.primaryIccid,
+        balanceThreshold,
+        updatedBy: updatedBy(user),
+      });
 
-      const mapping = await queryFirst(env.DB.prepare(DETAIL_SELECT).bind(id), IccidMappingDetail);
+      const mapping = await getIccidMappingDetail(env.DB, id);
 
       if (!mapping) throw new ORPCError('NOT_FOUND', { message: 'ICCID mapping not found' });
       return { success: true, data: mapping };
@@ -506,13 +329,7 @@ export const iccidMappingsHandler = {
   async delete({ env }: WriteCall, id: string): Promise<DeleteIccidMappingResponse> {
     try {
       // If this SIM is a primary with secondaries still attached, the ON DELETE RESTRICT FK aborts.
-      await env.DB.prepare(
-        `
-        DELETE FROM sims WHERE iccid = ?
-      `,
-      )
-        .bind(id)
-        .run();
+      await deleteSim(env.DB, id);
 
       return { success: true, message: 'ICCID mapping deleted successfully' };
     } catch (error) {
@@ -547,10 +364,7 @@ export const iccidMappingsHandler = {
         try {
           const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = mapping;
 
-          const existing = await queryFirst(
-            env.DB.prepare(EXISTING_SIM_SELECT).bind(iccid),
-            ExistingSimRow,
-          );
+          const existing = await getExistingSim(env.DB, iccid);
           const service = resolveServiceType(mapping, existing);
           if ('error' in service) {
             failed++;
@@ -564,82 +378,25 @@ export const iccidMappingsHandler = {
             continue;
           }
 
+          const sim = {
+            sim_index,
+            phone_number,
+            country_code: emptyToNull(country_code),
+            carrier: emptyToNull(carrier),
+            imei: emptyToNull(imei),
+            notes: emptyToNull(notes),
+            serviceType: service.serviceType,
+            serviceTypeSource: service.serviceTypeSource,
+            serviceTypeProvided: service.serviceTypeProvided,
+            role: role.role,
+            primaryIccid: role.primaryIccid,
+            updatedBy: updatedBy(user),
+          };
           if (existing) {
-            await env.DB.prepare(
-              `
-              UPDATE sims
-              SET
-                sim_index = ?,
-                phone_number = ?,
-                country_code = ?,
-                carrier = ?,
-                imei = ?,
-                notes = ?,
-                service_type = ?,
-                service_type_source = ?,
-                service_type_verified_at = CASE
-                  WHEN ? = 0 THEN service_type_verified_at
-                  WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL
-                  ELSE CURRENT_TIMESTAMP
-                END,
-                sim_role = ?,
-                primary_iccid = ?,
-                updated_at = CURRENT_TIMESTAMP,
-                updated_by = ?
-              WHERE iccid = ?
-            `,
-            )
-              .bind(
-                sim_index,
-                phone_number,
-                emptyToNull(country_code),
-                emptyToNull(carrier),
-                emptyToNull(imei),
-                emptyToNull(notes),
-                service.serviceType,
-                service.serviceTypeSource,
-                service.serviceTypeProvided ? 1 : 0,
-                service.serviceType,
-                service.serviceType,
-                role.role,
-                role.primaryIccid,
-                updatedBy(user),
-                iccid,
-              )
-              .run();
+            await updateSimFromImport(env.DB, iccid, sim);
             updated++;
           } else {
-            await env.DB.prepare(
-              `
-              INSERT INTO sims (
-                iccid, sim_index, phone_number, country_code, carrier, imei, notes,
-                service_type, service_type_source, service_type_verified_at,
-                sim_role, primary_iccid,
-                updated_at, updated_by
-              )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-                CASE WHEN ? = 'unknown' OR ? = 'balance_managed' THEN NULL ELSE CURRENT_TIMESTAMP END,
-                ?, ?,
-                CURRENT_TIMESTAMP, ?)
-            `,
-            )
-              .bind(
-                iccid,
-                sim_index,
-                phone_number,
-                emptyToNull(country_code),
-                emptyToNull(carrier),
-                emptyToNull(imei),
-                emptyToNull(notes),
-                service.serviceType,
-                service.serviceTypeSource,
-                service.serviceType,
-                service.serviceType,
-                role.role,
-                role.primaryIccid,
-                updatedBy(user),
-              )
-              .run();
+            await insertSimFromImport(env.DB, iccid, sim);
             created++;
           }
         } catch (error) {
