@@ -236,11 +236,19 @@
               cargo
               check-daemon-wire
               clippy
+              findutils
+              gawk
               git
               rustfmt
             ];
             text = ''
               cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
+              too_long="$(find src -name '*.rs' ! -name tests.rs -exec awk 'END { if (NR > 600) print FILENAME ": " NR " lines" }' {} \;)"
+              if [ -n "$too_long" ]; then
+                echo "Over 600 lines; split into a submodule (tests go in <module>/tests.rs):" >&2
+                echo "$too_long" >&2
+                exit 1
+              fi
               cargo fmt --all --check
               cargo clippy --locked --all-targets --all-features -- -D warnings
               cargo test --locked

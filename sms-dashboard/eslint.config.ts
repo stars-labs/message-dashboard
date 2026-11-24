@@ -137,6 +137,12 @@ export default defineConfig([
     },
   },
   {
+    name: 'A source file stays small enough to read whole',
+    files: ['**/*.ts', '**/*.svelte'],
+    ignores: ['**/*.test.ts'],
+    rules: { 'max-lines': ['error', { max: 600, skipBlankLines: true, skipComments: true }] },
+  },
+  {
     name: 'Untyped data enters through a schema',
     files: ['**/*.ts'],
     ignores: ['shared/parse-json.ts', 'server/lib/d1.ts', '**/*.test.ts'],
