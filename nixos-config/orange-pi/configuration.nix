@@ -1,5 +1,3 @@
-# Hardened NixOS configuration for Orange Pi with SMS Dashboard
-# This configuration implements security best practices from the security audit
 {
   config,
   pkgs,
@@ -9,59 +7,41 @@
 
 {
   imports = [
-    # Include hardware configuration (generate with nixos-generate-config)
     ./hardware-configuration.nix
 
-    # Include SMS daemon module
     ../modules/sms-daemon.nix
     ../modules/netbird-server.nix
     ../modules/pi-deploy.nix
-
   ];
 
-  # System identification
   networking.hostName = "orange-pi-sms";
 
-  # Allow unfree packages (for claude-code)
+  # claude-code is unfree.
   nixpkgs.config.allowUnfree = true;
 
-
-  # =============================================================================
-  # NETWORK SECURITY
-  # =============================================================================
-
-  # NetworkManager is the only network manager on this host; addressing lives in
-  # the connection profiles declared with it further down. dhcpcd on top of it
-  # produces duplicate leases, default routes, and DNS entries on one interface.
-  #
-  # Do not set networking.useDHCP here: the NetworkManager module (enabled below)
-  # sets it to false itself and manages per-interface addressing. Setting it true
-  # causes a conflicting-definition eval error.
+  # NetworkManager is the only network manager here; dhcpcd on top of it
+  # produces duplicate leases, routes, and DNS entries.
+  # Do not set networking.useDHCP: the NetworkManager module sets it to false,
+  # and a plain true conflicts at eval.
   networking.dhcpcd.enable = false;
   networking.nameservers = [
     "8.8.8.8"
     "8.8.4.4"
   ];
 
-  # Modern nftables firewall configuration
-  networking.firewall.enable = false; # Disable legacy iptables firewall
+  networking.firewall.enable = false;
 
-  # =============================================================================
-  # SSH HARDENING
-  # =============================================================================
-
-  # Hardened SSH configuration
   services.openssh = {
     enable = true;
     ports = [ 22 ];
     settings = {
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
-      PermitRootLogin = "prohibit-password"; # Allow root login with keys only (needed for nixos-rebuild)
+      PermitRootLogin = "prohibit-password"; # nixos-rebuild connects as root with a key
       AllowUsers = [
         "htx"
         "root"
-      ]; # Allow htx and root users
+      ];
       MaxAuthTries = 3;
       MaxSessions = 2;
       ClientAliveInterval = 300;
@@ -84,7 +64,6 @@
     };
   };
 
-  # SSH banner warning
   environment.etc."ssh/banner".text = ''
     ********************************************************************
     *                                                                  *
@@ -95,7 +74,6 @@
     ********************************************************************
   '';
 
-  # Fail2ban for brute force protection
   services.fail2ban = {
     enable = false;
     maxretry = 3;
@@ -121,11 +99,6 @@
     };
   };
 
-  # =============================================================================
-  # USER AND PRIVILEGE MANAGEMENT
-  # =============================================================================
-
-  # Create user for management with restricted privileges
   users.users.htx = {
     isNormalUser = true;
     description = "HTX User";
@@ -141,11 +114,9 @@
       "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC/XbGv4O4QXwFxs9gvie5LxHygseGa82ue+DpsiZ9zGaHwwKmLHAnkk9QsR4T4ALRCyK0yzGBliI2rRlICqw58CLQzASK9w23+YhQdp61NtXG94C8QTCJk2nGpsv9oKM+MnyH7d2dH97vfAE/S/2vAk7FwMzVhH8ehaH1E/f/d2WX6RjBHWqEwG4I4kLDkpMBBM2QmKnCxLOnxXmjZmhr/p0Pr61hedht2Fs1aRQ1XfMkRLPG0lHdzadcIdut6pG39yO33vKfJOf72BuRz3Qdd6P6x5bmFLjuymzvJrDC2KAFtBKpc5G0u+lozN3y9k8f+mgOj4EYFdNjKvRMgr9Dv cardno:25_422_096"
     ];
 
-    # Set shell timeout
     shell = pkgs.bashInteractive;
   };
 
-  # Configure root user for nixos-rebuild (with SOPS password hash)
   users.users.root = {
     hashedPasswordFile = config.sops.secrets."sms-dashboard/user-passwords/root-hash".path;
     openssh.authorizedKeys.keys = [
@@ -154,11 +125,10 @@
     ];
   };
 
-  # Sudo configuration with restrictions
   security.sudo = {
     enable = true;
-    wheelNeedsPassword = true; # Always require password for sudo
-    execWheelOnly = true; # Only wheel group can use sudo
+    wheelNeedsPassword = true;
+    execWheelOnly = true;
 
     extraConfig = ''
       # Limit sudo commands for htx user
@@ -188,43 +158,33 @@
     '';
   };
 
-  # =============================================================================
-  # WATCHDOG CONFIGURATION
-  # =============================================================================
-
   services.logrotate.enable = false;
-  # Hardware watchdog configuration
-  # Using watchdogd service for system monitoring and automatic recovery
   services.watchdogd = {
     enable = true;
     settings = {
       "device /dev/watchdog" = {
-        timeout = 30; # Hardware watchdog timeout in seconds
-        interval = 10; # Ping interval in seconds
-        safe-exit = true; # Disable watchdog on clean exit
+        timeout = 30;
+        interval = 10;
+        safe-exit = true;
       };
       loadavg = {
         enabled = true;
         interval = 60;
-        warning = 8.0; # Warning at load average 8
-        critical = 12.0; # Critical at load average 12 (will trigger reboot)
+        warning = 8.0;
+        critical = 12.0; # reboots
       };
       meminfo = {
         enabled = true;
         interval = 60;
-        warning = 0.85; # Warning at 85% memory usage
-        critical = 0.95; # Critical at 95% memory usage (will trigger reboot)
+        warning = 0.85;
+        critical = 0.95; # reboots
       };
       filenr = {
         enabled = true;
-        logmark = true; # Log file descriptor usage
+        logmark = true;
       };
     };
   };
-
-  # =============================================================================
-  # NIX STORE MAINTENANCE
-  # =============================================================================
 
   # Nothing else reclaims old generations or dead store paths on this box.
   nix.gc = {
@@ -233,47 +193,35 @@
     options = "--delete-older-than 14d";
   };
 
-  # =============================================================================
-  # BOOT SECURITY
-  # =============================================================================
-
   boot = {
-    # hardened kernel removed upstream (unmaintained); use latest mainline
+    # linux_hardened is gone upstream; latest mainline instead.
     kernelPackages = lib.mkForce pkgs.linuxPackages_latest;
 
-    # Load watchdog kernel module (Orange Pi usually uses sunxi_wdt)
-    kernelModules = [ "sunxi_wdt" ]; # Allwinner watchdog for Orange Pi
+    kernelModules = [ "sunxi_wdt" ];
 
-    # Boot loader configuration
     loader = {
       systemd-boot = {
         enable = true;
-        # Keep the ESP from filling with entries for long-gone generations.
-        configurationLimit = 10;
+        configurationLimit = 10; # keeps the ESP from filling up
       };
       efi = {
         canTouchEfiVariables = true;
         efiSysMountPoint = "/boot";
       };
-      timeout = 1; # Minimal timeout to prevent boot delay attacks
+      timeout = 1;
     };
 
-    # Kernel parameters for security hardening AND USB optimization
     kernelParams = [
-      # USB optimization for 100 modems
-      "usbcore.usbfs_memory_mb=1024" # Increase USB buffer (default 16MB, 1GB for 100 modems)
-      "usbcore.autosuspend=-1" # Disable USB autosuspend
-      "usbcore.old_scheme_first=1" # Try legacy enumeration handshake first (helps marginal modems)
-      "xhci_hcd.quirks=270336" # USB controller quirk for stability (from dotfiles)
-      "log_buf_len=4M" # Increase kernel message buffer
-      "elevator=noop" # Optimize for throughput
-      "fs.file-max=2097152" # Increase file handles
-      "fs.nr_open=1048576" # Increase open file limit
+      "usbcore.usbfs_memory_mb=1024" # default is 16MB; 100 modems need more
+      "usbcore.autosuspend=-1"
+      "usbcore.old_scheme_first=1" # legacy enumeration handshake first; helps marginal modems
+      "xhci_hcd.quirks=270336"
+      "log_buf_len=4M"
+      "elevator=noop"
+      "fs.file-max=2097152"
+      "fs.nr_open=1048576"
+      "sunxi_wdt.nowayout=1"
 
-      # Watchdog parameters
-      "sunxi_wdt.nowayout=1" # Prevent watchdog from being disabled
-
-      # Security hardening
       "init_on_alloc=1"
       "init_on_free=1"
       "page_alloc.shuffle=1"
@@ -289,15 +237,11 @@
       "vt.global_cursor_default=0"
     ];
 
-    # Kernel sysctl settings - ALL sysctl configuration
     kernel.sysctl = {
-      # ===== USB and system performance (for 100 modems) =====
-      # USB and device optimizations
       "vm.dirty_ratio" = 5;
       "vm.dirty_background_ratio" = 2;
       "vm.swappiness" = 10;
 
-      # Network buffer optimizations (for API uploads and 100 modems)
       "net.core.rmem_max" = 134217728;
       "net.core.wmem_max" = 134217728;
       "net.core.rmem_default" = 134217728;
@@ -306,20 +250,15 @@
       "net.ipv4.tcp_rmem" = "4096 87380 134217728";
       "net.ipv4.tcp_wmem" = "4096 65536 134217728";
 
-      # File handle limits
       "fs.file-max" = 2097152;
       "fs.nr_open" = 1048576;
 
-      # Inotify limits for monitoring many devices
       "fs.inotify.max_user_instances" = 8192;
       "fs.inotify.max_user_watches" = 524288;
 
-      # Process limits
       "kernel.pid_max" = 4194304;
       "kernel.threads-max" = 2097152;
 
-      # ===== Security hardening =====
-      # Network hardening
       "net.ipv4.conf.all.rp_filter" = 1;
       "net.ipv4.conf.default.rp_filter" = 1;
       "net.ipv4.conf.all.accept_source_route" = 0;
@@ -337,14 +276,12 @@
       "net.ipv6.conf.all.use_tempaddr" = lib.mkForce 2;
       "net.ipv6.conf.default.use_tempaddr" = lib.mkForce 2;
 
-      # File system hardening
       "fs.protected_hardlinks" = 1;
       "fs.protected_symlinks" = 1;
       "fs.protected_regular" = 2;
       "fs.protected_fifos" = 2;
       "fs.suid_dumpable" = 0;
 
-      # Kernel hardening
       "kernel.randomize_va_space" = 2;
       "kernel.panic_on_oops" = 1;
       "kernel.yama.ptrace_scope" = 2;
@@ -355,24 +292,19 @@
       "kernel.sysrq" = 0;
       "kernel.core_uses_pid" = 1;
       "kernel.kexec_load_disabled" = 1;
-      "kernel.modules_disabled" = 0; # Set to 1 after boot if no modules needed
+      "kernel.modules_disabled" = 0;
       "kernel.perf_event_paranoid" = 3;
 
-      # Process hardening
-      # kernel.pid_max already set above to 4194304 for 100 modems
       "vm.mmap_min_addr" = 65536;
       "vm.unprivileged_userfaultfd" = 0;
     };
 
-    # Blacklist unnecessary kernel modules
     blacklistedKernelModules = [
-      # Network protocols
       "dccp"
       "sctp"
       "rds"
       "tipc"
 
-      # Filesystems
       "cramfs"
       "freevxfs"
       "jffs2"
@@ -380,45 +312,35 @@
       "hfsplus"
       "udf"
 
-      # Hardware
       "bluetooth"
       "btusb"
       "firewire-core"
       "thunderbolt"
 
-      # Modem data path. SMS and calls go over the AT serial ports (option driver);
-      # nothing uses QMI, and qmi_wwan otherwise creates one idle wwu* interface
-      # per modem.
+      # SMS and calls use the AT serial ports (option driver); qmi_wwan would
+      # only create one idle wwu* interface per modem.
       "qmi_wwan"
       "cdc_wdm"
 
       # The mainline Orange Pi 5 Plus device tree wires the hym8563 alarm IRQ to
-      # the wrong pin, so it storms (~3400 IRQs/s) and keeps i2c-6 busy. The
-      # clock comes from NTP instead; drop this once the DT fix lands upstream.
+      # the wrong pin, so it storms (~3400 IRQs/s) and keeps i2c-6 busy; the
+      # clock comes from NTP.
       "rtc_hym8563"
 
-      # Others
       "vivid"
-      "uvcvideo" # Webcam - remove if needed
+      "uvcvideo"
     ];
   };
 
-  # =============================================================================
-  # SYSTEM SECURITY
-  # =============================================================================
-
   security = {
-    # Polkit settings
     polkit.enable = true;
 
-    # AppArmor
     apparmor = {
       enable = false;
       killUnconfinedConfinables = true;
     };
 
-    # Audit framework - DISABLED due to buffer overflow with 100 USB modems
-    # auditd generates too many events with 100 modems causing "No buffer space available"
+    # auditd overflows its buffer ("No buffer space available") with 100 modems.
     auditd.enable = false;
     audit = {
       enable = false;
@@ -433,7 +355,6 @@
       ];
     };
 
-    # PAM configuration
     pam = {
       loginLimits = [
         {
@@ -451,36 +372,24 @@
       ];
 
       services = {
-        # Delay after failed authentication
-        login.failDelay.delay = 4000000; # 4 seconds
+        login.failDelay.delay = 4000000; # microseconds
         sshd.failDelay.delay = 4000000;
         sudo.failDelay.delay = 4000000;
       };
     };
   };
 
-  # =============================================================================
-  # SERVICE HARDENING
-  # =============================================================================
-
-  # Hardening for systemd services is defined in sms-daemon.nix
-  # Additional global systemd hardening
   systemd.coredump.enable = false;
 
-  # =============================================================================
-  # DNS RESOLUTION AND NETWORK MANAGEMENT
-  # =============================================================================
-
-  # Enable NetworkManager for better network management
   networking.networkmanager = {
     enable = true;
-    dns = "systemd-resolved"; # Use systemd-resolved for DNS
+    dns = "systemd-resolved";
 
-    # Declarative connection profiles. NetworkManager owns every interface,
-    # so addressing lives here rather than in networking.interfaces.
+    # NetworkManager owns every interface, so addressing lives here rather than
+    # in networking.interfaces.
     ensureProfiles.profiles = {
-      # Office uplink: fixed address, the documented deploy and access target
-      # (docs/deployment.md). The office cable is on enP4p65s0.
+      # Office uplink on enP4p65s0; the fixed address is the deploy and access
+      # target in docs/deployment.md.
       lan-static = {
         connection = {
           id = "lan-static";
@@ -500,9 +409,8 @@
         ipv6.method = "ignore";
       };
 
-      # Spare port: idle until a backup cable is plugged in, then takes a
-      # lease. Higher route metric keeps the static uplink as default route;
-      # DNS stays on networking.nameservers.
+      # Spare port; the higher route metric keeps the static uplink as default
+      # route, and DNS stays on networking.nameservers.
       lan-dhcp = {
         connection = {
           id = "lan-dhcp";
@@ -521,24 +429,18 @@
     };
   };
 
-  # Enable systemd-resolved for better DNS handling
   services.resolved = {
     enable = true;
     settings = {
       Resolve = {
-        DNSSEC = "false"; # Disable DNSSEC completely as it's causing validation failures
-        DNSOverTLS = "opportunistic"; # Use DNS over TLS when available
-        LLMNR = "false"; # Disable LLMNR for security (multicast name resolution)
+        DNSSEC = "false"; # validation failures
+        DNSOverTLS = "opportunistic";
+        LLMNR = "false";
       };
     };
   };
 
-  # =============================================================================
-  # LOGGING AND MONITORING
-  # =============================================================================
-
   services.journald.settings.Journal = {
-    # Storage configuration
     Storage = "persistent";
     SystemMaxUse = "1G";
     SystemKeepFree = "500M";
@@ -546,41 +448,31 @@
     RuntimeKeepFree = "100M";
     MaxRetentionSec = "30d";
 
-    # Compression and forwarding
     Compress = "yes";
     SplitMode = "uid";
     RateLimitIntervalSec = "30s";
     RateLimitBurst = "10000";
 
-    # Forwarding to syslog for remote logging
     ForwardToSyslog = "yes";
     MaxLevelStore = "debug";
     MaxLevelSyslog = "info";
   };
 
-  # =============================================================================
-  # MISCELLANEOUS SECURITY
-  # =============================================================================
-
-  # Time zone
   time.timeZone = "Asia/Singapore";
 
-  # Locale
   i18n.defaultLocale = "en_SG.UTF-8";
 
-  # Install only essential packages
   environment.systemPackages = with pkgs; [
     vim
     htop
     tmux
     git
-    sbctl # Secure boot control
-    usbutils # Provides lsusb command
+    sbctl
+    usbutils
     ldns
     claude-code
     modemmanager
   ];
 
-  # This value determines the NixOS release compatibility
   system.stateVersion = "25.11";
 }

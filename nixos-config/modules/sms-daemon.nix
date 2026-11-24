@@ -31,7 +31,6 @@ in
       type = types.nullOr types.str;
       default = null;
       description = "API key for authentication (not recommended, use apiKeyFile)";
-      # Mark as internal to discourage use
       internal = true;
     };
 
@@ -121,7 +120,7 @@ in
 
     group = mkOption {
       type = types.str;
-      default = "sms-daemon"; # Use dedicated group instead of dialout
+      default = "sms-daemon";
       description = "Group to run the daemon as";
     };
 
@@ -144,32 +143,27 @@ in
       }
     ];
 
-    # Create dedicated user and group with minimal privileges
     users.users.${cfg.user} = {
       isSystemUser = true;
       group = cfg.group;
-      # Only add to dialout for modem access, nothing else
       extraGroups = [ "dialout" ];
       home = "/var/lib/sms-daemon";
-      createHome = false; # Managed by systemd
-      shell = "${pkgs.shadow}/bin/nologin"; # No shell access
+      createHome = false;
+      shell = "${pkgs.shadow}/bin/nologin";
       description = "SMS Dashboard Daemon User";
     };
 
     users.groups.${cfg.group} = {
-      gid = null; # Let system assign
+      gid = null;
     };
 
-    # Create working directory with strict permissions
     systemd.tmpfiles.rules = [
       "d /var/lib/sms-daemon 0750 ${cfg.user} ${cfg.group} -"
       "d /var/lib/sms-daemon/tmp 0700 ${cfg.user} ${cfg.group} -"
       "d /var/log/sms-daemon 0750 ${cfg.user} ${cfg.group} -"
-      # Let's Encrypt account key and certificate for the voice bridge.
       "d /var/lib/sms-daemon/acme 0700 ${cfg.user} ${cfg.group} -"
     ];
 
-    # Hardened systemd service
     systemd.services.sms-daemon = {
       description = if cfg.useDBus
         then "SMS Dashboard Daemon (D-Bus/ModemManager mode)"
@@ -179,8 +173,7 @@ in
       requires = if cfg.useDBus then [ "ModemManager.service" ] else [];
       wantedBy = [ "multi-user.target" ];
 
-      # Limit repeated starts at the unit level. systemd ignores these keys in
-      # [Service], while NixOS renders these top-level options into [Unit].
+      # systemd reads start limits from [Unit]; NixOS renders these top-level options there.
       startLimitIntervalSec = 300;
       startLimitBurst = 5;
 
@@ -192,14 +185,10 @@ in
         SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
         SMS_DEVICE_ID = cfg.deviceId;
 
-        # Backend selection: AT commands (default) or D-Bus
-        # USE_DBUS=1 forces D-Bus/ModemManager as primary backend
         USE_DBUS = if cfg.useDBus then "1" else "0";
 
-        # Rust logging (info level by default, set to debug for verbose logs)
         RUST_LOG = if cfg.debugBuild then "orange_pi_daemon_rust=debug" else "orange_pi_daemon_rust=info";
 
-        # Security: Don't expose sensitive paths
         HOME = "/var/lib/sms-daemon";
         TMPDIR = "/var/lib/sms-daemon/tmp";
       } // optionalAttrs (cfg.voiceBridgeDomain != null) {
@@ -210,96 +199,72 @@ in
         VOICE_BRIDGE_PROXY_PROTOCOL = if cfg.voiceBridgeBehindProxy then "1" else "0";
       };
 
-      # Use systemd credentials for API key (more secure than environment variables)
       serviceConfig = mkMerge [
         {
           Type = "simple";
           User = cfg.user;
           Group = cfg.group;
 
-          # Restart configuration
-          # Always restart: the daemon sometimes exits cleanly after a SIGHUP;
-          # we want systemd to bring it back up regardless of exit code.
+          # The daemon sometimes exits cleanly after a SIGHUP and must come back.
           Restart = "always";
           RestartSec = "10s";
-          # RestartPreventExitStatus = "1";  # Only prevent restart on config errors
-          # preStart waits up to max_wait=180s for USB enumeration to settle;
-          # raise the start timeout above that so systemd doesn't abort it.
+          # preStart waits up to 180s for USB enumeration; the start timeout must exceed it.
           TimeoutStartSec = "300s";
 
-          # Working directory
           WorkingDirectory = "/var/lib/sms-daemon";
 
-          # Logging
-          # `tracing-journald` writes structured events and native PRIORITY fields
-          # directly. Reserve stderr for panics and other unstructured failures.
+          # tracing-journald writes structured events itself; stderr is for panics only.
           StandardOutput = "null";
           StandardError = "journal";
           SyslogLevel = "err";
           SyslogIdentifier = "sms-daemon";
 
-          # ==========================================================
-          # SECURITY HARDENING
-          # ==========================================================
-
-          # Filesystem protections
           ProtectSystem = "strict";
           ProtectHome = true;
           PrivateTmp = true;
           ProtectProc = "invisible";
           ProcSubset = "pid";
 
-          # Only allow access to specific paths
           ReadWritePaths = [
             "/var/lib/sms-daemon"
             "/var/log/sms-daemon"
           ];
 
-          # Device access restrictions (only allow modem devices)
-          # PrivateDevices=false required for USB modem access
-          # DeviceAllow whitelist only works when PrivateDevices=false
-          PrivateDevices = false; # Required for /dev/ttyUSB* access
-          # DeviceAllow doesn't support path wildcards - use auto policy for USB serial access
-          # The dialout group membership provides the actual permission
-          DevicePolicy = "auto"; # Required for dynamic USB serial port access
+          # DeviceAllow has no path wildcards, so /dev/ttyUSB* access comes from
+          # the dialout group under an open device policy.
+          PrivateDevices = false;
+          DevicePolicy = "auto";
 
-          # Network restrictions
-          PrivateNetwork = false; # Need network for API
+          PrivateNetwork = false;
           RestrictAddressFamilies = "AF_INET AF_INET6 AF_UNIX";
           IPAccounting = true;
           IPAddressAllow = [
-            "10.171.150.0/24" # Local network
-            "8.8.8.8/32" # DNS
-            "8.8.4.4/32" # DNS
-            # Add API server IP if known
+            "10.171.150.0/24"
+            "8.8.8.8/32"
+            "8.8.4.4/32"
           ];
 
-          # Resource limits - Increased for 100 modems
-          MemoryMax = "2G"; # Increased from 512M to 2G for 100 modems
-          MemorySwapMax = "1G"; # Allow some swap for peak usage
-          CPUQuota = "400%"; # Max 4 cores for parallel processing
-          TasksMax = 512; # Increased to handle 100+ modems + worker threads
+          MemoryMax = "2G";
+          MemorySwapMax = "1G";
+          CPUQuota = "400%";
+          TasksMax = 512;
 
-          # File descriptor limits - Increased for many USB devices
-          LimitNOFILE = 65536; # Increased for 100 modems (each needs multiple FDs)
-          LimitNPROC = 512; # Process limit - increased to match TasksMax
-          LimitCORE = 0; # No core dumps (may contain sensitive data)
+          LimitNOFILE = 65536;
+          LimitNPROC = 512;
+          LimitCORE = 0;
 
-          # Address space limits - Important for memory management
-          LimitAS = "4G"; # Total address space limit
-          LimitDATA = "3G"; # Data segment limit
-          LimitSTACK = "16M"; # Stack size per thread
+          LimitAS = "4G";
+          LimitDATA = "3G";
+          LimitSTACK = "16M";
 
-          # Capability restrictions
           NoNewPrivileges = true;
           CapabilityBoundingSet = [
-            "CAP_NET_RAW" # For network operations
+            "CAP_NET_RAW"
           ] ++ optional voiceBridgeNeedsBindCap "CAP_NET_BIND_SERVICE";
           # Only a privileged port needs the capability; behind the SNI router
           # the bridge sits on 8443 and does without it.
           AmbientCapabilities = optional voiceBridgeNeedsBindCap "CAP_NET_BIND_SERVICE";
 
-          # Kernel protections
           ProtectKernelTunables = true;
           ProtectKernelModules = true;
           ProtectKernelLogs = true;
@@ -307,7 +272,6 @@ in
           ProtectClock = true;
           ProtectHostname = true;
 
-          # System call filtering
           SystemCallFilter = [
             "@system-service"
             "~@privileged"
@@ -322,12 +286,10 @@ in
           SystemCallErrorNumber = "EPERM";
           SystemCallArchitectures = "native";
 
-          # Namespacing
-          PrivateUsers = false; # Need access to dialout group
+          PrivateUsers = false;
           PrivateMounts = true;
           MountAPIVFS = true;
 
-          # Misc security
           RestrictRealtime = true;
           RestrictSUIDSGID = true;
           RemoveIPC = true;
@@ -335,9 +297,8 @@ in
           RestrictNamespaces = true;
           MemoryDenyWriteExecute = true;
 
-          # Execution restrictions
           ExecPaths = [
-            "/nix/store" # Only allow Nix store executables
+            "/nix/store"
           ];
           NoExecPaths = [
             "/var"
@@ -345,19 +306,13 @@ in
             "/home"
           ];
 
-          # Additional sandboxing
           PrivateIPC = true;
           KeyringMode = "private";
           UMask = "0077";
 
-          # Notification (for monitoring)
           NotifyAccess = "main";
-          # WATCHDOG DISABLED - it was causing more problems than solving
-          # The daemon runs stable and doesn't need watchdog supervision
-          # WatchdogSec = "0";  # 0 = disabled
         }
 
-        # Handle API key loading securely
         (
           if cfg.apiKeyFile != null then
             {
@@ -382,25 +337,22 @@ in
             }
           else
             {
-              # Fallback to environment variable (less secure)
               Environment = "SMS_API_KEY=${cfg.apiKey}";
               ExecStart = "${cfg.package}/bin/sms-daemon";
             }
         )
       ];
 
-      # Include necessary tools in PATH
       path = with pkgs; [
-        modemmanager # Provides mmcli
+        modemmanager
         coreutils
         findutils
         gnugrep
         gnused
-        systemd # For busctl
-        util-linux # For logger command in preStart/postStop
+        systemd
+        util-linux
       ];
 
-      # Pre-start checks
       preStart = if cfg.useDBus then ''
         # D-Bus mode: verify ModemManager is running
         if ! systemctl is-active ModemManager.service >/dev/null 2>&1; then
@@ -442,7 +394,6 @@ in
         logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems, USB settled in ''${elapsed}s)"
       '';
 
-      # Post-stop cleanup
       postStop = ''
         # Log service stop
         logger -t sms-daemon "SMS daemon stopped"
@@ -452,14 +403,10 @@ in
       '';
     };
 
-    # ModemManager: only enable in D-Bus mode
-    # In AT command mode, ModemManager is disabled for better performance
     networking.modemmanager.enable = cfg.useDBus;
 
-    # Allow the daemon (member of the dialout group) to issue USBDEVFS_RESET on the
-    # Quectel modem USB device nodes (/dev/bus/usb/BBB/DDD). This backs the active
-    # USB-reset recovery for wedged modems. Scoped to vendor 2c7c (Quectel) so we
-    # don't broaden write access to unrelated USB devices.
+    # Lets the dialout daemon issue USBDEVFS_RESET on Quectel (vendor 2c7c) device
+    # nodes to recover wedged modems, without opening other USB devices.
     services.udev.extraRules = mkIf (!cfg.useDBus) ''
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2c7c", GROUP="dialout", MODE="0664"
     '';

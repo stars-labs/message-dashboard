@@ -1,5 +1,3 @@
-# NetBird control plane on the Orange Pi, migrated from lubancat on 2026-10-08.
-#
 # Port 443 is shared: the voice bridge (sms-daemon) terminates its own TLS and
 # renews its certificate over TLS-ALPN-01, so an nginx *stream* server routes by
 # SNI without touching the bytes — `voice-bridge.itoken.world` to the bridge on
@@ -10,8 +8,7 @@
 # No coturn: NetBird's relay (over 443) is the fallback path, and its built-in
 # STUN answers on 3478/udp. Port 80 is forwarded for the HTTP-01 certificate.
 #
-# Identity: Auth0, tenant starslab.jp.auth0.com.
-# Three Auth0 applications and one API, created 2026-10-08 with the auth0 CLI:
+# Identity: Auth0, tenant starslab.jp.auth0.com. Three applications and one API:
 #   NetBird Dashboard   SPA; callbacks /auth and /silent-auth on the domain
 #   NetBird CLI         native; device code + PKCE on localhost:53000/54000
 #   NetBird Management  machine-to-machine; reads user profiles for the
@@ -21,9 +18,9 @@
 #
 # Secrets are files under /var/lib/netbird-secrets, root-only, placed by hand
 # and never part of this repository:
-#   datastore-key       DataStoreEncryptionKey carried over from lubancat
+#   datastore-key       DataStoreEncryptionKey
 #   auth0-m2m-secret    client secret of the NetBird Management application
-#   relay-auth-secret   generated on the Pi; shared by management and relay
+#   relay-auth-secret   shared by management and relay
 { config, lib, pkgs, ... }:
 
 let
@@ -150,8 +147,6 @@ in
     recommendedProxySettings = true;
     recommendedTlsSettings = true;
 
-    # SNI router on 443. ssl_preread looks at the ClientHello only; the TLS
-    # session itself is terminated by whichever backend the name selects.
     streamConfig = ''
       map $ssl_preread_server_name $sni_backend {
         ${voiceDomain} 127.0.0.1:${toString voicePort};
@@ -205,7 +200,5 @@ in
     voiceBridgeBehindProxy = true;
   };
 
-  # The secrets directory outlives any service; the files inside are placed by
-  # the migration runbook (docs/netbird-migration.md) and are root-only.
   systemd.tmpfiles.rules = [ "d ${secrets} 0700 root root -" ];
 }

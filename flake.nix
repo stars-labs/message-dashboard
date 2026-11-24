@@ -40,13 +40,11 @@
       ];
 
       flake = {
-        # NixOS modules
         nixosModules = {
           default = ./nixos-config/modules/sms-daemon.nix;
           sms-daemon = ./nixos-config/modules/sms-daemon.nix;
         };
 
-        # NixOS configuration for Orange Pi
         nixosConfigurations = {
           orange-pi = nixpkgs.lib.nixosSystem {
             system = "aarch64-linux";
@@ -63,16 +61,13 @@
                   ...
                 }:
                 {
-                  # Enable flakes
                   nix.settings.experimental-features = [
                     "nix-command"
                     "flakes"
                   ];
 
-                  # SOPS configuration for secure secret management
                   sops = {
                     defaultSopsFile = ./nixos-config/secrets/orange-pi.yaml;
-                    # Use SSH host key for decryption on the Orange Pi
                     age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
 
                     secrets = {
@@ -90,16 +85,14 @@
                     };
                   };
 
-                  # Override the SMS daemon to use SOPS secrets
                   services.sms-daemon = {
                     enable = true;
-                    # SWITCH TO RUST: Use the memory-safe Rust daemon
                     package = self.packages.aarch64-linux.orange-pi-daemon-rust;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
-                    phoneUpdateIntervalSeconds = 1; # Upload every 1 second!
-                    messageCheckIntervalMs = 1000; # Check every 1 second
-                    signalCheckIntervalSeconds = 10; # Not used by Rust (syncs with phone status)
-                    debugBuild = false; # Rust daemon uses RUST_LOG env var
+                    phoneUpdateIntervalSeconds = 1;
+                    messageCheckIntervalMs = 1000;
+                    signalCheckIntervalSeconds = 10;
+                    debugBuild = false;
                     # Cloudflare Realtime adapters connect here; DNS-only A record
                     # to the office IP, 443 forwarded to the Pi. docs/voice-call-plan.md
                     voiceBridgeDomain = "voice-bridge.itoken.world";
@@ -122,11 +115,9 @@
           ...
         }:
         let
-          # Cargo package metadata is the single source of truth for daemon versioning.
           daemonCargo = builtins.fromTOML (builtins.readFile ./orange-pi-daemon/Cargo.toml);
           daemonVersion = daemonCargo.package.version;
 
-          # Rust SMS daemon - the only daemon implementation
           sms-daemon = pkgs.rustPlatform.buildRustPackage {
             pname = "sms-daemon";
             version = daemonVersion;
@@ -156,17 +147,14 @@
             ];
             buildInputs = with pkgs; [
               openssl
-              dbus # Required for native D-Bus support
+              dbus
             ];
 
-            # Formatting is a deployment gate, not an optional developer check.
-            # A NixOS daemon build must never proceed to tests or packaging with
-            # an unformatted Rust source tree.
+            # Formatting is a deployment gate: an unformatted tree fails the build.
             preCheck = ''
               cargo fmt --all --check
             '';
 
-            # Post-install: create symlink from Rust binary name to expected name
             postInstall = ''
               ln -s $out/bin/orange-pi-daemon-rust $out/bin/sms-daemon
             '';
@@ -186,13 +174,10 @@
             };
           };
 
-          # Alias for backward compatibility
           orange-pi-daemon-rust = sms-daemon;
 
-          # The daemon-Worker wire types are generated into
-          # sms-dashboard/shared/daemon-wire by ts-rs during `cargo test`. Wipe the
-          # directory, regenerate, and fail on any difference from what is checked in
-          # (changed, deleted, or untracked files).
+          # ts-rs writes sms-dashboard/shared/daemon-wire during `cargo test`; fails
+          # on any difference from the checked-in files.
           check-daemon-wire = pkgs.writeShellApplication {
             name = "check-daemon-wire";
             runtimeInputs = with pkgs; [
@@ -213,11 +198,9 @@
             '';
           };
 
-          # Breaking changes between the committed sms-dashboard/openapi.json and the
-          # one on a base ref (default origin/main). /api/control/ is what the Pi
-          # daemon and the Balance Agent speak, and they cannot roll back with the
-          # Worker, so a breaking change there fails; browser routes ship with their
-          # client, so theirs are reported only. OASDIFF_FORMAT=githubactions in CI.
+          # /api/control/ is spoken by the Pi daemon and the Balance Agent, which
+          # cannot roll back with the Worker, so a breaking change there fails;
+          # browser routes ship with their client and are only reported.
           check-api-compat = pkgs.writeShellApplication {
             name = "check-api-compat";
             runtimeInputs = [
@@ -247,7 +230,6 @@
             '';
           };
 
-          # One local entry point for the same Rust validation required by Nix.
           check-daemon = pkgs.writeShellApplication {
             name = "check-daemon";
             runtimeInputs = with pkgs; [
@@ -266,15 +248,8 @@
             '';
           };
 
-          # Dev convenience commands. These land on $PATH inside the devShell (via
-          # direnv `use flake`), so they work from anywhere in the repo tree.
-
-          # Runs the Cloudflare Worker locally with Auth0 secrets injected.
-          #
-          # Secrets never touch disk or command-line arguments. `sops exec-env`
-          # decrypts into this process's environment only, then Wrangler forwards
-          # that environment into the local Worker bindings. A `.dev.vars` file
-          # would leave plaintext credentials behind after a crash.
+          # Secrets stay in the process environment via `sops exec-env`; a
+          # `.dev.vars` file would leave plaintext credentials behind after a crash.
           dev-api = pkgs.writeShellApplication {
             name = "dev-api";
             runtimeInputs = with pkgs; [
@@ -322,8 +297,6 @@
             '';
           };
 
-          # Frontend dev server. The vite invocation itself stays in package.json so
-          # there is one definition of how the frontend starts; this only saves the cd.
           dev-frontend = pkgs.writeShellApplication {
             name = "dev-frontend";
             runtimeInputs = with pkgs; [ git ];
@@ -333,10 +306,8 @@
             '';
           };
 
-          # Routes the Orange Pi subnet out the local LAN gateway, bypassing the
-          # VPN (which grabs 10.171/16 and black-holes Pi traffic). Run this when
-          # on the company VPN and Pi access fails. Sudo prompt is expected.
-          # Pi host is defined in docs/deployment.md (single source of truth).
+          # The company VPN grabs 10.171/16 and black-holes Pi traffic; this routes
+          # the Pi subnet out the local LAN gateway instead.
           pi-route = pkgs.writeShellApplication {
             name = "pi-route";
             runtimeInputs = with pkgs; [ coreutils ];
@@ -353,9 +324,7 @@
             '';
           };
 
-          # Authenticated developer interface for both local Balance Agent
-          # capabilities. Credentials live in macOS Keychain; this wrapper never
-          # reads the SOPS development secret file.
+          # Credentials live in macOS Keychain; never reads the SOPS dev secret file.
           balance-agent-cli = pkgs.writeShellApplication {
             name = "balance-agent";
             runtimeInputs = with pkgs; [ git ];
@@ -365,12 +334,7 @@
             '';
           };
 
-          # Versioned release driver for the Balance Agent desktop app. Builds
-          # the .app, zips it, and emits a SHA-256 checksum. Run:
-          #   nix run .#release-balance-agent -- 0.1.0
-          # Artifacts land under sms-dashboard/balance-agent/release/<version>/.
-          # Ad-hoc (unsigned, unnotarized) per the internal-team-utility policy
-          # in CLAUDE.md; Developer ID signing is deferred.
+          # Ad-hoc signed (unsigned, unnotarized); Developer ID signing is not set up.
           release-balance-agent = pkgs.writeShellApplication {
             name = "release-balance-agent";
             runtimeInputs = with pkgs; [
@@ -404,9 +368,7 @@
             '';
           };
 
-          # Owns the local frontend/API pair. Re-running `dev-server restart`
-          # replaces both processes instead of letting Vite or Wrangler select a
-          # fallback port. State and logs live in /tmp, never in the worktree.
+          # `restart` replaces both processes so Vite and Wrangler never fall back to another port.
           dev-server = pkgs.writeShellApplication {
             name = "dev-server";
             runtimeInputs = with pkgs; [
@@ -610,7 +572,6 @@
               check-api-compat
               ;
             default = sms-daemon;
-            # Alias for easier access
             daemon-rust = orange-pi-daemon-rust;
           };
 
@@ -633,7 +594,6 @@
           devShells = {
             default = pkgs.mkShell {
               packages = [
-                # Dev commands (defined above) — on $PATH anywhere in the repo
                 dev-api
                 dev-frontend
                 dev-server
@@ -643,27 +603,22 @@
                 pi-route
               ]
               ++ (with pkgs; [
-                # Nix tools
                 nixfmt
                 nixd
 
-                # Ops tooling
                 ansible
                 ansible-lint
                 sops
                 age
 
-                # Frontend development
                 bun
 
-                # Rust development
                 cargo
                 rustc
                 rust-analyzer
                 rustfmt
                 clippy
 
-                # Testing tools
                 curl
                 jq
                 pkg-config
@@ -692,7 +647,6 @@
               '';
             };
 
-            # Dedicated daemon development shell (Rust)
             daemon = pkgs.mkShell {
               packages = with pkgs; [
                 nixos-rebuild
@@ -712,9 +666,7 @@
               '';
             };
 
-            # Rust daemon development shell. CI uses it too: small enough to
-            # cache, and it carries the same `check-daemon` gate as the default
-            # shell.
+            # CI uses this shell: small enough to cache, with the same `check-daemon` gate.
             rust = pkgs.mkShell {
               packages = [ check-daemon ] ++ (with pkgs; [
                 cargo

@@ -1,13 +1,6 @@
-# Switching the Pi to a system that CI already built.
-#
-# `.github/workflows/ci.yml` builds the Orange Pi system on an arm64 runner for
-# every push to main and pushes the closure to the Cachix cache below (only the
-# paths cache.nixos.org does not already serve). The job summary prints the
-# `pi-deploy <store path>` line to run here; the Pi then downloads instead of
-# compiling, which keeps a deploy off the SD card's write budget and the CPU.
-#
-# `pi-deploy` runs the switch as a transient systemd unit, so a dropped SSH
-# session does not interrupt it, and follows the unit's log until it is done.
+# CI builds the Orange Pi system and pushes it to the Cachix cache below, so the
+# Pi downloads instead of compiling (sparing the SD card and CPU). The switch runs
+# as a transient systemd unit so a dropped SSH session cannot interrupt it.
 { pkgs, ... }:
 
 let
