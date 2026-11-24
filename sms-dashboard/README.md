@@ -124,6 +124,4 @@ bun run build
 bun run start
 ```
 
-The planned internal release is Nix-built, ad-hoc signed, checksummed, and published
-to this repository's private GitHub Releases. The release flake outputs are still
-pending; see [`../docs/balance-agent-product-plan.md`](../docs/balance-agent-product-plan.md).
+Release: [`../docs/deployment.md`](../docs/deployment.md).

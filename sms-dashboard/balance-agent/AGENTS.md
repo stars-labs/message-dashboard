@@ -65,5 +65,5 @@ package's `check`. Do not copy these files.
 
 ## Release
 
-See [docs/deployment.md](../../docs/deployment.md) and
-[docs/balance-agent-product-plan.md](../../docs/balance-agent-product-plan.md).
+See [docs/deployment.md](../../docs/deployment.md). Design constraints and what
+is out of scope: [docs/balance-agent-cli.md](../../docs/balance-agent-cli.md).

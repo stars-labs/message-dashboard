@@ -28,6 +28,15 @@ Auth0 subject.
   validation, audit records, and normalized balance metrics.
 - Browser profiles are temporary. Human verification remains a visible operator
   handoff and is never bypassed.
+- The desktop product never carries the global `API_KEY`. It signs in with Auth0
+  Device Authorization Flow and requests only the runner scopes.
+- `carrier-browser` runs one job at a time, and that is not configurable: several
+  OTP or captcha windows at once make it easy to act on the wrong SIM. A job
+  waiting for human verification blocks only the browser loop, never `sms-ai`.
+
+Out of scope by decision: solving or outsourcing human verification, browser
+sessions in Cloudflare or another remote browser, recharge or payment, and AI
+actions outside the carrier allowlists.
 
 The first CLI implementation supports macOS because that is the supported Balance
 Agent platform. The Electron application remains the normal operator interface;

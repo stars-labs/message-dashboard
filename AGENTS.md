@@ -71,7 +71,6 @@ no longer reported fails too, so remove it once fixed.
 - [Data model & auth contracts](docs/data-contracts.md)
 - [Deployment procedures](docs/deployment.md)
 - [Balance Agent CLI](docs/balance-agent-cli.md)
-- [Balance Agent release plan](docs/balance-agent-product-plan.md)
 - [SMS hardware safety](docs/sms-hardware-storage-safety-plan.md)
 - [Voice call plan](docs/voice-call-plan.md)
 - [USB topology](docs/usb-topology-explained.md)
