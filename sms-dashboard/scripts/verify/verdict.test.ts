@@ -9,6 +9,19 @@ describe('verify verdict', () => {
     });
   });
 
+  test('fails when teardown could not finish, so evidence may be missing', () => {
+    expect(
+      verdict({
+        error: null,
+        pages: [],
+        teardown: ['trace: Target page, context or browser has been closed'],
+      }),
+    ).toEqual({
+      ok: false,
+      failures: ['teardown: trace: Target page, context or browser has been closed'],
+    });
+  });
+
   test('fails on the journey error and on every page issue', () => {
     expect(
       verdict({

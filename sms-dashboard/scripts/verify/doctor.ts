@@ -30,11 +30,13 @@ export function strayKeychainServices(dump: string): string[] {
   return [...new Set([...services].map((match) => match[1] ?? ''))];
 }
 
-/** PIDs, from `ps -axo pid=,command=`, of processes still serving a stack's temp state. */
+/** PIDs, from `ps -axo pid=,command=`, of processes still using a run's temp state. */
 export function strayStacks(ps: string): string[] {
   return ps
     .split('\n')
-    .filter((line) => line.includes('sms-dashboard-stack-'))
+    .filter(
+      (line) => line.includes('sms-dashboard-stack-') || line.includes('sms-dashboard-agent-app-'),
+    )
     .map((line) => line.trim().split(/\s+/)[0] ?? '')
     .filter((pid) => pid !== '');
 }

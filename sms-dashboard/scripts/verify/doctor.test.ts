@@ -46,7 +46,9 @@ experimental_remote = true
       '  102 /path/workerd serve --config /tmp/sms-dashboard-stack-abc/x',
       '  103 node node_modules/wrangler/bin/wrangler.js dev --port 8787',
       '  104 /bin/zsh',
+      '  105 /x/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron --user-data-dir=/tmp/sms-dashboard-agent-app-q1 /x/balance-agent',
+      '  106 /Applications/Balance Agent.app/Contents/MacOS/Balance Agent',
     ].join('\n');
-    expect(strayStacks(ps)).toEqual(['101', '102']);
+    expect(strayStacks(ps)).toEqual(['101', '102', '105']);
   });
 });

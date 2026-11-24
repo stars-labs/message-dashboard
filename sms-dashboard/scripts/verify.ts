@@ -17,6 +17,7 @@ import { startLocalStack } from './local-stack.ts';
 import type { PageIssue, Viewport } from './page-report.ts';
 import { recordIssues, VIEWPORTS } from './page-visit.ts';
 import { startAgentSandbox, type AgentSandbox } from './verify/agent.ts';
+import { launchAgentApp } from './verify/agent-app.ts';
 import { daemonClient } from './verify/daemon.ts';
 import { remoteBindings, strayKeychainServices, strayStacks } from './verify/doctor.ts';
 import type { JourneyContext } from './verify/journey.ts';
@@ -68,8 +69,27 @@ async function verify(journeyFile: string, out: string): Promise<number> {
 
   const pages: { label: string; page: Page; issues: PageIssue[] }[] = [];
   const agents: AgentSandbox[] = [];
+  const apps: { close: () => Promise<{ forced: boolean }> }[] = [];
+  const notes: string[] = [];
   const evidence: string[] = [];
+  const teardown: string[] = [];
   let error: string | null = null;
+
+  // Teardown keeps going past a failure, so the report is always written.
+  async function attempt(label: string, step: () => Promise<unknown>): Promise<void> {
+    try {
+      await step();
+    } catch (caught) {
+      teardown.push(`${label}: ${errorText(caught)}`);
+    }
+  }
+
+  function track(label: string, page: Page): Page {
+    const issues: PageIssue[] = [];
+    recordIssues(page, issues);
+    pages.push({ label: `${label}#${String(pages.length + 1)}`, page, issues });
+    return page;
+  }
 
   const ai = startFakeAI();
   const stack = await startLocalStack().catch(async (caught: unknown) => {
@@ -99,13 +119,19 @@ async function verify(journeyFile: string, out: string): Promise<number> {
             agents.push(sandbox);
             return sandbox;
           },
+          async agentApp() {
+            const launched = await launchAgentApp();
+            apps.push(launched);
+            return {
+              app: launched.app,
+              userData: launched.userData,
+              open: async () => track('agent-app', await launched.open()),
+            };
+          },
           async page(viewport: Viewport = 'desktop') {
             const page = await context.newPage();
-            const issues: PageIssue[] = [];
-            recordIssues(page, issues);
             await page.setViewportSize(VIEWPORTS[viewport]);
-            pages.push({ label: `${viewport}#${String(pages.length + 1)}`, page, issues });
-            return page;
+            return track(viewport, page);
           },
           async evidence(name, data) {
             await writeFile(join(out, `${name}.json`), `${JSON.stringify(data, null, 2)}\n`);
@@ -116,23 +142,39 @@ async function verify(journeyFile: string, out: string): Promise<number> {
         error = errorText(caught);
       }
       for (const { label, page } of pages) {
-        if (!page.isClosed()) await page.screenshot({ path: join(out, `${label}.png`) });
+        if (!page.isClosed()) {
+          await attempt(`screenshot ${label}`, () =>
+            page.screenshot({ path: join(out, `${label}.png`) }),
+          );
+        }
       }
-      await context.tracing.stop({ path: join(out, 'trace.zip') });
+      await attempt('trace', () => context.tracing.stop({ path: join(out, 'trace.zip') }));
     } finally {
-      await browser.close();
+      for (const app of apps) {
+        await attempt('Balance Agent app', async () => {
+          if ((await app.close()).forced) {
+            notes.push('the Balance Agent app did not quit within 10s and was killed');
+          }
+        });
+      }
+      await attempt('browser', () => browser.close());
     }
   } finally {
-    for (const sandbox of agents) await sandbox.stop();
-    await ai.stop();
-    await stack.stop();
+    for (const sandbox of agents) await attempt('Balance Agent sandbox', () => sandbox.stop());
+    await attempt('fake AI', () => ai.stop());
+    await attempt('stack', () => stack.stop());
   }
 
-  const result = verdict({ error, pages: pages.map(({ label, issues }) => ({ label, issues })) });
+  const result = verdict({
+    error,
+    pages: pages.map(({ label, issues }) => ({ label, issues })),
+    teardown,
+  });
   await writeFile(
     join(out, 'report.json'),
-    `${JSON.stringify({ journey: resolve(journeyFile), ...result, evidence, aiPrompts: ai.prompts }, null, 2)}\n`,
+    `${JSON.stringify({ journey: resolve(journeyFile), ...result, notes, evidence, aiPrompts: ai.prompts }, null, 2)}\n`,
   );
+  for (const note of notes) console.error(`NOTE ${note}`);
   for (const failure of result.failures) console.error(`FAIL ${failure}`);
   console.log(`${result.ok ? 'PASS' : 'FAIL'} ${journeyFile} — evidence in ${out}/`);
   return result.ok ? 0 : 1;
