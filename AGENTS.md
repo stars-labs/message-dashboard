@@ -48,7 +48,8 @@ Entering the dev shell (`nix develop`) installs them from `flake.nix`
 until then its commits fail. Never skip them with `--no-verify`.
 
 - **pre-commit**, on staged files: prettier and ESLint for `sms-dashboard/`,
-  `cargo fmt --check` for `orange-pi-daemon/`.
+  `cargo fmt --check` for `orange-pi-daemon/`, `check-nix` (nixfmt, deadnix,
+  statix) for `.nix` files. `nix fmt` formats every Nix file.
 - **pre-push**, on the files the pushed commits change: `bun run check` for
   `sms-dashboard/`, `check-daemon` for the daemon and its control fixtures, the
   Orange Pi system eval for `flake.*` and `nixos-config/`. `bun run e2e` is not a

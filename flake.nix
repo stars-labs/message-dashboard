@@ -230,6 +230,12 @@
             '';
           };
 
+          # Wrangler runs on Node only (see dev-api).
+          dashboardTools = with pkgs; [
+            bun
+            nodejs_22
+          ];
+
           check-nix = pkgs.writeShellApplication {
             name = "check-nix";
             runtimeInputs = with pkgs; [
@@ -720,6 +726,7 @@
                 check-nix
                 pi-route
               ]
+              ++ dashboardTools
               ++ (with pkgs; [
                 nixfmt
                 nixd
@@ -728,8 +735,6 @@
                 ansible-lint
                 sops
                 age
-
-                bun
 
                 cargo
                 rustc
@@ -770,6 +775,9 @@
                 export ANSIBLE_COLLECTIONS_PATHS="$HOME/.ansible/collections:/usr/share/ansible/collections:/etc/ansible/collections:''${ANSIBLE_COLLECTIONS_PATHS:-}"
               '';
             };
+
+            # CI's dashboard jobs: the dashboard's toolchain and nothing else.
+            dashboard = pkgs.mkShell { packages = dashboardTools; };
 
             daemon = pkgs.mkShell {
               packages = with pkgs; [

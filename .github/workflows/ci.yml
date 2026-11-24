@@ -1,7 +1,7 @@
 # Gates for every push and pull request. Each job mirrors a local command the
 # agent guides already require: `check-daemon` for the Rust daemon, `bun run check`
 # (typecheck, lint, test, build) and `bun run e2e` for the dashboard, `check-api-compat` on pull
-# requests, and an evaluation of the Orange Pi system so a broken NixOS module is
+# requests, and a lint and evaluation of the Nix files so a broken NixOS module is
 # caught before a deploy. On main the Pi
 # system is also built on an arm64 runner and pushed to Cachix, so the Pi only
 # downloads (`pi-deploy <path>`, see docs/deployment.md). Deploys themselves
@@ -50,17 +50,17 @@ jobs:
       - name: rustfmt check, strict Clippy, and full test suite
         run: nix develop .#rust -c check-daemon
 
+  # Bun and Node come from the flake's `dashboard` shell, as they do locally.
   dashboard:
     name: Dashboard (bun run check)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: sms-dashboard
+        shell: nix develop ..#dashboard -c bash -e {0}
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
+      - uses: cachix/install-nix-action@v31
       - run: bun install --frozen-lockfile
       - run: bun run check
 
@@ -70,15 +70,10 @@ jobs:
     defaults:
       run:
         working-directory: sms-dashboard
+        shell: nix develop ..#dashboard -c bash -e {0}
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      # Wrangler runs on Node only (see dev-api in flake.nix).
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - uses: cachix/install-nix-action@v31
       - run: bun install --frozen-lockfile
       - run: PLAYWRIGHT_BROWSERS_PATH=0 bunx playwright-core install chromium --no-shell --with-deps
       - run: bun run e2e
@@ -112,6 +107,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
+      - name: nixfmt, deadnix and statix on every Nix file
+        run: nix build --no-link -L .#checks.x86_64-linux.nix-lint
       - name: Evaluate the Pi system closure
         run: nix eval --raw .#nixosConfigurations.orange-pi.config.system.build.toplevel.drvPath
 
