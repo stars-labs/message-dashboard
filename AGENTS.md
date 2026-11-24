@@ -41,6 +41,19 @@ or slider bypasses — human verification is an operator handoff.
 **Scope** — Never revert or overwrite user changes. Keep changes inside the
 component that owns the behavior.
 
+## Git hooks
+
+Entering the dev shell (`nix develop`) installs them from `flake.nix`
+(`pre-commit.settings.hooks`); a worktree needs its own `nix develop` once, and
+until then its commits fail. Never skip them with `--no-verify`.
+
+- **pre-commit**, on staged files: prettier and ESLint for `sms-dashboard/`,
+  `cargo fmt --check` for `orange-pi-daemon/`.
+- **pre-push**, on the files the pushed commits change: `bun run check` for
+  `sms-dashboard/`, `check-daemon` for the daemon and its control fixtures, the
+  Orange Pi system eval for `flake.*` and `nixos-config/`. `bun run e2e` is not a
+  hook; run it for client or server changes.
+
 ## Reference docs
 
 - [Data model & auth contracts](docs/data-contracts.md)

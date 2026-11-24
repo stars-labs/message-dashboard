@@ -14,10 +14,15 @@
       url = "github:Mic92/sops-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     lanzaboote = {
       url = "github:nix-community/lanzaboote";
       inputs = {
         nixpkgs.follows = "nixpkgs";
+        pre-commit.follows = "git-hooks";
       };
     };
   };
@@ -32,6 +37,8 @@
       ...
     }@inputs:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      imports = [ inputs.git-hooks.flakeModule ];
+
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -227,6 +234,24 @@
               echo "browser routes (deployed with their client): reported only"
               oasdiff breaking --format "$format" \
                 --unmatch-path '^/api/control/' "$base" "$root/$spec"
+            '';
+          };
+
+          # pre-commit runs from the repository root and passes paths from it;
+          # each tool runs from its own project directory.
+          in-project = pkgs.writeShellApplication {
+            name = "in-project";
+            runtimeInputs = with pkgs; [
+              bun
+              cargo
+              git
+              rustfmt
+            ];
+            text = ''
+              project="$1"
+              shift
+              cd "$(git rev-parse --show-toplevel)/$project"
+              exec "''${@#"$project"/}"
             '';
           };
 
@@ -599,6 +624,59 @@
                 touch "$out"
               '';
 
+          pre-commit = {
+            # The dashboard hooks need node_modules, which the Nix sandbox lacks.
+            check.enable = false;
+            settings.hooks = {
+              dashboard-format = {
+                enable = true;
+                name = "prettier (staged dashboard files)";
+                entry = "${lib.getExe in-project} sms-dashboard bun run prettier --check --ignore-unknown";
+                files = "^sms-dashboard/";
+                stages = [ "pre-commit" ];
+              };
+              dashboard-lint = {
+                enable = true;
+                name = "eslint (staged dashboard files)";
+                entry = "${lib.getExe in-project} sms-dashboard bun run --bun eslint --max-warnings 0 --no-warn-ignored";
+                files = "^sms-dashboard/.*\\.(ts|svelte)$";
+                stages = [ "pre-commit" ];
+              };
+              daemon-format = {
+                enable = true;
+                name = "cargo fmt (daemon)";
+                entry = "${lib.getExe in-project} orange-pi-daemon cargo fmt --all --check";
+                files = "^orange-pi-daemon/.*\\.rs$";
+                pass_filenames = false;
+                stages = [ "pre-commit" ];
+              };
+              dashboard-check = {
+                enable = true;
+                name = "bun run check";
+                entry = "${lib.getExe in-project} sms-dashboard bun run check";
+                files = "^sms-dashboard/";
+                pass_filenames = false;
+                stages = [ "pre-push" ];
+              };
+              daemon-check = {
+                enable = true;
+                name = "check-daemon";
+                entry = lib.getExe check-daemon;
+                files = "^(orange-pi-daemon/|sms-dashboard/shared/control-fixtures/)";
+                pass_filenames = false;
+                stages = [ "pre-push" ];
+              };
+              pi-eval = {
+                enable = true;
+                name = "Orange Pi system evaluates";
+                entry = "nix eval --raw .#nixosConfigurations.orange-pi.config.system.build.toplevel.drvPath";
+                files = "^(flake\\.(nix|lock)$|nixos-config/)";
+                pass_filenames = false;
+                stages = [ "pre-push" ];
+              };
+            };
+          };
+
           devShells = {
             default = pkgs.mkShell {
               packages = [
@@ -634,6 +712,11 @@
               ]);
 
               shellHook = ''
+                ${config.pre-commit.installationScript}
+                # git-hooks.nix records a relative core.hooksPath, which a linked
+                # worktree resolves inside itself, so its commits skip every hook.
+                ${lib.getExe pkgs.git} config --local core.hooksPath \
+                  "$(${lib.getExe pkgs.git} rev-parse --path-format=absolute --git-common-dir)/hooks"
                 echo "SMS Dashboard Development Environment"
                 echo ""
                 echo "Available projects:"
