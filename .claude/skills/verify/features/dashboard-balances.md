@@ -46,7 +46,13 @@ Proof: the notice, the check and job rows, and the history row.
 ## Gotchas
 
 - Seed eligibility: S01 is postpaid (no 查询), S03 is a disconnected secondary, so
-  S02 (M1 prepaid, browser profile) is the only SIM you can query.
+  S02 (M1 prepaid, browser profile) is the only SIM you can query as seeded.
+  [agent-sms-ai-run](agent-sms-ai-run.md) makes S03 queryable through production
+  paths.
+- The page keeps the SIM list it loaded: a SIM edited on 设备与卡 keeps its old role
+  and 查询 state here until the page reloads.
+- A query whose method needs the Balance Agent opens 查询助手未就绪 when none is
+  signed in; 仍然排队 queues it anyway.
 - Notices are inline and dismissible (`关闭提示`), not the toast stack.
 - A second query for the same SIM within 24h is refused (429) by design.
 - Statuses advance only when a runner acts: drive the agent journeys for 等待本机 →

@@ -36,6 +36,10 @@ query a carrier or touch production. Keep it that way:
   Auth0 tenant.
 - Never automate a CAPTCHA or slider. Carrier-browser human verification is an
   operator handoff, not a journey.
+- Never claim a carrier-browser job, click 登录 in the Balance Agent app, or type an AI
+  token into it: each reaches outside the run (see the agent files).
+- Run the Balance Agent only through `agent()` / `agentApp()`, never bare: bare, it
+  reads and writes the operator's own installation.
 
 ## Proof and skip reporting
 
@@ -65,6 +69,16 @@ Walk the index top to bottom.
   search, edit a SIM's fields.
 - [dashboard-balances](dashboard-balances.md): the Balance module: balances per SIM
   and starting a balance query.
+
+## Balance Agent
+
+- [agent-cli](agent-cli.md): configure, device login, status, doctor and run, in a
+  sandboxed CLI.
+- [agent-sms-ai-run](agent-sms-ai-run.md): a carrier menu reply turned into a skill
+  job, the AI's decision, and the follow-up SMS.
+- [agent-app](agent-app.md): the menu-bar app's window: status and settings.
+- [agent-carrier-browser](agent-carrier-browser.md): carrier portal queries. Manual
+  only past the queued job.
 
 ## Entry contract
 

@@ -49,7 +49,8 @@ Proof: the 已提交 state, the 等待发送 feed row, and the D1 row.
 
 - Scope everything to the drawer and select fields by placeholder. At 1440px two
   composers are mounted (the drawer and the hidden 1536px column) with the same ids,
-  so `getByLabel('发送卡')` and `#sim-selection` resolve outside the drawer.
+  so `getByLabel('发送卡')` and `#sim-selection` resolve outside the drawer
+  ([GRA-227](https://linear.app/gray-arrow/issue/GRA-227)).
 - The drawer's backdrop covers the page and swallows clicks. Close it (`关闭发送短信`)
   before driving anything else. Nav buttons close it; `page.goto` does not.
 - Only S01 and S02 are offered: S03's modem is disconnected, so it is not `active`.

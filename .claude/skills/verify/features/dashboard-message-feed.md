@@ -59,4 +59,5 @@ row for the spam toggle; the detail's text for detail.
   重置本地缓存 (mobile) before asserting on fresh data.
 - New rows are highlighted for 10s; don't assert on the highlight class.
 - A sent row added by the composer labels its SIM by ICCID tail (`00000002`) rather
-  than `S02` until the feed reloads; seeded sent rows show `S02`.
+  than `S02` until the feed reloads; seeded sent rows show `S02`
+  ([GRA-228](https://linear.app/gray-arrow/issue/GRA-228)).
