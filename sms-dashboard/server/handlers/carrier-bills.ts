@@ -1,16 +1,24 @@
 import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
-import { queryAll, queryFirst, type D1, type D1Batch } from '../lib/d1.js';
+import type { D1, D1Batch } from '../lib/d1.js';
 import {
-  CarrierBillingLinkedSim,
-  type CarrierBillingAccountsResponse,
-} from '../../shared/api/carrier-billing.js';
+  applyBillAction,
+  findBill,
+  findBillIdByIdempotencyKey,
+  findBillSourceMessage,
+  listBillEvents,
+  listBills,
+  type BillRow,
+} from '../db/carrier-bills.js';
+import {
+  listBillingAccountMembers,
+  listBillingAccounts,
+  listLinkedSims,
+} from '../db/carrier-billing.js';
+import type { CarrierBillingAccountsResponse } from '../../shared/api/carrier-billing.js';
 import {
   BILL_URGENCIES,
-  CarrierBill,
-  CarrierBillEvent,
-  CarrierBillSourceMessage,
   type CarrierBillConflict,
   type CarrierBillMutationResponse,
   type CarrierBillResponse,
@@ -22,65 +30,6 @@ import {
 type BillUrgency = (typeof BILL_URGENCIES)[number];
 
 type BillAction = 'payment_planned' | 'mark_paid' | 'waive' | 'reopen';
-
-const BILL_COLUMNS = [
-  'id',
-  'billing_account_id',
-  'source_message_id',
-  'amount_minor',
-  'currency',
-  'due_date',
-  'received_at',
-  'parser_version',
-  'action_status',
-  'payment_planned_at',
-  'paid_at',
-  'paid_by',
-  'operator_note',
-  'version',
-  'created_at',
-  'updated_at',
-]
-  .map((column) => `b.${column}`)
-  .join(', ');
-
-/** A carrier_bills row joined with its account and notification SIM. */
-const BillRow = v.object({
-  ...v.omit(CarrierBill, ['account_ref_masked', 'notification_sim', 'urgency', 'days_remaining'])
-    .entries,
-  account_ref_last4: v.string(),
-  notification_sim_index: v.nullable(v.number()),
-  notification_sim_number: v.nullable(v.string()),
-});
-
-type BillRow = v.InferOutput<typeof BillRow>;
-
-const BillEventRow = v.object({
-  ...v.omit(CarrierBillEvent, ['metadata']).entries,
-  metadata_json: v.string(),
-});
-
-const PriorEventRow = v.object({ bill_id: v.string() });
-
-const AccountRow = v.object({
-  id: v.string(),
-  country_code: v.string(),
-  carrier: v.string(),
-  currency: v.string(),
-  display_name: v.string(),
-  account_ref_last4: v.string(),
-  status: v.string(),
-  version: v.number(),
-  notification_sim_iccid: v.string(),
-  notification_sim_index: v.nullable(v.number()),
-  notification_sim_number: v.nullable(v.string()),
-  payment_due_count: v.number(),
-});
-
-const AccountMemberRow = v.object({
-  billing_account_id: v.string(),
-  ...CarrierBillingLinkedSim.entries,
-});
 
 type BillDb = D1<'all' | 'first' | 'run'> & D1Batch<'all' | 'first' | 'run'>;
 
@@ -153,29 +102,6 @@ function presentBill(row: BillRow, today: string) {
   };
 }
 
-const BILL_SELECT = `
-  SELECT
-    ${BILL_COLUMNS},
-    a.display_name AS account_display_name,
-    a.carrier,
-    a.account_ref_last4,
-    a.notification_sim_iccid,
-    d.sim_index AS notification_sim_index,
-    d.number AS notification_sim_number,
-    (
-      SELECT COUNT(*)
-      FROM carrier_billing_account_sims s
-      WHERE s.billing_account_id = a.id AND s.removed_at IS NULL
-    ) AS linked_sim_count
-  FROM carrier_bills b
-  INNER JOIN carrier_billing_accounts a ON a.id = b.billing_account_id
-  LEFT JOIN device_view d ON d.iccid = a.notification_sim_iccid
-`;
-
-async function findBill(db: D1<'first'>, id: string): Promise<BillRow | null> {
-  return queryFirst(db.prepare(`${BILL_SELECT} WHERE b.id = ?`).bind(id), BillRow);
-}
-
 function parseMetadata(text: string): unknown {
   const parsed = parseJson(text, v.unknown());
   return parsed.ok && typeof parsed.value === 'object' && parsed.value !== null ? parsed.value : {};
@@ -186,54 +112,12 @@ async function billDetail(db: D1<'all' | 'first'>, id: string, today: string) {
   if (!row) return null;
 
   const [members, events] = await Promise.all([
-    queryAll(
-      db
-        .prepare(
-          `
-      SELECT
-        s.sim_iccid AS iccid,
-        d.sim_index,
-        d.number,
-        s.verification_source,
-        s.verified_at,
-        s.verified_by
-      FROM carrier_billing_account_sims s
-      LEFT JOIN device_view d ON d.iccid = s.sim_iccid
-      WHERE s.billing_account_id = ? AND s.removed_at IS NULL
-      ORDER BY d.sim_index, s.sim_iccid
-    `,
-        )
-        .bind(row.billing_account_id),
-      CarrierBillingLinkedSim,
-    ),
-    queryAll(
-      db
-        .prepare(
-          `
-      SELECT id, event_type, actor_type, actor_subject, source_message_id,
-        metadata_json, created_at
-      FROM carrier_bill_events
-      WHERE bill_id = ?
-      ORDER BY created_at, id
-    `,
-        )
-        .bind(id),
-      BillEventRow,
-    ),
+    listLinkedSims(db, row.billing_account_id),
+    listBillEvents(db, id),
   ]);
 
   const sourceMessage = row.source_message_id
-    ? await queryFirst(
-        db
-          .prepare(
-            `
-      SELECT id, phone_number AS sender, content, timestamp
-      FROM messages WHERE id = ?
-    `,
-          )
-          .bind(row.source_message_id),
-        CarrierBillSourceMessage,
-      )
+    ? await findBillSourceMessage(db, row.source_message_id)
     : null;
 
   return {
@@ -290,17 +174,7 @@ async function mutateBill(
   const expectedVersion = body.expected_version;
   const note = emptyToNull(body.note);
 
-  const prior = await queryFirst(
-    db
-      .prepare(
-        `
-    SELECT bill_id FROM carrier_bill_events
-    WHERE actor_subject = ? AND idempotency_key = ?
-  `,
-      )
-      .bind(actor, idempotencyKey),
-    PriorEventRow,
-  );
+  const prior = await findBillIdByIdempotencyKey(db, actor, idempotencyKey);
   if (prior) {
     if (prior.bill_id !== billId) {
       throw new ORPCError('CONFLICT', {
@@ -340,58 +214,21 @@ async function mutateBill(
 
   let updated: boolean;
   try {
-    const results = await db.batch([
-      db
-        .prepare(
-          `
-        UPDATE carrier_bills
-        SET action_status = ?,
-            payment_planned_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
-            paid_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
-            paid_by = CASE WHEN ? = 1 THEN ? ELSE NULL END,
-            operator_note = COALESCE(?, operator_note),
-            version = version + 1,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND version = ?
-      `,
-        )
-        .bind(
-          next.status,
-          next.planned ? 1 : 0,
-          next.paid ? 1 : 0,
-          next.paid ? 1 : 0,
-          actor,
-          note,
-          billId,
-          expectedVersion,
-        ),
-      db
-        .prepare(
-          `
-        INSERT INTO carrier_bill_events (
-          id, bill_id, event_type, actor_type, actor_subject,
-          idempotency_key, metadata_json
-        )
-        SELECT ?, ?, ?, 'user', ?, ?, ?
-        WHERE changes() = 1
-      `,
-        )
-        .bind(eventId, billId, next.event, actor, idempotencyKey, metadata),
-    ]);
-
-    updated = results[0]?.meta.changes === 1;
+    updated = await applyBillAction(db, {
+      billId,
+      expectedVersion,
+      actor,
+      idempotencyKey,
+      note,
+      status: next.status,
+      planned: next.planned,
+      paid: next.paid,
+      eventId,
+      eventType: next.event,
+      metadata,
+    });
   } catch (error) {
-    const raced = await queryFirst(
-      db
-        .prepare(
-          `
-      SELECT bill_id FROM carrier_bill_events
-      WHERE actor_subject = ? AND idempotency_key = ?
-    `,
-        )
-        .bind(actor, idempotencyKey),
-      PriorEventRow,
-    );
+    const raced = await findBillIdByIdempotencyKey(db, actor, idempotencyKey);
     if (raced?.bill_id === billId) {
       return { success: true, idempotent: true, bill: await storedBillDetail(db, billId) };
     }
@@ -412,45 +249,16 @@ export const carrierBillsHandler = {
     query: v.InferOutput<typeof CarrierBillsQuery>,
   ): Promise<CarrierBillsResponse> {
     const today = singaporeDate();
-    const clauses: string[] = [];
-    const params: string[] = [];
     const { carrier, account_id: accountId, from, to, status } = query;
 
-    if (carrier) {
-      clauses.push('a.carrier = ?');
-      params.push(carrier);
+    if (from && !validIsoDate(from)) {
+      throw new ORPCError('BAD_REQUEST', { message: 'from must be an ISO date' });
     }
-    if (accountId) {
-      clauses.push('a.id = ?');
-      params.push(accountId);
-    }
-    if (from) {
-      if (!validIsoDate(from)) {
-        throw new ORPCError('BAD_REQUEST', { message: 'from must be an ISO date' });
-      }
-      clauses.push('b.due_date >= ?');
-      params.push(from);
-    }
-    if (to) {
-      if (!validIsoDate(to)) {
-        throw new ORPCError('BAD_REQUEST', { message: 'to must be an ISO date' });
-      }
-      clauses.push('b.due_date <= ?');
-      params.push(to);
+    if (to && !validIsoDate(to)) {
+      throw new ORPCError('BAD_REQUEST', { message: 'to must be an ISO date' });
     }
 
-    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-    const rows = await queryAll(
-      env.DB.prepare(
-        `
-      ${BILL_SELECT}
-      ${where}
-      ORDER BY b.due_date, b.id
-      LIMIT 500
-    `,
-      ).bind(...params),
-      BillRow,
-    );
+    const rows = await listBills(env.DB, { carrier, accountId, from, to });
     let bills = rows.map((row) => presentBill(row, today));
     if (status)
       bills = bills.filter((bill) => bill.urgency === status || bill.action_status === status);
@@ -465,46 +273,8 @@ export const carrierBillsHandler = {
 
   async listAccounts({ env }: ReadCall): Promise<CarrierBillingAccountsResponse> {
     const [accounts, members] = await Promise.all([
-      queryAll(
-        env.DB.prepare(
-          `
-        SELECT
-          a.id, a.country_code, a.carrier, a.currency, a.display_name,
-          a.account_ref_last4, a.status, a.version, a.notification_sim_iccid,
-          d.sim_index AS notification_sim_index,
-          d.number AS notification_sim_number,
-          (
-            SELECT COUNT(*)
-            FROM carrier_bills b
-            WHERE b.billing_account_id = a.id
-              AND b.action_status IN ('unpaid', 'payment_planned')
-          ) AS payment_due_count
-        FROM carrier_billing_accounts a
-        LEFT JOIN device_view d ON d.iccid = a.notification_sim_iccid
-        ORDER BY a.carrier, a.display_name, a.id
-      `,
-        ),
-        AccountRow,
-      ),
-      queryAll(
-        env.DB.prepare(
-          `
-        SELECT
-          s.billing_account_id,
-          s.sim_iccid AS iccid,
-          d.sim_index,
-          d.number,
-          s.verification_source,
-          s.verified_at,
-          s.verified_by
-        FROM carrier_billing_account_sims s
-        LEFT JOIN device_view d ON d.iccid = s.sim_iccid
-        WHERE s.removed_at IS NULL
-        ORDER BY s.billing_account_id, d.sim_index, s.sim_iccid
-      `,
-        ),
-        AccountMemberRow,
-      ),
+      listBillingAccounts(env.DB),
+      listBillingAccountMembers(env.DB),
     ]);
     return {
       success: true,

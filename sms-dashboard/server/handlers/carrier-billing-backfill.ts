@@ -9,7 +9,8 @@ import {
   type BackfillPreviewResponse,
   type BackfillVersionConflict,
 } from '../../shared/api/carrier-billing.js';
-import { queryFirst, type D1 } from '../lib/d1.js';
+import type { D1 } from '../lib/d1.js';
+import { findPriorBackfillExecution, insertBackfillExecutedEvent } from '../db/carrier-billing.js';
 import {
   previewCarrierBillBackfill,
   AccountNotReadyError,
@@ -19,11 +20,6 @@ import { processCarrierBillMessage } from '../utils/carrier-billing.js';
 
 /** The stored result of an execution, which a retry with the same key replays. */
 const StoredExecution = v.object({ summary: v.optional(BackfillExecuteSummary) });
-
-const PriorExecutionRow = v.object({
-  billing_account_id: v.string(),
-  metadata_json: v.string(),
-});
 
 interface PreviewCall {
   env: { DB: D1<'first' | 'all'> };
@@ -75,16 +71,7 @@ export const carrierBillingBackfillHandler = {
       });
     }
     const accountId = body.account_id;
-    const prior = await queryFirst(
-      env.DB.prepare(
-        `
-      SELECT billing_account_id, metadata_json
-      FROM carrier_billing_account_events
-      WHERE actor_subject = ? AND idempotency_key = ?
-    `,
-      ).bind(actor, key),
-      PriorExecutionRow,
-    );
+    const prior = await findPriorBackfillExecution(env.DB, actor, key);
     if (prior) {
       if (prior.billing_account_id !== accountId) {
         throw new ORPCError('CONFLICT', {
@@ -138,28 +125,17 @@ export const carrierBillingBackfillHandler = {
       }
     }
 
-    await env.DB.prepare(
-      `
-      INSERT INTO carrier_billing_account_events (
-        id, billing_account_id, event_type, actor_subject,
-        idempotency_key, metadata_json
-      ) VALUES (?, ?, 'backfill_executed', ?, ?, ?)
-    `,
-    )
-      .bind(
-        crypto.randomUUID(),
-        accountId,
-        actor,
-        key,
-        JSON.stringify({
-          preview_digest: preview.preview_digest,
-          summary,
-          source_message_groups: preview.candidates.map(
-            (candidate) => candidate.source_message_ids,
-          ),
-        }),
-      )
-      .run();
+    await insertBackfillExecutedEvent(env.DB, {
+      id: crypto.randomUUID(),
+      billingAccountId: accountId,
+      actor,
+      idempotencyKey: key,
+      metadata: JSON.stringify({
+        preview_digest: preview.preview_digest,
+        summary,
+        source_message_groups: preview.candidates.map((candidate) => candidate.source_message_ids),
+      }),
+    });
     return { success: true, summary };
   },
 };

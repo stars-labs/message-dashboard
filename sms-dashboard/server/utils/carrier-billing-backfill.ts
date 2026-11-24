@@ -1,5 +1,10 @@
-import * as v from 'valibot';
-import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import type { D1 } from '../lib/d1.js';
+import { findBillAmountForCycle, findProcessedBillAmong } from '../db/carrier-bills.js';
+import {
+  findBillableAccount,
+  listBackfillMessages,
+  type ScanMessage,
+} from '../db/carrier-billing.js';
 import { parseSingtelPostpaidBillSms } from './singtel-postpaid-bill.js';
 import type {
   BackfillAccount,
@@ -29,34 +34,6 @@ export interface BackfillPreview {
   candidates: BackfillCandidate[];
   preview_digest: string;
 }
-
-/** The billing account row the preview requires. */
-const BillableAccountRow = v.object({
-  id: v.string(),
-  display_name: v.string(),
-  account_ref_digest: v.string(),
-  account_ref_last4: v.string(),
-  notification_sim_iccid: v.string(),
-  status: v.picklist(['pending_verification', 'active', 'inactive']),
-  version: v.number(),
-  notification_sim_index: v.nullable(v.number()),
-});
-
-/** The message columns the scan reads. */
-const ScanMessageRow = v.object({
-  id: v.string(),
-  phone_iccid: v.string(),
-  phone_number: v.string(),
-  content: v.string(),
-  timestamp: v.nullable(v.string()),
-  type: v.string(),
-});
-
-type ScanMessage = v.InferOutput<typeof ScanMessageRow>;
-
-const ProcessedRow = v.object({ bill_id: v.string() });
-
-const CycleRow = v.object({ amount_minor: v.number(), currency: v.string() });
 
 function timeOf(timestamp: string | null): number {
   return timestamp === null ? Number.NaN : Date.parse(timestamp);
@@ -89,38 +66,10 @@ async function dispositionFor(
     'source_message_ids' | 'due_date' | 'amount_minor' | 'currency'
   >,
 ): Promise<BackfillCandidate['disposition']> {
-  const placeholders = candidate.source_message_ids.map(() => '?').join(', ');
-  const processed = await queryFirst(
-    db
-      .prepare(
-        `
-    SELECT id AS bill_id
-    FROM carrier_bills
-    WHERE source_message_id IN (${placeholders})
-    UNION ALL
-    SELECT bill_id
-    FROM carrier_bill_events
-    WHERE source_message_id IN (${placeholders})
-    LIMIT 1
-  `,
-      )
-      .bind(...candidate.source_message_ids, ...candidate.source_message_ids),
-    ProcessedRow,
-  );
+  const processed = await findProcessedBillAmong(db, candidate.source_message_ids);
   if (processed) return 'already_processed';
 
-  const cycle = await queryFirst(
-    db
-      .prepare(
-        `
-    SELECT amount_minor, currency
-    FROM carrier_bills
-    WHERE billing_account_id = ? AND due_date = ?
-  `,
-      )
-      .bind(accountId, candidate.due_date),
-    CycleRow,
-  );
+  const cycle = await findBillAmountForCycle(db, accountId, candidate.due_date);
   if (!cycle) return 'new';
   return cycle.amount_minor === candidate.amount_minor && cycle.currency === candidate.currency
     ? 'duplicate'
@@ -131,56 +80,18 @@ export async function previewCarrierBillBackfill(
   db: D1<'first' | 'all'>,
   accountId: string,
 ): Promise<BackfillPreview> {
-  const account = await queryFirst(
-    db
-      .prepare(
-        `
-    SELECT
-      a.id, a.display_name, a.account_ref_digest, a.account_ref_last4,
-      a.notification_sim_iccid, a.status, a.version,
-      d.sim_index AS notification_sim_index
-    FROM carrier_billing_accounts a
-    INNER JOIN device_view d
-      ON d.iccid = a.notification_sim_iccid
-      AND d.country = 'SG'
-      AND d.carrier = 'Singtel'
-      AND d.service_type = 'postpaid'
-    WHERE a.id = ?
-      AND a.status = 'active'
-      AND a.country_code = 'SG'
-      AND a.carrier = 'Singtel'
-      AND EXISTS (
-        SELECT 1 FROM carrier_billing_account_sims s
-        WHERE s.billing_account_id = a.id
-          AND s.sim_iccid = a.notification_sim_iccid
-          AND s.removed_at IS NULL
-      )
-  `,
-      )
-      .bind(accountId),
-    BillableAccountRow,
-  );
+  const account = await findBillableAccount(db, accountId);
   if (!account) {
     throw new AccountNotReadyError(
       'Billing account must be active with a verified notification SIM',
     );
   }
 
-  const messages = await queryAll(
-    db
-      .prepare(
-        `
-    SELECT id, phone_iccid, phone_number, content, timestamp, type
-    FROM messages
-    WHERE phone_iccid = ?
-      AND phone_number = 'Singtel'
-      AND type = 'received'
-      AND (instr(content, ?) = 1 OR trim(content) = ?)
-    ORDER BY timestamp, id
-  `,
-      )
-      .bind(account.notification_sim_iccid, BILL_PREFIX, BILL_FRAGMENT_SUFFIX),
-    ScanMessageRow,
+  const messages = await listBackfillMessages(
+    db,
+    account.notification_sim_iccid,
+    BILL_PREFIX,
+    BILL_FRAGMENT_SUFFIX,
   );
   const used = new Set<string>();
   const candidates: Omit<BackfillCandidate, 'disposition'>[] = [];
