@@ -1,13 +1,15 @@
 import { describe, expect, test } from 'bun:test';
+import { createCarrierBrowserJobProcessor } from './carrier-browser-workflow.js';
 import {
   TEMPORARY_CHROME_ARGS,
-  createCarrierBrowserJobProcessor,
   createTemporaryChromePreferences,
+} from './carrier-browser/chrome-profile.js';
+import {
   isUnicomErrorPage,
   validateCarrierBrowserJob,
   validateUnicomBrowserJob,
-  waitForFirstVisible,
-} from './carrier-browser-workflow.js';
+} from './carrier-browser/job-target.js';
+import { waitForFirstVisible } from './carrier-browser/locators.js';
 import type { CarrierWebBalanceJob } from '../../../../shared/api/carrier-web-balance.js';
 import { fakeControlClient } from '../../test-support/control-client.js';
 
