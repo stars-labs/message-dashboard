@@ -52,8 +52,15 @@ until then its commits fail. Never skip them with `--no-verify`.
   statix) for `.nix` files. `nix fmt` formats every Nix file.
 - **pre-push**, on the files the pushed commits change: `bun run check` for
   `sms-dashboard/`, `check-daemon` for the daemon and its control fixtures, the
-  Orange Pi system eval for `flake.*` and `nixos-config/`. `bun run e2e` is not a
-  hook; run it for client or server changes.
+  Orange Pi system eval for `flake.*` and `nixos-config/`, and `audit-deps` when a
+  manifest or lockfile changes. `bun run e2e` is not a hook; run it for client or
+  server changes.
+
+`audit-deps` (needs the network) runs `cargo deny check` in the daemon
+(`deny.toml`: advisories, licenses, sources) and `bun run audit` in the dashboard.
+An advisory is accepted only with a reason: `[advisories] ignore` in `deny.toml`,
+`ACCEPTED` in `sms-dashboard/scripts/audit.ts`. An accepted npm advisory that is
+no longer reported fails too, so remove it once fixed.
 
 ## Reference docs
 

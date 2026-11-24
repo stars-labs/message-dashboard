@@ -270,6 +270,23 @@
             '';
           };
 
+          # Advisories change without a commit, so this needs the network and is run
+          # apart from the gates whose answer depends only on the tree.
+          audit-deps = pkgs.writeShellApplication {
+            name = "audit-deps";
+            runtimeInputs = with pkgs; [
+              bun
+              cargo
+              cargo-deny
+              git
+            ];
+            text = ''
+              root="$(git rev-parse --show-toplevel)"
+              (cd "$root/orange-pi-daemon" && cargo deny --locked check)
+              (cd "$root/sms-dashboard" && bun run audit)
+            '';
+          };
+
           check-daemon = pkgs.writeShellApplication {
             name = "check-daemon";
             runtimeInputs = with pkgs; [
@@ -618,6 +635,7 @@
               balance-agent-cli
               release-balance-agent
               check-api-compat
+              audit-deps
               ;
             default = sms-daemon;
             daemon-rust = orange-pi-daemon-rust;
@@ -703,6 +721,14 @@
                 pass_filenames = false;
                 stages = [ "pre-push" ];
               };
+              audit-deps = {
+                enable = true;
+                name = "dependency advisories and licenses";
+                entry = lib.getExe audit-deps;
+                files = "(^|/)(Cargo\\.(toml|lock)|deny\\.toml|package\\.json|bun\\.lock)$|^sms-dashboard/scripts/audit";
+                pass_filenames = false;
+                stages = [ "pre-push" ];
+              };
               pi-eval = {
                 enable = true;
                 name = "Orange Pi system evaluates";
@@ -721,6 +747,7 @@
                 dev-frontend
                 dev-server
                 balance-agent-cli
+                audit-deps
                 check-api-compat
                 check-daemon
                 check-nix

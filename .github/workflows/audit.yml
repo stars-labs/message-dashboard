@@ -1,0 +1,24 @@
+# `audit-deps`: npm and RustSec advisories, plus the daemon's licenses and sources.
+# Advisories are published without a commit here, so it also runs weekly.
+name: Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Dependency advisories and licenses (audit-deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix develop .#dashboard -c bun install --frozen-lockfile --cwd sms-dashboard
+      - run: nix run .#audit-deps
