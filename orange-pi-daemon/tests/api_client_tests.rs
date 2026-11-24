@@ -15,7 +15,7 @@ fn create_test_config() -> Config {
 }
 
 // Helper function to create test message
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]
@@ -43,7 +43,7 @@ fn create_stored_test_message(iccid: &str, content: &str) -> StoredMessage {
 }
 
 // Helper function to create test modem
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]
@@ -70,7 +70,7 @@ fn create_test_modem(equipment_id: &str) -> Modem {
 }
 
 // Helper function to create test SIM
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]

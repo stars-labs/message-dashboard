@@ -46,7 +46,7 @@ macro_rules! fixture {
 
 const ICCID: &str = "89860123456789012345";
 
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]
@@ -54,7 +54,7 @@ fn iccid() -> Iccid {
     Iccid::try_from(ICCID).unwrap()
 }
 
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]
@@ -62,7 +62,7 @@ fn assert_sends(fixture: &Fixture, body: &impl Serialize) {
     assert_eq!(serde_json::to_value(body).unwrap(), fixture.request.body);
 }
 
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]

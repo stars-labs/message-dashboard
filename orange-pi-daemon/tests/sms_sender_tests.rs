@@ -26,7 +26,7 @@ async fn create_test_sender() -> anyhow::Result<SmsSender> {
     ))
 }
 
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]

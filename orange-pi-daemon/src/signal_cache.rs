@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, trace};
 
-#[allow(
+#[expect(
     clippy::as_conversions,
     clippy::cast_precision_loss,
     reason = "the standard library has no u64 to f64 conversion; counters stay far below 2^53"

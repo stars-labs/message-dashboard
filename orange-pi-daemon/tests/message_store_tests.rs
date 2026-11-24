@@ -5,7 +5,7 @@ use orange_pi_daemon_rust::types::{Message, SmsStorage};
 use orange_pi_daemon_rust::wire::Direction;
 
 // Helper function to create test message
-#[allow(
+#[expect(
     clippy::unwrap_used,
     reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
 )]

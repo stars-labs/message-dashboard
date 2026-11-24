@@ -34,7 +34,7 @@ impl AtModemManager {
         Ok(false)
     }
 
-    #[allow(
+    #[expect(
         unsafe_code,
         reason = "USBDEVFS_RESET is an ioctl with no safe wrapper in nix or std"
     )]

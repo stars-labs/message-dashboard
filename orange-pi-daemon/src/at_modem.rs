@@ -124,7 +124,7 @@ pub struct AtModemManager {
     timeout: Duration,
 }
 
-#[allow(
+#[expect(
     clippy::as_conversions,
     reason = "nix declares SpecialCharacterIndices as a repr(usize) enum with no conversion to usize, and termios::control_chars is indexed by usize"
 )]

@@ -9,7 +9,7 @@ pub(super) fn open_nmea(port: &str) -> Result<AsyncFd<File>> {
     Ok(async_file(AtModemManager::open_serial(port)?)?)
 }
 
-#[allow(
+#[expect(
     unsafe_code,
     reason = "tokio 1.54 made AsyncFd registration unsafe; an owned File meets its contract"
 )]
