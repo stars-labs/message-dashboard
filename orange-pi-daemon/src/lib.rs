@@ -274,7 +274,7 @@ mod tests {
 
         let config = Config {
             api_url: "https://test.example.com".to_string(),
-            api_key: "test_key".to_string(),
+            api_key: "test_key".into(),
             check_interval_secs: 30,
         };
         let _client = ApiClient::new(config).unwrap();
@@ -290,7 +290,7 @@ mod tests {
 
         let config = Config {
             api_url: "https://test.example.com".to_string(),
-            api_key: "test_key".to_string(),
+            api_key: "test_key".into(),
             check_interval_secs: 30,
         };
         let api_client = ApiClient::new(config).unwrap();

@@ -45,7 +45,7 @@ impl ApiClient {
         let response = self
             .client
             .post(&url)
-            .header("x-api-key", &self.config.api_key)
+            .header("x-api-key", self.config.api_key.expose())
             .header("x-daemon-version", env!("CARGO_PKG_VERSION"))
             .json(snapshot)
             .send()
@@ -100,7 +100,7 @@ impl ApiClient {
         let response = self
             .client
             .post(&url)
-            .header("x-api-key", &self.config.api_key)
+            .header("x-api-key", self.config.api_key.expose())
             .header("x-daemon-version", "rust-3.0.0-reports")
             .json(&payload)
             .send()
@@ -146,7 +146,7 @@ impl ApiClient {
             let response = self
                 .client
                 .post(&url)
-                .header("x-api-key", &self.config.api_key)
+                .header("x-api-key", self.config.api_key.expose())
                 .json(&MessageBatchRequest {
                     messages: chunk.iter().map(UploadedMessage::from).collect(),
                 })
@@ -193,7 +193,7 @@ impl ApiClient {
         let response = self
             .client
             .get(&url)
-            .header("x-api-key", &self.config.api_key)
+            .header("x-api-key", self.config.api_key.expose())
             .send()
             .await
             .context("Failed to get pending SMS")?;
@@ -237,7 +237,7 @@ impl ApiClient {
         let response = self
             .client
             .post(&url)
-            .header("x-api-key", &self.config.api_key)
+            .header("x-api-key", self.config.api_key.expose())
             .timeout(std::time::Duration::from_secs(10))
             .json(body)
             .send()

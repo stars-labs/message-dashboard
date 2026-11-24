@@ -164,7 +164,7 @@ impl VoiceBridge {
         let callback = move |request: &Request, response: Response| {
             let path = request.uri().path();
             match voice_auth::parse_path(path) {
-                Some(req) if voice_auth::verify(&api_key, &req, now_unix()) => {
+                Some(req) if voice_auth::verify(api_key.expose(), &req, now_unix()) => {
                     *admitted_slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(req);
                     Ok(response)
                 }

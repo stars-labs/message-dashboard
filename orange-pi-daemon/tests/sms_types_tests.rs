@@ -283,3 +283,14 @@ fn pending_sms_rejects_the_obsolete_numeric_id_and_message_fields() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn debug_output_never_contains_the_api_key() {
+    let config = Config {
+        api_url: "https://dashboard.example".into(),
+        api_key: "fixture-api-key".into(),
+        check_interval_secs: 1,
+    };
+
+    assert!(!format!("{config:?}").contains("fixture-api-key"));
+}

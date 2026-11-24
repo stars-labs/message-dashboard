@@ -20,6 +20,7 @@ use crate::api_client::ApiClient;
 use crate::at_modem::{AtModemManager, VoicePorts};
 use crate::identifiers::Iccid;
 use crate::modem_manager::ModemManager;
+use crate::types::ApiKey;
 use crate::voice_auth::{CallAction, Leg, VoiceRequest};
 use crate::voice_call::{is_ringing, parse_clcc};
 use crate::wire::{CallEndReason, ModemReport};
@@ -109,7 +110,7 @@ struct BridgeState {
 }
 
 pub struct VoiceBridge {
-    api_key: String,
+    api_key: ApiKey,
     modems: Arc<ModemManager>,
     api: ApiClient,
     devices: Arc<RwLock<HashMap<String, ModemReport>>>,
@@ -142,7 +143,7 @@ async fn finish_modem_call(
 
 impl VoiceBridge {
     pub fn new(
-        api_key: String,
+        api_key: ApiKey,
         modems: Arc<ModemManager>,
         api: ApiClient,
         devices: Arc<RwLock<HashMap<String, ModemReport>>>,

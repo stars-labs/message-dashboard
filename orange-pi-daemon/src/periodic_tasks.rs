@@ -10,6 +10,7 @@ use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
 use orange_pi_daemon_rust::sync_manager::{device_delta, DeviceDelta, SyncManager};
+use orange_pi_daemon_rust::types::ApiKey;
 use orange_pi_daemon_rust::voice_bridge::{VoiceBridge, VoiceBridgeConfig};
 use orange_pi_daemon_rust::wire::{ModemReport, SyncMode};
 
@@ -279,7 +280,7 @@ pub(crate) fn spawn_rediscovery(manager: Arc<ModemManager>, modem_set: Arc<RwLoc
 /// Runs only when `VOICE_BRIDGE_DOMAIN` is set: a wss:// listener for the Cloudflare Realtime adapters plus one URC reader per
 /// voice-capable modem for incoming calls. See docs/voice-call-plan.md.
 pub(crate) fn spawn_voice_bridge(
-    api_key: String,
+    api_key: ApiKey,
     modem_manager: Arc<ModemManager>,
     api_client: ApiClient,
     devices: SharedDevices,

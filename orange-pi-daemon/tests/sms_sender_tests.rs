@@ -12,7 +12,7 @@ use std::sync::Arc;
 async fn create_test_sender() -> anyhow::Result<SmsSender> {
     let config = Config {
         api_url: "http://localhost:8787".to_string(),
-        api_key: "test_key".to_string(),
+        api_key: "test_key".into(),
         check_interval_secs: 1,
     };
 

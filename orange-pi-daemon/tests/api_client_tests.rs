@@ -9,7 +9,7 @@ use orange_pi_daemon_rust::wire::{Direction, ModemReport, ModemStatus, SyncMode}
 fn create_test_config() -> Config {
     Config {
         api_url: "http://localhost:8787".to_string(),
-        api_key: "test_api_key_12345".to_string(),
+        api_key: "test_api_key_12345".into(),
         check_interval_secs: 1,
     }
 }
@@ -215,12 +215,12 @@ async fn test_get_pending_sms_signature() {
 fn test_config_structure() {
     let config = Config {
         api_url: "https://api.example.com".to_string(),
-        api_key: "secret_key".to_string(),
+        api_key: "secret_key".into(),
         check_interval_secs: 30,
     };
 
     assert_eq!(config.api_url, "https://api.example.com");
-    assert_eq!(config.api_key, "secret_key");
+    assert_eq!(config.api_key.expose(), "secret_key");
     assert_eq!(config.check_interval_secs, 30);
 }
 
@@ -298,7 +298,7 @@ fn test_message_with_unicode() {
 fn test_config_with_custom_url() {
     let config = Config {
         api_url: "https://custom.api.com:8443".to_string(),
-        api_key: "key".to_string(),
+        api_key: "key".into(),
         check_interval_secs: 60,
     };
 
@@ -311,10 +311,10 @@ fn test_config_with_long_api_key() {
     let long_key = "x".repeat(256);
     let config = Config {
         api_url: "http://localhost".to_string(),
-        api_key: long_key.clone(),
+        api_key: long_key.into(),
         check_interval_secs: 1,
     };
 
     let client = ApiClient::new(config).unwrap();
-    assert_eq!(client.config.api_key.len(), 256);
+    assert_eq!(client.config.api_key.expose().len(), 256);
 }

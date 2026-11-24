@@ -165,8 +165,36 @@ impl fmt::Display for ModemState {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub api_url: String,
-    pub api_key: String,
+    pub api_key: ApiKey,
     pub check_interval_secs: u64,
+}
+
+/// The daemon's credential for the Worker; `Debug` never shows it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApiKey(String);
+
+impl ApiKey {
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for ApiKey {
+    fn from(key: String) -> Self {
+        Self(key)
+    }
+}
+
+impl From<&str> for ApiKey {
+    fn from(key: &str) -> Self {
+        Self(key.to_string())
+    }
+}
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ApiKey(<redacted>)")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

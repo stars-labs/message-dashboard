@@ -39,7 +39,7 @@ impl SmsSender {
         let client = reqwest::Client::new();
         let response = client
             .get(&url)
-            .header("X-API-Key", &self.api_client.config.api_key)
+            .header("X-API-Key", self.api_client.config.api_key.expose())
             .header("X-Daemon-Session-Id", &self.session_id)
             .header("Accept", "application/json")
             .timeout(std::time::Duration::from_secs(10))
@@ -185,7 +185,7 @@ impl SmsSender {
         let response = client
             .post(&url)
             .header("Content-Type", "application/json")
-            .header("X-API-Key", &self.api_client.config.api_key)
+            .header("X-API-Key", self.api_client.config.api_key.expose())
             .json(&result)
             .timeout(std::time::Duration::from_secs(10))
             .send()

@@ -6,6 +6,7 @@ use tracing::{error, info, warn};
 use orange_pi_daemon_rust::identifiers::Iccid;
 use orange_pi_daemon_rust::message_store::MessageStore;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
+use orange_pi_daemon_rust::types::ApiKey;
 use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
 
 #[expect(clippy::print_stdout, reason = "--help writes its text to stdout")]
@@ -96,14 +97,14 @@ pub(crate) async fn build_modem_cache(
     Ok(valid_modems)
 }
 
-pub(crate) fn load_api_settings() -> (String, String) {
+pub(crate) fn load_api_settings() -> (String, ApiKey) {
     let api_url =
         std::env::var("SMS_API_URL").unwrap_or_else(|_| "http://localhost:8787".to_string());
     let api_key = std::env::var("SMS_API_KEY").unwrap_or_else(|_| {
         warn!("SMS_API_KEY not set, using default");
         "default_api_key".to_string()
     });
-    (api_url, api_key)
+    (api_url, api_key.into())
 }
 
 pub(crate) async fn check_modem_manager(modem_manager: &ModemManager) -> Result<()> {
