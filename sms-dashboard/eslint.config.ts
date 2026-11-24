@@ -96,7 +96,6 @@ const NOT_YET_ON_THE_DATA_LAYER = [
   'server/handlers/iccid-mappings.ts',
   'server/handlers/keywords.ts',
   'server/handlers/messages.ts',
-  'server/handlers/phones.ts',
   'server/utils/audit-log.ts',
   'server/utils/carrier-billing-backfill.ts',
   'server/utils/carrier-billing.ts',
