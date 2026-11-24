@@ -60,6 +60,9 @@ jobs:
         shell: nix develop ..#dashboard -c bash -e {0}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # check:migrations compares migrations/ with origin/main.
+          fetch-depth: 0
       - uses: cachix/install-nix-action@v31
       - run: bun install --frozen-lockfile
       - run: bun run check
