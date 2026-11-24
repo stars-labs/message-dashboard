@@ -112,25 +112,16 @@ with the newest. Flag any verification-code SMS (they expire in 5 min — note
 the time elapsed since `timestamp`). If the user asked for "new since last
 check", note the `id` of the prior fetch so they can see the delta.
 
-## Schema reference (messages table)
+## Reading the messages table
 
-```
-id              INTEGER PRIMARY KEY
-phone_iccid     TEXT   -- the SIM identity; query by this
-phone_number    TEXT   -- the SENDER, not the SIM's own number
-content         TEXT
-timestamp       TEXT   -- ISO 8601 UTC, e.g. 2026-09-02T06:24:38.000Z
-direction       TEXT   -- 'received' (inbound) or 'sent'
-modem_id        TEXT   -- ttyUSB port index, NOT a stable SIM key
-sms_path        TEXT
-status          TEXT   -- pending|uploading|uploaded|failed
-attempts        INTEGER
-created_at      TIMESTAMP
-uploaded_at     TIMESTAMP
-deleted_at      TIMESTAMP
-error           TEXT
-```
-UNIQUE constraint: `(phone_iccid, timestamp, content)` — dedup is built in.
+The schema is `orange-pi-daemon/src/message_store/schema.rs`. What it does not say:
+
+- `phone_iccid` is the SIM identity; query by it.
+- `phone_number` is the **sender**, not the SIM's own number.
+- `timestamp` is ISO 8601 UTC, e.g. `2026-09-02T06:24:38.000Z`; `direction` is
+  `received` or `sent`.
+- `modem_id` is a ttyUSB index, not a stable SIM key.
+- `(phone_iccid, timestamp, content)` is unique, so a message is stored once.
 
 ## Never
 
