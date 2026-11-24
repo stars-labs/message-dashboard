@@ -1,4 +1,4 @@
-use super::serial::read_some;
+use super::serial::{async_file, read_some};
 use super::VoiceBridge;
 use crate::at_modem::AtModemManager;
 use crate::identifiers::Iccid;
@@ -8,7 +8,6 @@ use crate::wire::CallEndReason;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::unix::AsyncFd;
 use tracing::{debug, info, warn};
 
 impl VoiceBridge {
@@ -87,7 +86,7 @@ impl VoiceBridge {
     }
 
     async fn read_urcs(self: Arc<Self>, modem_id: String, iccid: Iccid, port: String) {
-        let fd = match AtModemManager::open_serial(&port).and_then(|f| Ok(AsyncFd::new(f)?)) {
+        let fd = match AtModemManager::open_serial(&port).and_then(|f| Ok(async_file(f)?)) {
             Ok(fd) => fd,
             Err(e) => {
                 debug!(modem_id = %modem_id, "📞 Cannot open URC port {}: {}", port, e);

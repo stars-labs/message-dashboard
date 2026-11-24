@@ -1,5 +1,5 @@
 use super::admission::read_proxy_source;
-use super::serial::read_some;
+use super::serial::{async_file, read_some};
 use super::{finish_modem_call, ActiveCall, BridgeState, CallHandles};
 use crate::identifiers::Iccid;
 use std::fs::File;
@@ -61,7 +61,7 @@ fn pair() -> (AsyncFd<File>, UnixStream) {
     let (ours, theirs) = UnixStream::pair().unwrap();
     ours.set_nonblocking(true).unwrap();
     let file = File::from(OwnedFd::from(ours));
-    (AsyncFd::new(file).unwrap(), theirs)
+    (async_file(file).unwrap(), theirs)
 }
 
 #[tokio::test]

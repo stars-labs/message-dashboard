@@ -6,7 +6,17 @@ use std::time::Duration;
 use tokio::io::unix::AsyncFd;
 
 pub(super) fn open_nmea(port: &str) -> Result<AsyncFd<File>> {
-    Ok(AsyncFd::new(AtModemManager::open_serial(port)?)?)
+    Ok(async_file(AtModemManager::open_serial(port)?)?)
+}
+
+#[allow(
+    unsafe_code,
+    reason = "tokio 1.54 made AsyncFd registration unsafe; an owned File meets its contract"
+)]
+pub(super) fn async_file(file: File) -> std::io::Result<AsyncFd<File>> {
+    // SAFETY: the AsyncFd owns `file`, so its descriptor stays open and names the same
+    // file description until the AsyncFd drops it.
+    Ok(unsafe { AsyncFd::register(file) }?)
 }
 
 /// How many empty reads in a row mean the port is gone rather than idle.
