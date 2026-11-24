@@ -153,11 +153,7 @@ bunx wrangler secret put AUTH0_CLIENT_ID       # Auth0 application client ID
 bunx wrangler secret put AUTH0_CLIENT_SECRET   # Auth0 application client secret
 bunx wrangler secret put API_KEY               # API key for Orange Pi authentication
 
-# Initialize D1 database (first time only)
-npm run db:init
-
-# Run database migrations
-npm run db:migrate
+# Apply a new D1 migration: see docs/deployment.md
 
 # Build and deploy to Cloudflare
 npm run deploy

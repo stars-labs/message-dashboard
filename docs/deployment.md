@@ -13,10 +13,18 @@ bunx wrangler d1 execute sms-dashboard --remote --file=migrations/NNN_name.sql
 
 # 3. Deploy
 bun run deploy
+
+# 4. After a migration: regenerate the baseline (the headers of
+#    migrations/schema.sql and reference-data.sql give the commands; set
+#    `through` to NNN), then confirm it matches production and commit it
+bun run check:schema-drift
 ```
 
 - Do **not** run `wrangler d1 migrations apply --remote` — production predates
   Wrangler migration bookkeeping. Always apply only the exact new migration file.
+- `bun run check` fails once main has a migration newer than `schema.sql`'s
+  `through`, so step 4 cannot be skipped for long. `check:schema-drift` reads
+  production (two `d1 export` calls, which briefly hold other D1 requests).
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
 
 ## Orange Pi Daemon

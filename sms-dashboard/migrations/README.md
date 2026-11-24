@@ -107,24 +107,15 @@ This directory contains SQL migration scripts for the SMS Dashboard D1 database.
 
 ### Local Development
 ```bash
-# Initialize local database
-npm run db:init
-
-# Run a specific migration locally
-bunx wrangler d1 execute sms-dashboard --local --file=migrations/[filename].sql
+# Build a local D1: schema.sql, reference-data.sql, then every migration after
+# schema.sql's `through`
+bun run db:init
 ```
 
 ### Production
-```bash
-# Run migrations on production database
-npm run db:migrate
-
-# Or run a specific migration
-bunx wrangler d1 execute sms-dashboard --remote --file=migrations/[filename].sql
-
-# Validate migration success
-bunx wrangler d1 execute sms-dashboard --remote --file=migrations/validate-migration.sql
-```
+See [docs/deployment.md](../../docs/deployment.md): apply only the new migration
+file, then regenerate `schema.sql` and `reference-data.sql` (their headers say how)
+and check them with `bun run check:schema-drift`.
 
 ## Database Schema (Current - v2.1)
 
@@ -257,8 +248,7 @@ bunx wrangler d1 backup create sms-dashboard
 
 2. **Test migrations locally first**:
 ```bash
-npm run db:init
-bunx wrangler d1 execute sms-dashboard --local --file=migrations/new_migration.sql
+bun run db:init   # applies every migration after schema.sql's `through`
 ```
 
 3. **Validate after migration**:

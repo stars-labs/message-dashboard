@@ -77,8 +77,19 @@ bun run build
 ## D1 migrations
 
 Add a new numbered file — never rewrite an applied migration.
+`bun run check:migrations` (part of `bun run check`) rejects a change to any
+migration on `origin/main`, and a new one not named `NNN_name.sql` above main's
+highest number.
 Apply with: `bunx wrangler d1 execute sms-dashboard --remote --file=migrations/NNN_name.sql`
 Do **not** use `wrangler d1 migrations apply --remote`.
+
+The baseline is `migrations/schema.sql` (structure) plus `reference-data.sql` (the
+`sim_balance_profiles` rows only migrations write), exported from production; its
+`-- through: NNN` header names the last migration included. Tests build every
+database with `createSchema` (`test/schema.ts`): baseline, then each newer
+migration. A new test uses it, never a hand-written `CREATE TABLE`. After a migration reaches
+production, regenerate both files and run `bun run check:schema-drift`
+([deployment](../docs/deployment.md)).
 
 ## Deploy
 
@@ -103,14 +114,13 @@ See [docs/deployment.md](../docs/deployment.md).
   view at both widths and writes `report.html` with console errors and failed
   requests. It signs in with a temporary admin session in local KV, no login.
 - `bun run e2e` (CI runs it on every push and pull request) starts the real Worker
-  on a fresh local D1 built from `migrations/schema.sql` plus
+  on a fresh local D1 built by `bun run db:init` plus
   `scripts/e2e/seed.sql`, with Auth0 answered by `scripts/e2e/fake-auth0.ts`, and
   opens every view in `shared/views.ts` at 1440px and 440px. A view fails on a
   console error or warning, a page error, a failed or 4xx/5xx request, a redirect
   away from it, or sideways scroll on mobile; screenshots land in `e2e-results/`.
   A new view is covered by adding it to `shared/views.ts`; data it needs goes in
-  the seed. After a migration reaches production, regenerate `schema.sql` (its
-  header says how).
+  the seed.
 - Cross-component: run every affected component's gate
 
 ## UI rules

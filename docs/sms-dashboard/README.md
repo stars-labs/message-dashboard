@@ -46,12 +46,11 @@ npm run deploy
 ## Database
 
 ```bash
-# Initialize local database
-npm run db:init
-
-# Run migrations on production
-npm run db:migrate
+# Build a local D1 as production's schema and reference data
+bun run db:init
 ```
+
+Production migrations: see [deployment](../deployment.md).
 
 ## Configuration
 
