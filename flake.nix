@@ -230,6 +230,22 @@
             '';
           };
 
+          check-nix = pkgs.writeShellApplication {
+            name = "check-nix";
+            runtimeInputs = with pkgs; [
+              deadnix
+              nixfmt
+              statix
+            ];
+            text = ''
+              nixfmt --check "$@"
+              deadnix --fail "$@"
+              for file in "$@"; do
+                statix check "$file"
+              done
+            '';
+          };
+
           # pre-commit runs from the repository root and passes paths from it;
           # each tool runs from its own project directory.
           in-project = pkgs.writeShellApplication {
@@ -619,6 +635,19 @@
                 touch "$out"
               '';
 
+          checks.nix-lint =
+            let
+              nixFiles = lib.fileset.toSource {
+                root = ./.;
+                fileset = lib.fileset.fileFilter (file: file.hasExt "nix") ./.;
+              };
+            in
+            pkgs.runCommand "nix-lint" { } ''
+              cd ${nixFiles}
+              find . -name '*.nix' -exec ${lib.getExe check-nix} {} +
+              touch "$out"
+            '';
+
           pre-commit = {
             # The dashboard hooks need node_modules, which the Nix sandbox lacks.
             check.enable = false;
@@ -643,6 +672,13 @@
                 entry = "${lib.getExe in-project} orange-pi-daemon cargo fmt --all --check";
                 files = "^orange-pi-daemon/.*\\.rs$";
                 pass_filenames = false;
+                stages = [ "pre-commit" ];
+              };
+              nix-lint = {
+                enable = true;
+                name = "nixfmt, deadnix, statix";
+                entry = lib.getExe check-nix;
+                files = "\\.nix$";
                 stages = [ "pre-commit" ];
               };
               dashboard-check = {
@@ -681,6 +717,7 @@
                 balance-agent-cli
                 check-api-compat
                 check-daemon
+                check-nix
                 pi-route
               ]
               ++ (with pkgs; [
@@ -710,8 +747,9 @@
                 ${config.pre-commit.installationScript}
                 # git-hooks.nix records a relative core.hooksPath, which a linked
                 # worktree resolves inside itself, so its commits skip every hook.
-                ${lib.getExe pkgs.git} config --local core.hooksPath \
-                  "$(${lib.getExe pkgs.git} rev-parse --path-format=absolute --git-common-dir)/hooks"
+                if common_dir="$(${lib.getExe pkgs.git} rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+                  ${lib.getExe pkgs.git} config --local core.hooksPath "$common_dir/hooks"
+                fi
                 echo "SMS Dashboard Development Environment"
                 echo ""
                 echo "Available projects:"
