@@ -403,7 +403,7 @@ impl NativeDBusClient {
             .await
             .context("Failed to create Messaging proxy")?;
 
-        let mut props = std::collections::HashMap::new();
+        let mut props = HashMap::new();
         props.insert("number".to_string(), recipient.as_str().into());
         props.insert("text".to_string(), text.to_string().into());
 

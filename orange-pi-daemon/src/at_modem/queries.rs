@@ -264,7 +264,7 @@ impl AtModemManager {
         let storage = storage_response
             .lines()
             .find(|l| l.contains("+CPMS:"))
-            .map(std::string::ToString::to_string)
+            .map(ToString::to_string)
             .unwrap_or_default();
 
         Ok(SmsConfig { mode, storage })

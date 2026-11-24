@@ -76,6 +76,9 @@ strip = true
 
 [lints.rust]
 unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unused_qualifications = "warn"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
@@ -93,3 +96,4 @@ panic = "warn"
 unreachable = "warn"
 todo = "warn"
 unimplemented = "warn"
+dbg_macro = "warn"

@@ -42,10 +42,7 @@ fn test_at_modem_manager_new() {
     let manager = AtModemManager::new();
 
     // Basic smoke test - manager should be created without panic
-    assert_eq!(
-        std::mem::size_of_val(&manager),
-        std::mem::size_of::<AtModemManager>()
-    );
+    assert_eq!(size_of_val(&manager), size_of::<AtModemManager>());
 }
 
 // ============================================================================

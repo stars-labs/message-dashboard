@@ -184,7 +184,7 @@ impl SmsAssembler {
     }
 
     pub fn pending_parts_count(&self) -> usize {
-        self.buffer.values().map(std::vec::Vec::len).sum()
+        self.buffer.values().map(Vec::len).sum()
     }
 }
 

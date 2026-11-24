@@ -61,15 +61,12 @@ impl ModemManager {
     /// Serial probes run without the cache lock so the reader's `get_port` never blocks.
     ///
     /// AT-command mode only; in D-Bus mode `ModemManager` handles its own hotplug.
-    pub async fn rediscover_and_merge(
-        &self,
-        known: &std::collections::HashSet<String>,
-    ) -> Result<Vec<String>> {
+    pub async fn rediscover_and_merge(&self, known: &HashSet<String>) -> Result<Vec<String>> {
         if self.mode != BackendMode::AtCommand {
             return Ok(Vec::new());
         }
 
-        let active_ports: std::collections::HashSet<String> = {
+        let active_ports: HashSet<String> = {
             let cache = self.port_cache.read().await;
             cache.values().map(|cached| cached.port.clone()).collect()
         };

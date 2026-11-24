@@ -200,7 +200,7 @@ impl AtModemManager {
     /// handle; the stable cross-system key is the IMEI (`equipment_id`).
     pub fn port_to_modem_id(port: &str) -> String {
         port.strip_prefix("/dev/ttyUSB")
-            .map_or_else(|| port.to_string(), std::string::ToString::to_string)
+            .map_or_else(|| port.to_string(), ToString::to_string)
     }
 
     pub fn modem_id_to_port(id: &str) -> String {

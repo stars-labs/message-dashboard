@@ -195,7 +195,7 @@ mod tests {
 
     fn rejects<T>(inputs: &[&str])
     where
-        T: for<'a> TryFrom<&'a str, Error = InvalidIdentifier> + std::fmt::Debug,
+        T: for<'a> TryFrom<&'a str, Error = InvalidIdentifier> + fmt::Debug,
     {
         for input in inputs {
             assert!(T::try_from(*input).is_err(), "{input:?} must be rejected");
