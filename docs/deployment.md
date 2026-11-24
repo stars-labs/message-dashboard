@@ -27,6 +27,29 @@ bun run check:schema-drift
   production (two `d1 export` calls, which briefly hold other D1 requests).
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
 
+## D1 Backup and Account Move
+
+```bash
+cd sms-dashboard
+bunx wrangler d1 export sms-dashboard --remote --output="$BACKUP_DIR/sms-dashboard.sql"
+```
+
+Keep the dump outside the repository: it holds phone numbers and message text.
+A dump restores only into an empty database; never replay it over production.
+
+To move the Worker to another Cloudflare account:
+
+1. Export production as above.
+2. `bunx wrangler d1 create sms-dashboard` and `bunx wrangler kv namespace create SESSIONS`;
+   put the new `account_id`, `database_id` and KV `id` in `wrangler.toml`.
+3. `bunx wrangler d1 execute sms-dashboard --remote --file="$BACKUP_DIR/sms-dashboard.sql"`.
+4. `bunx wrangler secret put <NAME>` for each secret in `server/secrets-env.d.ts`,
+   except `USE_AUTH0_ROLES`, which exists only so tests can prove it is ignored.
+5. `bun run deploy`. The first deploy creates the `CALL_STATE` Durable Object from
+   the `[[migrations]]` block in `wrangler.toml`.
+6. Add the new hostname to the Auth0 application's callback, logout and web-origin
+   URLs ([Auth0 setup](auth0.md)).
+
 ## Orange Pi Daemon
 
 This file is the **single source of truth** for the Orange Pi host: other docs
