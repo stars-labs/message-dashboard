@@ -207,18 +207,25 @@ function elementOf(found: Element | null, description: string): HTMLElement {
 
 describe('mobile detail navigation', () => {
   test('recurring dashboard refreshes avoid full-table stats and balance history reads', () => {
-    const source = readFileSync(new URL('./App.svelte', import.meta.url), 'utf8');
-    const pollingStart = source.indexOf('async function loadMessagesForPhone');
-    const pollingEnd = source.indexOf('async function refreshBalanceChecksForView');
-    const messagePolling = source.slice(pollingStart, pollingEnd);
-    const balancePolling = source.slice(
-      pollingEnd,
-      source.indexOf('async function loadOlderMessages'),
-    );
+    const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+    const between = (source: string, start: string, end: string) => {
+      const from = source.indexOf(start);
+      const to = source.indexOf(end, from);
+      expect([start, from >= 0 && to > from]).toEqual([start, true]);
+      return source.slice(from, to);
+    };
+    const feed = read('./app/message-feed.svelte.ts');
+    const balances = read('./app/balance-checks.svelte.ts');
+    const messagePolling = between(feed, '  async load(', '  loadOlder = async');
+    const balancePolling = between(balances, '  refresh = async', '\n}\n');
 
-    expect(source).not.toContain('/api/stats');
-    expect(source).not.toContain('/api/balance-checks?limit=500');
+    for (const source of [read('./App.svelte'), feed, balances]) {
+      expect(source).not.toContain('/api/stats');
+      expect(source).not.toContain('/api/balance-checks?limit=500');
+    }
+    expect(messagePolling).toContain('api.getMessages(');
     expect(messagePolling).not.toContain('getBalanceChecks');
+    expect(balancePolling).toContain('api.getBalanceChecks(');
     expect(balancePolling).not.toContain('limit: 500');
   });
 

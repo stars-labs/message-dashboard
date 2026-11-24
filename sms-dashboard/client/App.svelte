@@ -1,36 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import PhoneList from './lib/PhoneList.svelte';
-  import SimpleMessageView from './lib/SimpleMessageView.svelte';
-  import MessageComposer from './lib/MessageComposer.svelte';
   import IccidMappings from './lib/IccidMappings.svelte';
-  import PhoneDetails from './lib/PhoneDetails.svelte';
+  import MessageComposer from './lib/MessageComposer.svelte';
   import IccidMappingDialog from './lib/IccidMappingDialog.svelte';
-  import KeywordConfig from './lib/KeywordConfig.svelte';
-  import FilterRules from './lib/FilterRules.svelte';
   import UserManagement from './lib/UserManagement.svelte';
   import ErrorBoundary from './lib/ErrorBoundary.svelte';
-  import Toast from './lib/Toast.svelte';
   import SwUpdatePrompt from './lib/SwUpdatePrompt.svelte';
-  import { resetDashboardCache, resetServiceWorker } from './lib/sw-reset.js';
-  import { overlay } from './lib/overlay.js';
-  import { confirmAction } from './lib/confirm.svelte.js';
   import ConfirmHost from './lib/ConfirmHost.svelte';
   import DaemonHealthPanel from './lib/DaemonHealthPanel.svelte';
-  import CallPanel from './lib/CallPanel.svelte';
-  import {
-    callApi,
-    callElapsedSeconds,
-    callPollDelay,
-    countMissedSince,
-    describeCallError,
-    fetchCallHistory,
-    fetchCallState,
-    fetchIceServers,
-    formatDuration,
-  } from './lib/call-client.js';
-  import { createCallSession } from './lib/call-session.js';
-  import { createRingtone } from './lib/call-ringtone.js';
   import BalanceQueryDetail from './lib/BalanceQueryDetail.svelte';
   import MessageDetail from './lib/MessageDetail.svelte';
   import BalanceManagement from './lib/BalanceManagement.svelte';
@@ -39,57 +16,32 @@
   import { ApiError, api, contractApi, errorMessage } from './lib/api.js';
   import { getPhoneFlag } from './lib/countries.js';
   import { auth } from './lib/auth.js';
-  import { getStatusMeta } from './lib/device-status.js';
-  import { formatCardNumber } from './lib/card-number.js';
-  import { formatTimeAgo } from './lib/time.js';
-  import { isActiveBalanceCheck } from './lib/balance-polling.js';
   import { getDaemonStatusMeta, isDaemonConnected, type DaemonView } from './lib/daemon-status.js';
-  import {
-    getMobileTabDragX,
-    getMobileTabIndexAtPoint,
-    getMobileTabOptics,
-    getMobileTabs,
-    getMobileTabState,
-  } from './lib/mobile-tab-state.js';
-  import {
-    MESSAGE_PAGE_SIZE,
-    hasMoreMessages,
-    mergeMessagePage,
-    nextMessageOffset,
-  } from './lib/message-page.js';
+  import { MESSAGE_PAGE_SIZE } from './lib/message-page.js';
   import type { MeResponse } from '../shared/api/auth.js';
-  import type { BalanceCheck, BalanceCheckDetail } from '../shared/api/balance-checks.js';
-  import type { CallLogEntry, LiveCall } from '../shared/api/calls.js';
-  import type { FilterRule } from '../shared/api/filters.js';
   import type { CreateIccidMappingResponse } from '../shared/api/iccid-mappings.js';
   import type { ApiMessage } from '../shared/api/messages.js';
   import type { Phone } from '../shared/api/phones.js';
   import { textOr } from '../shared/text.js';
   import { isView, VIEW_PERMISSION, type View } from '../shared/views.js';
-
-  type ViewPhone = Phone & { flag: string };
+  import AuthGate from './app/AuthGate.svelte';
+  import { BalanceChecks } from './app/balance-checks.svelte.js';
+  import { CallController } from './app/call-controller.svelte.js';
+  import CallLayer from './app/CallLayer.svelte';
+  import DashboardView from './app/DashboardView.svelte';
+  import DesktopHeader from './app/DesktopHeader.svelte';
+  import { MessageFeed } from './app/message-feed.svelte.js';
+  import MobileTabBar from './app/MobileTabBar.svelte';
+  import MoreMenu from './app/MoreMenu.svelte';
+  import { resetLocalCache } from './app/reset-cache.js';
+  import RulesView from './app/RulesView.svelte';
+  import SendDrawer from './app/SendDrawer.svelte';
+  import StatusBanners from './app/StatusBanners.svelte';
+  import { ToastQueue } from './app/toasts.svelte.js';
+  import ToastStack from './app/ToastStack.svelte';
+  import type { ViewPhone } from './app/types.js';
 
   type SavedMapping = CreateIccidMappingResponse['data'] & { phone_iccid: string };
-
-  type MobileTabId = ReturnType<typeof getMobileTabs>[number];
-
-  type TabPointerEvent = PointerEvent & { currentTarget: HTMLElement };
-
-  type CallSession = ReturnType<
-    typeof createCallSession<MediaStreamTrack, MediaProvider, RTCTrackEvent>
-  >;
-
-  interface ToastItem {
-    id: number;
-    message: string;
-    type: 'success' | 'error' | 'info';
-    duration: number;
-  }
-
-  interface QueriesChange {
-    queuedChecks?: BalanceCheck[];
-    activeIds?: string[];
-  }
 
   let selectedPhoneIccid = $state<string | null>(null);
   let selectedPhone = $state<ViewPhone | null>(null);
@@ -100,37 +52,10 @@
       : null;
   }
 
-  function handlePhoneSelection() {
-    updateSelectedPhone();
-    void loadMessagesForPhone(selectedPhoneIccid);
-    void refreshBalanceChecksForView();
-  }
-
-  // Device sync is incremental, so updated_at only moves when modem state changes;
-  // a time-window filter would drop stable online devices. status 'active' is the signal.
-  function calculateOnlineDevices(phones: readonly ViewPhone[]) {
-    return phones.filter((p) => p.status === 'active').length;
-  }
-
-  function updateStatsFromPhones() {
-    stats.onlineDevices = calculateOnlineDevices(phoneNumbers);
-    stats.totalDevices = phoneNumbers.length;
-  }
   let selectedCountry = $state('all');
   let searchTerm = $state('');
   let showPhoneList = $state(false);
-  let messages = $state<ApiMessage[]>([]);
-  let hasMoreMessagePages = $state(false);
-  let loadingOlderMessages = $state(false);
-  let balanceChecks = $state<BalanceCheck[]>([]);
-  let balanceDetailCheck = $state<BalanceCheck | null>(null);
-  let balanceDetail = $state<BalanceCheckDetail | null>(null);
   let messageDetail = $state<ApiMessage | null>(null);
-  let latestSelectedBalanceCheck = $derived(
-    selectedPhoneIccid
-      ? (balanceChecks.find((check) => check.sim_iccid === selectedPhoneIccid) ?? null)
-      : null,
-  );
   let phoneNumbers = $state<ViewPhone[]>([]);
   let user = $state<MeResponse['user'] | null>(null);
   let loading = $state(true);
@@ -140,80 +65,41 @@
   let showIccidMappingDialog = $state(false);
   let showMoreMenu = $state(false);
   let showSendDrawer = $state(false);
-  let toasts = $state<ToastItem[]>([]);
-  let messageRequestId = 0;
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let pollInFlight = false;
   const POLL_INTERVAL_MS = 60000;
   const DAEMON_POLL_INTERVAL_MS = 300000;
   let lastDaemonPollAt = 0;
-  let newMessageIds = $state<Set<string>>(new Set());
-
-  let showFiltered = $state(false);
-  let filterRules = $state<FilterRule[]>([]);
-
-  async function toggleFiltered() {
-    showFiltered = !showFiltered;
-    if (showFiltered && filterRules.length === 0) {
-      try {
-        const response = await contractApi.filters.list();
-        filterRules = response.filters;
-      } catch (error) {
-        console.warn('[App] Could not load filter rules for labels:', error);
-      }
-    }
-    await loadMessagesForPhone(selectedPhoneIccid, { resetSync: true });
-  }
-  let lastKnownTimestamp = $state<string | null>(null);
   let daemonRefreshing = $state(false);
   let showDaemonDetails = $state(false);
-
-  // `callSession` is non-reactive because it holds browser objects (microphone, PeerConnection).
-  let showCallPanel = $state(false);
-  let activeCall = $state<LiveCall | null>(null);
-  let callBusy = $state(false);
-  let callError = $state<string | null>(null);
-  let callAudio = $state<HTMLAudioElement | null>(null);
-  let callMuted = $state(false);
-  let callHistory = $state<CallLogEntry[]>([]);
-  let callHistoryLoading = $state(false);
-  let callsSeenAt = $state(readCallsSeenAt());
-  let callClock = $state(Date.now());
-  let callSession: CallSession | null = null;
-  let callPollInterval: ReturnType<typeof setTimeout> | null = null;
-  let callPollInFlight = false;
-  let lastRingingCallId: string | null = null;
-  let ringtone: ReturnType<typeof createRingtone> | null = null;
-  let titleBeforeRing: string | null = null;
-  let activeCallId: string | null = null;
   let swUpdatePrompt = $state<{ checkForUpdate(): Promise<unknown> } | null>(null);
-  // A failed fetch must never look like a healthy, quiet fleet.
   let authError = $state<string | null>(null);
-  let dataError = $state<string | null>(null);
-  let messagesFromCache = $state(false);
-
   let pullRefreshing = $state(false);
+  let phoneToMap = $state<ViewPhone | null>(null);
+  let daemonStatus = $state<DaemonView>({
+    status: 'unknown',
+    message: '正在检查采集服务状态…',
+    snapshot: null,
+    connected: false,
+  });
+
+  const toasts = new ToastQueue();
+  const feed = new MessageFeed({
+    isSignedIn: () => user !== null,
+    selectedIccid: () => selectedPhoneIccid,
+    senderNumber: (iccid) => phoneNumbers.find((p) => p.iccid === iccid)?.number,
+    notify: toasts.show,
+  });
+  const balances = new BalanceChecks({
+    isSignedIn: () => user !== null,
+    view: () => currentView,
+    selectedIccid: () => selectedPhoneIccid,
+  });
+  const calls = new CallController({ isSignedIn: () => user !== null, can });
 
   async function handleResetLocalCache() {
     showMoreMenu = false;
-    const confirmed = await confirmAction({
-      title: '清除本地缓存',
-      message:
-        '会删除这台设备上缓存的短信副本和离线资源，然后重新加载页面。\n\n' +
-        '服务器上的短信不受影响，重新加载后会重新拉取。',
-      confirmLabel: '清除并重载',
-      danger: true,
-    });
-    if (!confirmed) return;
-    const result = await resetDashboardCache({
-      clearMessageCache: () => api.cache.clear(),
-      resetOfflineCache: () => resetServiceWorker(),
-    });
-    if (!result.ok) {
-      showToast('部分缓存未能清除，请重试', 'error');
-      return;
-    }
-    window.location.reload();
+    await resetLocalCache(toasts.show);
   }
 
   async function handlePullRefresh() {
@@ -226,32 +112,6 @@
     }
   }
 
-  // Not Date.now(): same-millisecond toasts would share a key.
-  let toastSeq = 0;
-  function showToast(message: string, type: ToastItem['type'] = 'info', duration = 4000) {
-    toastSeq += 1;
-    toasts.push({ id: toastSeq, message, type, duration });
-  }
-
-  function removeToast(id: number) {
-    toasts = toasts.filter((t) => t.id !== id);
-  }
-  let phoneToMap = $state<ViewPhone | null>(null);
-  let daemonStatus = $state<DaemonView>({
-    status: 'unknown',
-    message: '正在检查采集服务状态…',
-    snapshot: null,
-    connected: false,
-  });
-
-  let stats = $state({
-    onlineDevices: 0,
-    totalDevices: 0,
-  });
-
-  let anomalySimError = $derived(phoneNumbers.filter((p) => p.status === 'sim_error').length);
-  let anomalyMismatch = $derived(phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length);
-  let anomalyOffline = $derived(phoneNumbers.filter((p) => p.status === 'offline').length);
   let daemonMeta = $derived(getDaemonStatusMeta(daemonStatus.status));
   // UX only: the server enforces the same permissions on every endpoint.
   function can(permission: string) {
@@ -259,111 +119,22 @@
   }
 
   let canManagePhones = $derived(can('phones.write'));
-  let mobileTabs = $derived(getMobileTabs(canManagePhones));
-  let mobileTabState = $derived(
-    getMobileTabState({
-      currentView,
-      showMoreMenu,
-      canManagePhones,
-    }),
-  );
-  let mobileTabPointerId = $state<number | null>(null);
-  let mobileTabDragIndex = $state<number | null>(null);
-  let mobileTabDragX = $state<number | null>(null);
-  let mobileTabGlowX = $state<number | null>(null);
-  let mobileTabIconShiftX = $state(0);
-  let suppressMobileTabClickUntil = 0;
-  let mobileTabVisualIndex = $derived(mobileTabDragIndex ?? mobileTabState.index);
-  let mobileTabVisualId = $derived(mobileTabs[mobileTabVisualIndex]);
-  let mobileTabSelectionWidth = $derived(`${100 / mobileTabState.count}%`);
-  let mobileTabSelectionX = $derived(
-    mobileTabDragX !== null
-      ? `${mobileTabDragX}px`
-      : mobileTabState.index === 0
-        ? '0%'
-        : `calc(${mobileTabState.index * 100}% + ${mobileTabState.index * 8}px)`,
-  );
-  let mobileTabGlowPosition = $derived(mobileTabGlowX === null ? '50%' : `${mobileTabGlowX}px`);
-
-  function activateMobileTab(target: MobileTabId) {
-    if (target === 'more') {
-      showMoreMenu = !showMoreMenu;
-      return;
-    }
-    navigate(target);
-  }
-
-  function handleMobileTabClick(target: MobileTabId) {
-    if (Date.now() < suppressMobileTabClickUntil) return;
-    activateMobileTab(target);
-  }
-
-  function updateMobileTabDrag(event: TabPointerEvent) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const geometry = {
-      clientX: event.clientX,
-      left: rect.left,
-      width: rect.width,
-      count: mobileTabs.length,
-    };
-    const index = getMobileTabIndexAtPoint(geometry);
-    mobileTabDragIndex = index;
-    mobileTabDragX = getMobileTabDragX(geometry);
-    const optics = getMobileTabOptics(geometry);
-    mobileTabGlowX = optics.glowX;
-    mobileTabIconShiftX = optics.iconShiftX;
-    return index;
-  }
-
-  function handleMobileTabPointerDown(event: TabPointerEvent) {
-    const root = document.documentElement;
-    if (
-      event.pointerType !== 'touch' ||
-      event.button !== 0 ||
-      !root.classList.contains('is-ios') ||
-      !root.classList.contains('is-standalone')
-    )
-      return;
-
-    event.preventDefault();
-    mobileTabPointerId = event.pointerId;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    updateMobileTabDrag(event);
-  }
-
-  function handleMobileTabPointerMove(event: TabPointerEvent) {
-    if (event.pointerId !== mobileTabPointerId) return;
-    event.preventDefault();
-    updateMobileTabDrag(event);
-  }
-
-  function finishMobileTabPointer(event: TabPointerEvent, shouldActivate: boolean) {
-    if (event.pointerId !== mobileTabPointerId) return;
-    event.preventDefault();
-    const target = mobileTabs[updateMobileTabDrag(event)];
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    mobileTabPointerId = null;
-    mobileTabDragIndex = null;
-    mobileTabDragX = null;
-    mobileTabGlowX = null;
-    mobileTabIconShiftX = 0;
-
-    if (shouldActivate && target) {
-      suppressMobileTabClickUntil = Date.now() + 500;
-      activateMobileTab(target);
-    }
-  }
 
   function navigate(view: View) {
     // A drawer left open above the new route makes the tab click look broken.
     messageDetail = null;
-    balanceDetailCheck = null;
+    balances.closeDetail();
     showPhoneList = false;
     showMoreMenu = false;
     showSendDrawer = false;
     currentView = view;
     window.location.hash = view;
-    if (view === 'balances') void refreshBalanceChecksForView();
+    if (view === 'balances') void balances.refresh();
+  }
+
+  function openIccidMappings(filter: 'all' | 'error') {
+    iccidMappingsFilter = filter;
+    navigate('iccid-mappings');
   }
 
   function handleHashChange() {
@@ -387,11 +158,6 @@
     if (user) handleHashChange();
   });
 
-  function messageTime(message: ApiMessage) {
-    const stamp = textOr(message.timestamp, null);
-    return stamp === null ? 0 : new Date(stamp).getTime();
-  }
-
   async function loadData() {
     if (!user) {
       dataLoading = false;
@@ -411,35 +177,18 @@
         ...phone,
         flag: getPhoneFlag(phone),
       }));
-      updateStatsFromPhones();
       updateSelectedPhone();
 
-      dataError = null;
-      if (!('failed' in messagesResponse)) {
-        messages = mergeMessagePage([], messagesResponse.data, { replace: true });
-        hasMoreMessagePages = hasMoreMessages(messagesResponse.pagination);
-        const newest = messages.reduce((max, m) => {
-          const t = messageTime(m);
-          return t > max ? t : max;
-        }, 0);
-        if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
-      } else {
-        console.error('[App] Messages API failed');
-        messages = [];
-        hasMoreMessagePages = false;
-        dataError = '短信列表加载失败';
-      }
-      messagesFromCache =
-        !('failed' in messagesResponse) && messagesResponse.sync.is_offline === true;
+      feed.applyFirstPage(messagesResponse);
 
-      balanceChecks = nextBalanceChecks;
+      balances.checks = nextBalanceChecks;
       await checkDaemonStatus();
 
       dataLoading = false;
     } catch (error) {
       console.warn('Failed to load data:', error);
       // Keep what was on screen: zeroed counters would read as an offline fleet.
-      dataError = errorMessage(error, '数据加载失败');
+      feed.loadError = errorMessage(error, '数据加载失败');
       dataLoading = false;
     }
   }
@@ -464,8 +213,8 @@
         .finally(() => {
           dataLoading = false;
           startPolling();
-          startCallPolling();
-          void loadCallHistory();
+          calls.startPolling();
+          void calls.loadHistory();
         })
         .catch((error: unknown) => {
           console.error('Failed to load data:', error);
@@ -481,177 +230,14 @@
   });
 
   function selectPhone(phone: Pick<Phone, 'iccid'> | null) {
-    balanceDetailCheck = null;
+    balances.closeDetail();
     messageDetail = null;
-    messages = [];
-    hasMoreMessagePages = false;
+    feed.clear();
     selectedPhoneIccid = textOr(phone?.iccid, null);
-    handlePhoneSelection();
+    updateSelectedPhone();
+    void feed.load(selectedPhoneIccid);
+    void balances.refresh();
     showPhoneList = false;
-  }
-
-  async function loadMessagesForPhone(
-    phoneIccid: string | null,
-    { replace = true, resetSync = false }: { replace?: boolean; resetSync?: boolean } = {},
-  ) {
-    if (!user) return;
-
-    const requestId = ++messageRequestId;
-
-    try {
-      const response = await api.getMessages({
-        ...(phoneIccid ? { phone_iccid: phoneIccid } : {}),
-        limit: MESSAGE_PAGE_SIZE,
-        ...(showFiltered ? { include_filtered: 1 } : {}),
-        ...(resetSync ? { reset_sync: 1 } : {}),
-      });
-
-      // Stale response: the user switched phones while loading.
-      if (requestId !== messageRequestId) return;
-
-      if (replace || hasMoreMessages(response.pagination)) {
-        hasMoreMessagePages = hasMoreMessages(response.pagination);
-      }
-      if (lastKnownTimestamp && messages.length > 0) {
-        const cutoff = new Date(lastKnownTimestamp).getTime();
-        console.log(
-          '[New Message Detection] lastKnownTimestamp:',
-          lastKnownTimestamp,
-          'cutoff:',
-          new Date(cutoff),
-        );
-        const freshIds = response.data.filter((m) => messageTime(m) > cutoff).map((m) => m.id);
-        console.log('[New Message Detection] Found', freshIds.length, 'new messages:', freshIds);
-        if (freshIds.length > 0) {
-          freshIds.forEach((id) => newMessageIds.add(id));
-          console.log(
-            '[New Message Detection] Added new message IDs, newMessageIds size:',
-            newMessageIds.size,
-          );
-          setTimeout(() => {
-            freshIds.forEach((id) => newMessageIds.delete(id));
-            console.log('[New Message Detection] Auto-cleared badges after 10s');
-          }, 10000);
-        }
-      } else {
-        console.log(
-          '[New Message Detection] Skipped - lastKnownTimestamp:',
-          lastKnownTimestamp,
-          'messages.length:',
-          messages.length,
-        );
-      }
-      const newest = response.data.reduce(
-        (max, m) => {
-          const t = messageTime(m);
-          return t > max ? t : max;
-        },
-        lastKnownTimestamp ? new Date(lastKnownTimestamp).getTime() : 0,
-      );
-      if (newest > 0) lastKnownTimestamp = new Date(newest).toISOString();
-      // Polls merge into loaded history and preserve it on an empty incremental
-      // response. Scope/filter changes replace the list, including with empty.
-      if (response.data.length > 0) {
-        messages = mergeMessagePage(messages, response.data, { replace });
-      } else if (replace) {
-        messages = [];
-      }
-    } catch (error) {
-      if (requestId !== messageRequestId) return;
-      console.error('[App] Failed to load messages:', error);
-      // Keep the loaded messages: a transient error must not blank valid data.
-    }
-  }
-
-  function isBalanceDetailOpen(id: string) {
-    return balanceDetailCheck?.id === id;
-  }
-
-  async function openBalanceCheck(check: BalanceCheck) {
-    if (check.id === '') return;
-    balanceDetailCheck = check;
-    balanceDetail = null;
-    try {
-      const result = await contractApi.balanceChecks.detail({ params: { id: check.id } });
-      if (isBalanceDetailOpen(check.id)) {
-        balanceDetail = result.data;
-      }
-    } catch (error) {
-      console.warn('Failed to load balance query detail:', error);
-    }
-  }
-
-  async function refreshBalanceChecksForView(options: QueriesChange = {}) {
-    if (!user) return;
-
-    const queuedChecks = options.queuedChecks ?? [];
-    if (queuedChecks.length > 0) {
-      const queuedIds = new Set(queuedChecks.map(({ id }) => id));
-      balanceChecks = [...queuedChecks, ...balanceChecks.filter(({ id }) => !queuedIds.has(id))];
-      return;
-    }
-
-    const activeIds = options.activeIds ?? [];
-    if (activeIds.length > 0) {
-      const result = await contractApi.balanceChecks.status({
-        query: { ids: activeIds.join(',') },
-      });
-      const updates = new Map(
-        result.data.map((status): [string, typeof status] => [status.id, status]),
-      );
-      const reachedTerminal = activeIds.some((id) => {
-        const update = updates.get(id);
-        if (update === undefined) return true;
-        const check = balanceChecks.find((candidate) => candidate.id === id);
-        if (!check) return false;
-        return isActiveBalanceCheck(check) && !isActiveBalanceCheck(update);
-      });
-      balanceChecks = balanceChecks.map((check) => {
-        const update = updates.get(check.id);
-        return update ? { ...check, ...update } : check;
-      });
-      if (!reachedTerminal) return;
-    }
-
-    if (currentView === 'balances') {
-      balanceChecks = await api.getBalanceChecks({ limit: 100 });
-      return;
-    }
-
-    if (currentView === 'dashboard' && selectedPhoneIccid) {
-      const latest = await api.getBalanceChecks({
-        phone_iccid: selectedPhoneIccid,
-        limit: 1,
-      });
-      balanceChecks = [
-        ...balanceChecks.filter((check) => check.sim_iccid !== selectedPhoneIccid),
-        ...latest,
-      ];
-    }
-  }
-
-  async function loadOlderMessages() {
-    if (!user || loadingOlderMessages || !hasMoreMessagePages) return;
-
-    loadingOlderMessages = true;
-    try {
-      const response = await api.getMessages({
-        ...(selectedPhoneIccid ? { phone_iccid: selectedPhoneIccid } : {}),
-        ...(showFiltered ? { include_filtered: 1 } : {}),
-        limit: MESSAGE_PAGE_SIZE,
-        offset: nextMessageOffset(messages),
-        force_refresh: true,
-      });
-
-      if (response.data.length > 0) {
-        messages = mergeMessagePage(messages, response.data);
-      }
-      hasMoreMessagePages = hasMoreMessages(response.pagination);
-    } catch (error) {
-      console.error('[App] Failed to load older messages:', error);
-    } finally {
-      loadingOlderMessages = false;
-    }
   }
 
   function handleSetIccidMapping(phone: Pick<Phone, 'iccid'>) {
@@ -673,59 +259,7 @@
         ...rest,
         number: phone_number,
       };
-      updateStatsFromPhones();
       updateSelectedPhone();
-    }
-  }
-
-  async function handleMessageSent(newMessage: {
-    phone_iccid: string;
-    recipient: string;
-    content: string;
-  }) {
-    try {
-      const response = await api.sendMessage({
-        phone_iccid: newMessage.phone_iccid,
-        recipient: newMessage.recipient,
-        content: newMessage.content,
-      });
-
-      const senderPhone = phoneNumbers.find((p) => p.iccid === newMessage.phone_iccid);
-      const senderNumber = textOr(senderPhone?.number, newMessage.phone_iccid);
-
-      const sentMessage: ApiMessage = {
-        id: response.messageId,
-        phone_iccid: newMessage.phone_iccid,
-        phone_number: senderNumber,
-        recipient: newMessage.recipient,
-        content: newMessage.content,
-        timestamp: new Date().toISOString(),
-        type: 'sent',
-        status: 'sending',
-        verification_code: null,
-        created_at: null,
-        updated_at: null,
-        error_message: null,
-        sms_id: null,
-        filter_status: 'clean',
-        filter_rule_id: null,
-        purpose: 'user',
-        balance_check_id: null,
-        processing_session_id: null,
-        display_phone_number: null,
-        phone_carrier: null,
-        phone_status: null,
-        phone_sim_index: null,
-        phone_country: null,
-        mapped_number: null,
-      };
-
-      messages = [sentMessage, ...messages];
-      return response;
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      showToast('发送失败: ' + errorMessage(error, '未知错误'), 'error');
-      throw error;
     }
   }
 
@@ -788,7 +322,7 @@
       pollInFlight = true;
       try {
         if (currentView === 'dashboard') {
-          await loadMessagesForPhone(selectedPhoneIccid, { replace: false });
+          await feed.load(selectedPhoneIccid, { replace: false });
         }
         const now = Date.now();
         if (now - lastDaemonPollAt >= DAEMON_POLL_INTERVAL_MS) {
@@ -808,809 +342,73 @@
       pollInterval = null;
       pollInFlight = false;
     }
-    stopCallPolling();
-  }
-
-  // Polling reads KV only (never D1) and pauses while the tab is hidden.
-  // A timeout chain, not an interval, so the delay can follow the call state.
-  function startCallPolling() {
-    if (callPollInterval || !can('messages.read')) return;
-    const tick = async () => {
-      if (document.visibilityState === 'visible') await refreshCallState();
-      callPollInterval = setTimeout(
-        () => void tick(),
-        callPollDelay({ call: activeCall, panelOpen: showCallPanel }),
-      );
-    };
-    callPollInterval = setTimeout(() => void tick(), 0);
-    document.addEventListener('visibilitychange', pollWhenVisible);
-  }
-
-  // A ring that started while the tab was hidden must show immediately on return.
-  function pollWhenVisible() {
-    if (document.visibilityState === 'visible') void refreshCallState();
-  }
-
-  function stopCallPolling() {
-    if (callPollInterval) {
-      clearTimeout(callPollInterval);
-      callPollInterval = null;
-    }
-    document.removeEventListener('visibilitychange', pollWhenVisible);
-  }
-
-  async function refreshCallState() {
-    if (callPollInFlight || !user) return;
-    callPollInFlight = true;
-    try {
-      applyCallState(await fetchCallState());
-    } catch {
-      // Keep the last known state; the next tick retries.
-    } finally {
-      callPollInFlight = false;
-    }
-  }
-
-  function applyCallState(call: LiveCall | null) {
-    activeCall = call;
-    // The call ended elsewhere (far end hung up, daemon, another tab): drop media.
-    if (!call && callSession && !callBusy) {
-      callSession.release();
-      callSession = null;
-      callMuted = false;
-    }
-    if (!call && activeCallId) void loadCallHistory();
-    activeCallId = call?.id ?? null;
-    // Surface a new incoming call once, without reopening a panel the user closed.
-    if (
-      call?.direction === 'inbound' &&
-      call.state === 'ringing' &&
-      call.id !== lastRingingCallId
-    ) {
-      lastRingingCallId = call.id;
-      showCallPanel = true;
-    }
-  }
-
-  $effect(() => {
-    if (!activeCall || activeCall.state === 'ringing') return;
-    const timer = setInterval(() => (callClock = Date.now()), 1000);
-    return () => {
-      clearInterval(timer);
-    };
-  });
-
-  let callDuration = $derived(
-    activeCall && activeCall.state !== 'ringing'
-      ? formatDuration(callElapsedSeconds(activeCall, callClock))
-      : null,
-  );
-
-  // Must be noticeable from another tab: ring and take over the tab title.
-  $effect(() => {
-    const call = activeCall;
-    const ringing = call?.direction === 'inbound' && call.state === 'ringing';
-    if (!ringing) {
-      ringtone?.stop();
-      if (titleBeforeRing !== null) {
-        document.title = titleBeforeRing;
-        titleBeforeRing = null;
-      }
-      return;
-    }
-    ringtone = ringtone ?? createRingtone<AudioNode>(window.AudioContext);
-    ringtone.start();
-    titleBeforeRing = titleBeforeRing ?? document.title;
-    document.title = `☎ 来电 ${call.number ?? ''}`.trim();
-  });
-
-  function readCallsSeenAt() {
-    try {
-      return localStorage.getItem('calls.seen_at');
-    } catch {
-      return null;
-    }
-  }
-
-  let missedCallCount = $derived(countMissedSince(callHistory, callsSeenAt));
-
-  async function loadCallHistory() {
-    if (!can('messages.read')) return;
-    callHistoryLoading = true;
-    try {
-      const { calls } = await fetchCallHistory({ limit: 30 });
-      callHistory = calls;
-    } catch {
-      // A failed log load must not disturb call control.
-    } finally {
-      callHistoryLoading = false;
-    }
-  }
-
-  function openCallPanel() {
-    showCallPanel = true;
-    void refreshCallState();
-    const seenAt = new Date().toISOString();
-    callsSeenAt = seenAt;
-    try {
-      localStorage.setItem('calls.seen_at', seenAt);
-    } catch {
-      // Private windows refuse storage; the badge then just returns next reload.
-    }
-    void loadCallHistory();
-  }
-
-  async function fetchRtcIceServers(): Promise<RTCIceServer[]> {
-    const servers = await fetchIceServers();
-    return servers.map(({ urls, username, credential }) => ({
-      urls,
-      ...(username === undefined ? {} : { username }),
-      ...(credential === undefined ? {} : { credential }),
-    }));
-  }
-
-  function newCallSession() {
-    callSession?.release();
-    callMuted = false;
-    callSession = createCallSession<MediaStreamTrack, MediaProvider, RTCTrackEvent>({
-      fetchIce: fetchRtcIceServers,
-      api: callApi,
-      RTCPeerConnection: window.RTCPeerConnection,
-      getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-      streamOf: (track) => new MediaStream([track]),
-      audioElement: callAudio,
-    });
-    return callSession;
-  }
-
-  async function runCallAction(action: () => Promise<unknown>) {
-    callBusy = true;
-    callError = null;
-    try {
-      await action();
-    } catch (error) {
-      callError = textOr(describeCallError(error), '通话操作失败');
-      callSession = null;
-    } finally {
-      callBusy = false;
-      await refreshCallState();
-    }
-  }
-
-  function handleDial({ iccid, number }: { iccid: string; number: string }) {
-    return runCallAction(() => newCallSession().dial({ iccid, number }));
-  }
-
-  function handleAnswer() {
-    return runCallAction(() => newCallSession().answer());
-  }
-
-  function handleToggleMute() {
-    if (!callSession) return;
-    callMuted = callSession.setMuted(!callMuted);
-  }
-
-  function handleHangup() {
-    return runCallAction(async () => {
-      if (callSession) {
-        await callSession.hangup();
-        callSession = null;
-      } else if (activeCall?.id) {
-        await callApi.hangup(activeCall.id);
-      }
-    });
+    calls.stopPolling();
   }
 </script>
 
-{#if loading}
-  <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
-    <div class="flex gap-2">
-      <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
-      <span class="w-3 h-3 rounded-full bg-emerald-200 animate-pulse [animation-delay:.2s]"></span>
-      <span class="w-3 h-3 rounded-full bg-emerald-100 animate-pulse [animation-delay:.4s]"></span>
-    </div>
-  </div>
-{:else if authError}
-  <!-- Identity service unreachable: a login button would bounce straight back, so offer a retry. -->
-  <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
-    <div class="w-full max-w-[460px] mx-4">
-      <div class="bg-white border border-stone-200 rounded-2xl p-10 shadow-raised text-center">
-        <h1 class="text-lg font-semibold text-stone-900 tracking-tight">无法连接服务器</h1>
-        <p class="text-sm text-stone-500 mt-2 mb-6 leading-relaxed">
-          没能确认登录状态，这通常是网络问题或服务端故障，不是你被登出了。<br />
-          <span class="text-stone-400 text-xs font-mono">{authError}</span>
-        </p>
-        <button
-          onclick={() => {
-            location.reload();
-          }}
-          class="w-full px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-xl
-            transition-colors shadow-focus"
-        >
-          重试
-        </button>
-      </div>
-    </div>
-  </div>
-{:else if !user}
-  <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
-    <div class="w-full max-w-[460px] mx-4">
-      <div class="bg-white border border-stone-200 rounded-2xl p-10 shadow-raised text-center">
-        <div class="flex items-center justify-center gap-2.5 mb-5">
-          <img src="/favicon.svg" alt="" class="w-[52px] h-[52px] rounded-xl" />
-        </div>
-        <h1 class="text-lg font-semibold text-stone-900 tracking-tight">验证码中心</h1>
-        <p class="text-sm text-stone-500 mt-2 mb-6 leading-relaxed">
-          需要公司邮箱和 sms 角色。<br />首次登录后默认为查看者。
-        </p>
-        <button
-          onclick={() => {
-            auth.login();
-          }}
-          class="w-full px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-xl
-            transition-colors shadow-focus"
-        >
-          使用 Auth0 登录
-        </button>
-        <p class="mt-5 text-[11px] font-mono text-stone-400">
-          95 modems · 采集服务{daemonMeta.label}
-        </p>
-      </div>
-    </div>
-  </div>
+{#if loading || authError !== null || !user}
+  <AuthGate {loading} {authError} daemonLabel={daemonMeta.label} />
 {:else}
   <div class="min-h-screen lg:h-screen lg:flex lg:flex-col lg:overflow-hidden bg-[#F7F5F2]">
-    <header class="bg-white border-b border-stone-200 sticky top-0 z-40 lg:flex-shrink-0">
-      <div class="px-4 lg:px-5 flex items-center h-[52px] gap-3 lg:gap-6">
-        <div class="flex items-center gap-2.5 shrink-0">
-          <img src="/favicon.svg" alt="" class="w-[30px] h-[30px] rounded-[8px]" />
-          <span class="text-[17px] leading-none font-semibold text-stone-900 tracking-[-0.01em]"
-            >验证码中心</span
-          >
-        </div>
-
-        <nav class="hidden lg:flex items-center gap-0.5 flex-1">
-          <button
-            onclick={() => {
-              navigate('dashboard');
-            }}
-            class="text-sm px-3 py-1.5 rounded-[7px] transition-all
-              {currentView === 'dashboard'
-              ? 'bg-stone-100 font-semibold text-stone-900'
-              : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
-          >
-            消息
-          </button>
-          {#if can('phones.write')}
-            <button
-              onclick={() => {
-                iccidMappingsFilter = 'all';
-                navigate('iccid-mappings');
-              }}
-              class="text-sm px-3 py-1.5 rounded-[7px] transition-all
-                {currentView === 'iccid-mappings'
-                ? 'bg-stone-100 font-semibold text-stone-900'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
-            >
-              设备与卡
-            </button>
-          {/if}
-          <button
-            onclick={() => {
-              navigate('balances');
-            }}
-            class="text-sm px-3 py-1.5 rounded-[7px] transition-all
-              {currentView === 'balances'
-              ? 'bg-stone-100 font-semibold text-stone-900'
-              : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
-          >
-            余额
-          </button>
-          {#if can('keywords.read') || can('filters.read')}
-            <button
-              onclick={() => {
-                navigate(can('filters.read') ? 'filters' : 'keywords');
-              }}
-              class="text-sm px-3 py-1.5 rounded-[7px] transition-all
-                {currentView === 'keywords' || currentView === 'filters'
-                ? 'bg-stone-100 font-semibold text-stone-900'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
-            >
-              规则
-            </button>
-          {/if}
-          {#if can('users.read')}
-            <button
-              onclick={() => {
-                navigate('users');
-              }}
-              class="text-sm px-3 py-1.5 rounded-[7px] transition-all
-                {currentView === 'users'
-                ? 'bg-stone-100 font-semibold text-stone-900'
-                : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'}"
-            >
-              用户
-            </button>
-          {/if}
-        </nav>
-
-        <div class="hidden lg:flex items-center gap-3 ml-auto shrink-0">
-          {#if can('messages.read')}
-            <button
-              onclick={() => {
-                if (showCallPanel) {
-                  showCallPanel = false;
-                } else {
-                  openCallPanel();
-                }
-              }}
-              aria-haspopup="dialog"
-              aria-expanded={showCallPanel}
-              class="flex items-center gap-1.5 px-2.5 py-[5px] border rounded-[7px] text-xs transition-colors
-                {activeCall?.state === 'ringing'
-                ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700 animate-pulse'
-                : activeCall
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
-                  : 'bg-stone-50 border-stone-200 text-stone-700 hover:bg-stone-100'}"
-            >
-              <svg
-                class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M3 5a2 2 0 012-2h2.3a1 1 0 01.95.68l1.1 3.3a1 1 0 01-.5 1.2l-1.6.8a11 11 0 005.1 5.1l.8-1.6a1 1 0 011.2-.5l3.3 1.1a1 1 0 01.68.95V19a2 2 0 01-2 2h-1C9.7 21 3 14.3 3 6V5z"
-                />
-              </svg>
-              <span class="font-medium tabular-nums">
-                {#if activeCall?.state === 'ringing'}来电{:else if callDuration}{callDuration}{:else}通话{/if}
-              </span>
-              {#if !activeCall && missedCallCount > 0}
-                <span
-                  title="{missedCallCount} 通未接来电"
-                  class="min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full
-                    bg-rose-600 text-white text-[10px] font-medium tabular-nums"
-                  >{missedCallCount}</span
-                >
-              {/if}
-            </button>
-          {/if}
-
-          <button
-            onclick={openDaemonDetails}
-            aria-haspopup="dialog"
-            aria-expanded={showDaemonDetails}
-            class="flex items-center gap-1.5 px-2.5 py-[5px] bg-stone-50 border border-stone-200
-              rounded-[7px] text-xs transition-colors hover:bg-stone-100 {daemonRefreshing
-              ? 'opacity-60'
-              : ''}"
-          >
-            <span class="w-1.5 h-1.5 rounded-full shrink-0 {daemonMeta.dotClass}"></span>
-            <span class="font-medium {daemonMeta.textClass}">采集服务{daemonMeta.label}</span>
-            {#if daemonStatus.reasons?.[0]}
-              <span class="max-w-[180px] truncate text-stone-500" title={daemonStatus.reasons[0]}>
-                · {daemonStatus.reasons[0]}
-              </span>
-            {/if}
-            {#if daemonStatus.last_heartbeat}
-              <span class="text-stone-400">· {formatTimeAgo(daemonStatus.last_heartbeat)}</span>
-            {/if}
-          </button>
-
-          <!-- Only below 1600px; wider layouts have the resident send column. -->
-          {#if can('messages.send')}
-            <button
-              onclick={() => (showSendDrawer = !showSendDrawer)}
-              class="2xl:hidden flex items-center gap-1.5 px-3.5 py-[7px] bg-orange-500
-                hover:bg-orange-600 text-white text-sm font-medium rounded-[8px] transition-colors"
-            >
-              <svg
-                class="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              发送短信
-            </button>
-          {/if}
-
-          <!-- A broom, not a refresh arrow: this clears local data and reloads. -->
-          <button
-            onclick={handleResetLocalCache}
-            title="清除本地缓存并重新加载"
-            aria-label="清除本地缓存并重新加载"
-            class="w-[26px] h-[26px] rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100
-              flex items-center justify-center transition-colors shrink-0"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M19 5l-7 7M14 3l7 7-9 9H5v-3l9-9z"
-              />
-            </svg>
-          </button>
-
-          {#if user}
-            {@const initials = textOr(user.name, textOr(user.email, '?')).charAt(0).toUpperCase()}
-            <button
-              onclick={() => {
-                auth.logout();
-              }}
-              title="退出登录"
-              class="w-[26px] h-[26px] rounded-full bg-stone-200 hover:bg-stone-300 flex items-center
-                justify-center text-[11px] font-semibold text-stone-700 transition-colors shrink-0"
-            >
-              {initials}
-            </button>
-          {/if}
-        </div>
-
-        <!-- Mobile: this is a receiver selector, not global navigation. -->
-        {#if currentView === 'dashboard'}
-          <button
-            class="lg:hidden ml-auto min-w-0 max-w-[190px] h-9 px-2.5 flex items-center gap-1.5
-              border border-stone-200 bg-stone-50 text-stone-700 rounded-lg transition-colors
-              hover:bg-stone-100 active:bg-stone-200"
-            onclick={() => {
-              showMoreMenu = false;
-              showPhoneList = true;
-            }}
-            aria-haspopup="dialog"
-            aria-expanded={showPhoneList}
-            aria-label={selectedPhone
-              ? `切换接收卡，当前为${selectedPhone.number || formatCardNumber(selectedPhone.sim_index)}`
-              : '选择接收卡'}
-          >
-            <svg
-              class="w-4 h-4 text-stone-500 shrink-0"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <rect x="7" y="2" width="10" height="20" rx="2" stroke-width="2" />
-              <path stroke-linecap="round" stroke-width="2" d="M10 5h4M11 18h2" />
-            </svg>
-            <span class="truncate text-xs font-medium">
-              {#if selectedPhone}
-                <span class="font-mono">{formatCardNumber(selectedPhone.sim_index)}</span>
-                <span class="text-stone-300 px-0.5">·</span>
-                {selectedPhone.flag || ''}{selectedPhone.number || '未设置号码'}
-              {:else}
-                全部设备
-              {/if}
-            </span>
-            <svg
-              class="w-3.5 h-3.5 text-stone-400 shrink-0"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 9l6 6 6-6"
-              />
-            </svg>
-          </button>
-        {/if}
-      </div>
-    </header>
+    <DesktopHeader
+      {user}
+      {currentView}
+      {can}
+      {calls}
+      {daemonStatus}
+      {daemonRefreshing}
+      {showDaemonDetails}
+      {showPhoneList}
+      {selectedPhone}
+      onNavigate={navigate}
+      onOpenIccidMappings={openIccidMappings}
+      onOpenDaemonDetails={openDaemonDetails}
+      onOpenPhoneList={() => {
+        showMoreMenu = false;
+        showPhoneList = true;
+      }}
+      onToggleSendDrawer={() => (showSendDrawer = !showSendDrawer)}
+      onResetCache={handleResetLocalCache}
+    />
     <!-- Mobile bottom padding matches the fixed tab bar height. Pull-to-refresh binds no listeners on desktop. -->
     <PullToRefresh onRefresh={handlePullRefresh}>
       <div
         class="pb-[var(--mobile-tab-bar-height)] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden"
       >
-        {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
-          <div class="bg-red-50 border-b border-red-200 px-4 py-3">
-            <div class="flex items-start gap-3">
-              <span class="mt-0.5 shrink-0">
-                <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
-              </span>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-red-800">
-                  采集服务{daemonMeta.label}
-                </p>
-                <p class="text-xs text-red-600 mt-0.5 leading-relaxed">
-                  {#if daemonStatus.last_heartbeat}
-                    最后一次心跳是 <strong>{formatTimeAgo(daemonStatus.last_heartbeat)}</strong>。
-                    下面显示的是那时的数据，新短信不会进来。
-                  {:else}
-                    {textOr(daemonStatus.message, '设备数据可能不是最新的。历史消息仍可查看。')}
-                  {/if}
-                </p>
-                <p class="text-xs text-red-500 mt-1">通常是 Orange Pi 掉线或 USB 集线器断电。</p>
-              </div>
-              <button
-                onclick={() => {
-                  window.location.reload();
-                }}
-                class="shrink-0 px-3 py-1.5 text-xs font-medium text-red-700 border border-red-300
-              rounded-lg hover:bg-red-100 transition-colors"
-              >
-                重新连接
-              </button>
-            </div>
-          </div>
-        {/if}
-
-        {#if phoneNumbers.some((p) => ['sim_error', 'iccid_mismatch'].includes(p.status))}
-          <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <svg
-                  class="w-5 h-5 text-yellow-600 flex-shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-                <span class="text-sm text-yellow-800">
-                  {#if phoneNumbers.filter((p) => p.status === 'sim_error').length > 0}
-                    <strong>{phoneNumbers.filter((p) => p.status === 'sim_error').length}</strong>
-                    张{getStatusMeta('sim_error').label}
-                  {/if}
-                  {#if phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length > 0}
-                    {#if phoneNumbers.filter((p) => p.status === 'sim_error').length > 0}
-                      •
-                    {/if}
-                    <strong
-                      >{phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length}</strong
-                    >
-                    张{getStatusMeta('iccid_mismatch').label}
-                  {/if}
-                </span>
-              </div>
-              {#if can('phones.write')}
-                <!-- Deep-links into the ICCID page, which a viewer cannot open — the hash
-                 guard would bounce them straight back to the dashboard. -->
-                <button
-                  onclick={() => {
-                    iccidMappingsFilter = 'error';
-                    navigate('iccid-mappings');
-                  }}
-                  class="text-xs text-yellow-600 hover:text-yellow-700 underline"
-                >
-                  查看详情
-                </button>
-              {/if}
-            </div>
-          </div>
-        {/if}
+        <StatusBanners
+          {daemonStatus}
+          {phoneNumbers}
+          {can}
+          onOpenIccidMappings={openIccidMappings}
+        />
 
         {#if currentView === 'dashboard'}
           <ErrorBoundary componentName="Dashboard">
-            <div class="lg:flex-shrink-0 bg-white border-b border-stone-200 flex-shrink-0">
-              <div class="flex items-center gap-6 px-5 h-10 overflow-x-auto">
-                <div class="flex items-baseline gap-1.5 shrink-0">
-                  <span
-                    class="font-mono text-[22px] font-semibold text-stone-900 leading-none tabular-nums tracking-[-0.02em]"
-                  >
-                    {stats.onlineDevices}
-                  </span>
-                  <span class="font-mono text-sm text-stone-400"
-                    >/ {stats.totalDevices || phoneNumbers.length}</span
-                  >
-                  <span class="text-xs text-stone-600">张卡在线</span>
-                </div>
-
-                {#if anomalySimError > 0 || anomalyMismatch > 0 || anomalyOffline > 0}
-                  <div class="h-4 w-px bg-stone-200 shrink-0"></div>
-                  <div class="flex items-center gap-3 shrink-0">
-                    {#if anomalySimError > 0}
-                      <span class="flex items-center gap-1.5 text-xs text-stone-600">
-                        <span class="inline-block w-2 h-2 rounded-sm bg-red-500 shrink-0"></span>
-                        读卡失败 <strong class="font-mono tabular-nums">{anomalySimError}</strong>
-                      </span>
-                    {/if}
-                    {#if anomalyMismatch > 0}
-                      <span class="flex items-center gap-1.5 text-xs text-stone-600">
-                        <span class="inline-block w-2 h-2 rounded-sm bg-amber-500 shrink-0"></span>
-                        ICCID 不匹配
-                        <strong class="font-mono tabular-nums">{anomalyMismatch}</strong>
-                      </span>
-                    {/if}
-                    {#if anomalyOffline > 0}
-                      <span class="flex items-center gap-1.5 text-xs text-stone-600">
-                        <span class="inline-block w-2 h-2 rounded-sm bg-stone-300 shrink-0"></span>
-                        离线 <strong class="font-mono tabular-nums">{anomalyOffline}</strong>
-                      </span>
-                    {/if}
-                  </div>
-
-                  {#if can('phones.write')}
-                    <button
-                      onclick={() => {
-                        iccidMappingsFilter = 'error';
-                        navigate('iccid-mappings');
-                      }}
-                      class="text-xs text-action-text font-medium border-b border-[#fdba74] hover:border-orange-400 transition-colors shrink-0"
-                    >
-                      处理 →
-                    </button>
-                  {/if}
-                {:else if phoneNumbers.length > 0}
-                  <div class="h-4 w-px bg-stone-200 shrink-0"></div>
-                  <span class="flex items-center gap-1.5 text-xs text-emerald-600">
-                    <span
-                      class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"
-                    ></span>
-                    全部正常
-                  </span>
-                {/if}
-              </div>
-            </div>
-
-            <!-- Desktop grid: 3 columns (phone, messages, send) from 1600px, 2 below with send as a drawer. -->
-            <div
-              class="px-0 sm:px-4 lg:px-5 lg:pt-4 lg:pb-4 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col"
-            >
-              <div
-                class="lg:grid lg:gap-4 lg:flex-1 lg:min-h-0 lg:grid-cols-[288px_1fr] {can(
-                  'messages.send',
-                )
-                  ? '2xl:grid-cols-[288px_1fr_352px]'
-                  : ''}"
-              >
-                <!-- Mobile receiver picker: a bottom sheet keeps the message context visible. -->
-                {#if showPhoneList}
-                  <div class="lg:hidden fixed inset-0 z-50" role="presentation">
-                    <button
-                      class="absolute inset-0 bottom-[var(--mobile-tab-bar-height)] w-full bg-stone-900/35"
-                      onclick={() => (showPhoneList = false)}
-                      aria-label="关闭接收卡选择"
-                    ></button>
-                    <div
-                      class="absolute left-0 right-0 bottom-[var(--mobile-tab-bar-height)] h-[min(68dvh,620px)] max-h-[calc(100dvh_-_52px_-_var(--mobile-tab-bar-height))]
-                  bg-white rounded-t-2xl shadow-[0_-12px_36px_rgba(28,25,23,.2)] overflow-hidden
-                  flex flex-col"
-                      role="dialog"
-                      aria-modal="true"
-                      aria-labelledby="receiver-picker-title"
-                      use:overlay={{ onClose: () => (showPhoneList = false) }}
-                    >
-                      <div class="flex-shrink-0 border-b border-stone-200">
-                        <div class="flex justify-center pt-2 pb-1" aria-hidden="true">
-                          <span class="w-9 h-1 rounded-full bg-stone-300"></span>
-                        </div>
-                        <div class="h-11 px-4 flex items-center gap-2">
-                          <div class="min-w-0 flex-1">
-                            <h2
-                              id="receiver-picker-title"
-                              class="text-sm font-semibold text-stone-900"
-                            >
-                              选择接收卡
-                            </h2>
-                            <p class="text-[11px] text-stone-400 mt-0.5">
-                              共 {phoneNumbers.length} 张卡
-                            </p>
-                          </div>
-                          <button
-                            class="w-9 h-9 -mr-1 flex items-center justify-center rounded-lg text-stone-500
-                        hover:bg-stone-100 active:bg-stone-200"
-                            onclick={() => (showPhoneList = false)}
-                            aria-label="关闭"
-                          >
-                            <svg
-                              class="w-5 h-5"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M6 18L18 6M6 6l12 12"
-                              />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                      <div class="flex-1 min-h-0">
-                        <PhoneList
-                          {phoneNumbers}
-                          bind:selectedPhoneIccid
-                          bind:selectedCountry
-                          bind:searchTerm
-                          onSelectPhone={selectPhone}
-                          onSetIccidMapping={handleSetIccidMapping}
-                          mobile={true}
-                          isLoading={dataLoading}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                {/if}
-
-                <div class="hidden lg:flex lg:flex-col h-full min-h-0">
-                  <PhoneList
-                    {phoneNumbers}
-                    bind:selectedPhoneIccid
-                    bind:selectedCountry
-                    bind:searchTerm
-                    onSelectPhone={selectPhone}
-                    onSetIccidMapping={handleSetIccidMapping}
-                    isLoading={dataLoading}
-                  />
-                </div>
-
-                <div
-                  class="flex flex-col h-full min-h-0 {selectedPhone
-                    ? 'lg:grid lg:grid-rows-[minmax(300px,1fr)_auto] lg:gap-3'
-                    : ''}"
-                >
-                  <div class="min-h-0 flex flex-col">
-                    <SimpleMessageView
-                      {messages}
-                      {selectedPhone}
-                      isLoading={dataLoading}
-                      {newMessageIds}
-                      onClearPhone={() => {
-                        selectPhone(null);
-                      }}
-                      {showFiltered}
-                      {filterRules}
-                      onToggleFiltered={toggleFiltered}
-                      {balanceChecks}
-                      onOpenBalance={openBalanceCheck}
-                      onOpenMessage={(message: ApiMessage) => {
-                        messageDetail = message;
-                      }}
-                      hasMore={hasMoreMessagePages}
-                      onLoadMore={loadOlderMessages}
-                      loadingMore={loadingOlderMessages}
-                      loadError={dataError}
-                      fromCache={messagesFromCache}
-                      onRetry={() => {
-                        dataLoading = true;
-                        void loadData().finally(() => {
-                          dataLoading = false;
-                        });
-                      }}
-                    />
-                  </div>
-                  {#if selectedPhone}
-                    <div class="hidden lg:block min-h-0">
-                      <PhoneDetails
-                        phone={selectedPhone}
-                        mobile={false}
-                        {daemonStatus}
-                        balanceCheck={latestSelectedBalanceCheck}
-                        onOpenBalance={openBalanceCheck}
-                        phones={phoneNumbers}
-                      />
-                    </div>
-                  {/if}
-                </div>
-
-                {#if can('messages.send')}
-                  <div class="hidden 2xl:flex 2xl:flex-col h-full min-h-0">
-                    <MessageComposer
-                      {selectedPhone}
-                      {phoneNumbers}
-                      {messages}
-                      onmessagesent={handleMessageSent}
-                    />
-                  </div>
-                {/if}
-              </div>
-            </div>
+            <DashboardView
+              {phoneNumbers}
+              {selectedPhone}
+              bind:selectedPhoneIccid
+              bind:selectedCountry
+              bind:searchTerm
+              bind:showPhoneList
+              {dataLoading}
+              {can}
+              {feed}
+              {balances}
+              {daemonStatus}
+              onSelectPhone={selectPhone}
+              onSetIccidMapping={handleSetIccidMapping}
+              onOpenIccidMappings={openIccidMappings}
+              onOpenMessage={(message: ApiMessage) => {
+                messageDetail = message;
+              }}
+              onRetry={() => {
+                dataLoading = true;
+                void loadData().finally(() => {
+                  dataLoading = false;
+                });
+              }}
+            />
           </ErrorBoundary>
         {:else if currentView === 'send'}
           <ErrorBoundary componentName="MessageComposer">
@@ -1619,9 +417,9 @@
                 <MessageComposer
                   {selectedPhone}
                   {phoneNumbers}
-                  {messages}
+                  messages={feed.messages}
                   mobilePage={true}
-                  onmessagesent={handleMessageSent}
+                  onmessagesent={feed.send}
                 />
               </div>
             </div>
@@ -1637,54 +435,16 @@
             <div class="lg:flex-1 lg:min-h-0 lg:overflow-hidden">
               <BalanceManagement
                 {phoneNumbers}
-                {balanceChecks}
+                balanceChecks={balances.checks}
                 canQueryBalances={can('balances.query')}
                 canWriteBills={can('bills.write')}
-                onQueriesChanged={refreshBalanceChecksForView}
-                onOpenBalance={openBalanceCheck}
+                onQueriesChanged={balances.refresh}
+                onOpenBalance={balances.open}
               />
             </div>
           </ErrorBoundary>
         {:else if currentView === 'keywords' || currentView === 'filters'}
-          <div
-            class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto bg-white lg:bg-transparent"
-          >
-            {#if can('keywords.read') && can('filters.read')}
-              <div
-                class="flex items-center p-1 m-3 lg:inline-flex lg:m-0 lg:mb-5 bg-stone-200/70 rounded-lg"
-                aria-label="规则类型"
-              >
-                <button
-                  onclick={() => {
-                    navigate('filters');
-                  }}
-                  class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
-                {currentView === 'filters'
-                    ? 'bg-white text-stone-900 font-semibold shadow-sm'
-                    : 'text-stone-500 hover:text-stone-800'}">垃圾过滤</button
-                >
-                <button
-                  onclick={() => {
-                    navigate('keywords');
-                  }}
-                  class="flex-1 lg:flex-none px-3 py-1.5 rounded-md text-sm transition-colors
-                {currentView === 'keywords'
-                    ? 'bg-white text-stone-900 font-semibold shadow-sm'
-                    : 'text-stone-500 hover:text-stone-800'}">关键词高亮</button
-                >
-              </div>
-            {/if}
-
-            {#if currentView === 'filters'}
-              <ErrorBoundary componentName="FilterRules">
-                <FilterRules />
-              </ErrorBoundary>
-            {:else}
-              <ErrorBoundary componentName="Keywords">
-                <KeywordConfig />
-              </ErrorBoundary>
-            {/if}
-          </div>
+          <RulesView {currentView} {can} onNavigate={navigate} />
         {:else}
           <ErrorBoundary componentName="UserManagement">
             <div class="px-0 py-0 lg:px-8 lg:py-6 lg:flex-1 lg:min-h-0 lg:overflow-auto">
@@ -1696,51 +456,20 @@
     </PullToRefresh>
 
     {#if showSendDrawer && can('messages.send')}
-      <div
-        class="hidden lg:block 2xl:hidden fixed inset-0 z-30 bg-stone-900/28"
-        onclick={() => (showSendDrawer = false)}
-        role="presentation"
-      ></div>
-      <div
-        class="hidden lg:flex 2xl:hidden fixed top-0 right-0 bottom-0 z-40 w-[400px] flex-col
-        bg-white border-l border-stone-200"
-        style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
-      >
-        <div
-          class="flex items-center justify-between px-5 py-4 border-b border-stone-200 flex-shrink-0"
-        >
-          <h3 class="text-sm font-semibold text-stone-900">发送短信</h3>
-          <button
-            onclick={() => (showSendDrawer = false)}
-            aria-label="关闭发送短信"
-            class="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        </div>
-        <div class="flex-1 min-h-0 overflow-y-auto">
-          <MessageComposer
-            {selectedPhone}
-            {phoneNumbers}
-            {messages}
-            onmessagesent={handleMessageSent}
-          />
-        </div>
-      </div>
+      <SendDrawer
+        {selectedPhone}
+        {phoneNumbers}
+        messages={feed.messages}
+        onSend={feed.send}
+        onClose={() => (showSendDrawer = false)}
+      />
     {/if}
 
-    {#if balanceDetailCheck}
+    {#if balances.detailCheck}
       <BalanceQueryDetail
-        check={balanceDetailCheck}
-        detail={balanceDetail}
-        onClose={() => (balanceDetailCheck = null)}
+        check={balances.detailCheck}
+        detail={balances.detail}
+        onClose={balances.closeDetail}
       />
     {/if}
 
@@ -1748,376 +477,30 @@
       <MessageDetail
         message={messageDetail}
         {selectedPhone}
-        {filterRules}
+        filterRules={feed.filterRules}
         keywords={$keywordsStore}
         onClose={() => (messageDetail = null)}
       />
     {/if}
 
-    <!-- The safe-area padding keeps controls clear of Safari chrome and the home indicator. -->
-    <nav
-      class="mobile-tab-bar lg:hidden fixed bottom-0 left-0 right-0 z-40
-      bg-white border-t border-stone-200
-      flex items-stretch touch-manipulation isolate"
-      style="box-shadow: 0 -1px 0 rgba(28,25,23,.06); padding-bottom: var(--mobile-tab-safe-area); --mobile-tab-selection-width: {mobileTabSelectionWidth}; --mobile-tab-selection-x: {mobileTabSelectionX}; --mobile-tab-glow-x: {mobileTabGlowPosition}; --mobile-tab-icon-shift-x: {mobileTabIconShiftX}px;"
-      data-mobile-tab-dragging={mobileTabPointerId !== null}
-      onpointerdown={handleMobileTabPointerDown}
-      onpointermove={handleMobileTabPointerMove}
-      onpointerup={(event) => {
-        finishMobileTabPointer(event, true);
-      }}
-      onpointercancel={(event) => {
-        finishMobileTabPointer(event, false);
-      }}
-    >
-      <span class="mobile-tab-selection" data-mobile-tab-selection aria-hidden="true"></span>
-
-      <button
-        onclick={() => {
-          handleMobileTabClick('dashboard');
-        }}
-        data-mobile-tab-active={mobileTabVisualId === 'dashboard'}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
-          touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'dashboard' ? 'text-[#c2410c]' : 'text-stone-400'}"
-      >
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M7 8h10M7 12h6m-6 4h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
-          />
-        </svg>
-        <span class="text-[10px] font-semibold leading-none">验证码</span>
-      </button>
-
-      {#if canManagePhones}
-        <button
-          onclick={() => {
-            handleMobileTabClick('iccid-mappings');
-          }}
-          data-mobile-tab-active={mobileTabVisualId === 'iccid-mappings'}
-          class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
-            touch-manipulation active:bg-stone-100 transition-colors
-            {mobileTabVisualId === 'iccid-mappings' ? 'text-[#c2410c]' : 'text-stone-400'}"
-        >
-          <svg
-            class="w-6 h-6"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <rect x="5" y="5" width="14" height="14" rx="2" />
-            <rect x="9" y="9" width="6" height="6" rx="1" />
-            <path stroke-linecap="round" d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3" />
-          </svg>
-          <span class="text-[10px] font-semibold leading-none">设备</span>
-        </button>
-      {/if}
-
-      <button
-        onclick={() => {
-          handleMobileTabClick('balances');
-        }}
-        data-mobile-tab-active={mobileTabVisualId === 'balances'}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
-          touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'balances' ? 'text-[#c2410c]' : 'text-stone-400'}"
-      >
-        <svg
-          class="w-6 h-6"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M4 7.5A2.5 2.5 0 016.5 5H19a1 1 0 011 1v12a1 1 0 01-1 1H6.5A2.5 2.5 0 014 16.5v-9z"
-          />
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M4 8h13m0 3h4v4h-4a2 2 0 010-4z"
-          />
-        </svg>
-        <span class="text-[10px] font-semibold leading-none">余额</span>
-      </button>
-
-      <button
-        onclick={() => {
-          handleMobileTabClick('send');
-        }}
-        data-mobile-tab-active={mobileTabVisualId === 'send'}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
-          touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'send' ? 'text-[#c2410c]' : 'text-stone-400 hover:text-stone-600'}"
-      >
-        <svg
-          class="w-6 h-6"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M5 5h9a3 3 0 013 3v1M5 5a3 3 0 00-3 3v5a3 3 0 003 3h2l3.5 3v-3H13"
-          />
-          <path stroke-linecap="round" stroke-linejoin="round" d="M14 12h8m-3-3 3 3-3 3" />
-        </svg>
-        <span class="text-[10px] font-semibold leading-none">发送</span>
-      </button>
-
-      <button
-        onclick={() => {
-          handleMobileTabClick('more');
-        }}
-        data-mobile-tab-active={mobileTabVisualId === 'more'}
-        class="mobile-tab-button relative z-[1] flex-1 flex flex-col items-center justify-center gap-0.5 min-h-[var(--mobile-tab-content-height)]
-          touch-manipulation active:bg-stone-100 transition-colors
-          {mobileTabVisualId === 'more' ? 'text-[#c2410c]' : 'text-stone-400'}"
-      >
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-        <span class="text-[10px] font-semibold leading-none">更多</span>
-      </button>
-    </nav>
+    <MobileTabBar
+      {currentView}
+      {showMoreMenu}
+      {canManagePhones}
+      onNavigate={navigate}
+      onToggleMore={() => (showMoreMenu = !showMoreMenu)}
+    />
 
     {#if showMoreMenu}
-      <div
-        class="lg:hidden fixed inset-0 z-[35] bg-stone-900/20"
-        onclick={() => (showMoreMenu = false)}
-        role="presentation"
-      ></div>
-      <div
-        class="lg:hidden fixed bottom-[var(--mobile-tab-bar-height)] left-0 right-0 z-40 bg-white border-t border-stone-200 rounded-t-2xl
-        shadow-[0_-8px_30px_rgba(28,25,23,.18)] max-h-[calc(100dvh_-_var(--mobile-tab-bar-height)_-_16px)] overflow-y-auto"
-        role="dialog"
-        aria-modal="true"
-        aria-label="更多"
-        use:overlay={{ onClose: () => (showMoreMenu = false) }}
-      >
-        <div class="p-4 space-y-1">
-          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
-            运行状态
-          </p>
-          <button
-            onclick={() => {
-              showMoreMenu = false;
-              void openDaemonDetails();
-            }}
-            class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left"
-          >
-            <div class="flex items-center gap-2.5">
-              <span class="w-2 h-2 rounded-full {daemonMeta.dotClass}"></span>
-              <div>
-                <div class="text-sm font-medium text-stone-800">采集服务{daemonMeta.label}</div>
-                <div class="text-xs text-stone-400 mt-0.5">
-                  心跳 {formatTimeAgo(daemonStatus.last_heartbeat)}
-                </div>
-              </div>
-            </div>
-            <svg
-              class="w-4 h-4 text-stone-300"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-          </button>
-
-          {#if can('messages.read')}
-            <button
-              onclick={() => {
-                showMoreMenu = false;
-                openCallPanel();
-              }}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-lg hover:bg-stone-50 transition-colors text-left"
-            >
-              <div class="flex items-center gap-2.5">
-                <span class="w-2 h-2 rounded-full {activeCall ? 'bg-emerald-500' : 'bg-stone-300'}"
-                ></span>
-                <div class="text-sm font-medium text-stone-800">
-                  {#if activeCall?.state === 'ringing'}来电振铃{:else if callDuration}通话中 {callDuration}{:else}语音通话{/if}
-                </div>
-                {#if !activeCall && missedCallCount > 0}
-                  <span
-                    class="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full
-                    bg-rose-600 text-white text-[10px] font-medium tabular-nums"
-                    >{missedCallCount}</span
-                  >
-                {/if}
-              </div>
-              <svg
-                class="w-4 h-4 text-stone-300"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-          {/if}
-
-          <div class="border-t border-stone-100 my-2"></div>
-          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
-            规则
-          </p>
-
-          {#if can('filters.read')}
-            <button
-              onclick={() => {
-                navigate('filters');
-              }}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
-            >
-              <div>
-                <div class="text-sm font-medium text-stone-800">垃圾过滤</div>
-                <div class="text-xs text-stone-400 mt-0.5">隐藏非验证码推广短信</div>
-              </div>
-              <svg
-                class="w-4 h-4 text-stone-300"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-          {/if}
-
-          {#if can('keywords.read')}
-            <button
-              onclick={() => {
-                navigate('keywords');
-              }}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
-            >
-              <div>
-                <div class="text-sm font-medium text-stone-800">关键词高亮</div>
-                <div class="text-xs text-stone-400 mt-0.5">标色识别验证码类型</div>
-              </div>
-              <svg
-                class="w-4 h-4 text-stone-300"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-          {/if}
-
-          {#if can('users.read')}
-            <div class="border-t border-stone-100 my-2"></div>
-            <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
-              管理
-            </p>
-            <button
-              onclick={() => {
-                navigate('users');
-              }}
-              class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
-            >
-              <div>
-                <div class="text-sm font-medium text-stone-800">用户管理</div>
-                <div class="text-xs text-stone-400 mt-0.5">管理员 / 查看者角色</div>
-              </div>
-              <svg
-                class="w-4 h-4 text-stone-300"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-          {/if}
-
-          <div class="border-t border-stone-100 my-2"></div>
-          <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest px-3 mb-2">
-            账户
-          </p>
-          <!-- Self-service recovery for stale IndexedDB rows or a bad service worker. -->
-          <button
-            onclick={handleResetLocalCache}
-            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
-          >
-            <div>
-              <div class="text-sm font-medium text-stone-700">重置本地缓存</div>
-              <div class="text-xs text-stone-400 mt-0.5">清除短信与离线缓存后重新加载</div>
-            </div>
-            <svg
-              class="w-4 h-4 text-stone-300"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-          </button>
-          <button
-            onclick={() => {
-              auth.logout();
-            }}
-            class="w-full flex items-center justify-between px-3 py-3 rounded-xl hover:bg-stone-50 transition-colors text-left"
-          >
-            <div class="text-sm font-medium text-stone-700">退出登录</div>
-            <svg
-              class="w-4 h-4 text-stone-300"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
+      <MoreMenu
+        {can}
+        {calls}
+        {daemonStatus}
+        onClose={() => (showMoreMenu = false)}
+        onNavigate={navigate}
+        onOpenDaemonDetails={openDaemonDetails}
+        onResetCache={handleResetLocalCache}
+      />
     {/if}
   </div>
 {/if}
@@ -2131,39 +514,7 @@
   />
 {/if}
 
-{#if user && can('messages.read')}
-  <!-- Far-end call audio. Always mounted so a session can attach to it at once. -->
-  <audio bind:this={callAudio} autoplay class="hidden"></audio>
-{/if}
-
-{#if showCallPanel && user}
-  <!-- Desktop: a panel under the top bar. Mobile: a sheet above the tab bar. -->
-  <div
-    role="dialog"
-    aria-modal="false"
-    aria-label="语音通话"
-    use:overlay={{ onClose: () => (showCallPanel = false) }}
-    class="fixed z-[60] left-3 right-3 bottom-[calc(var(--mobile-tab-bar-height)+18px)]
-      lg:left-auto lg:right-5 lg:top-[58px] lg:bottom-auto lg:w-[340px]
-      shadow-[0_16px_40px_rgba(28,25,23,.18)] rounded-lg"
-  >
-    <CallPanel
-      call={activeCall}
-      phones={phoneNumbers}
-      busy={callBusy}
-      error={callError}
-      muted={callMuted}
-      daemonOnline={isDaemonConnected(daemonStatus.status)}
-      history={callHistory}
-      historyLoading={callHistoryLoading}
-      onDial={handleDial}
-      onAnswer={handleAnswer}
-      onHangup={handleHangup}
-      onToggleMute={handleToggleMute}
-      onClose={() => (showCallPanel = false)}
-    />
-  </div>
-{/if}
+<CallLayer {user} {can} {calls} {phoneNumbers} daemonStatus={daemonStatus.status} />
 
 <IccidMappingDialog
   phone={phoneToMap}
@@ -2175,20 +526,7 @@
   }}
 />
 
-{#if toasts.length}
-  <div class="fixed top-4 right-4 z-[100] flex flex-col gap-2 items-end">
-    {#each toasts as toast (toast.id)}
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        duration={toast.duration}
-        onClose={() => {
-          removeToast(toast.id);
-        }}
-      />
-    {/each}
-  </div>
-{/if}
+<ToastStack queue={toasts} />
 
 <ConfirmHost />
 
