@@ -49,7 +49,9 @@ until then its commits fail. Never skip them with `--no-verify`.
 
 - **pre-commit**, on staged files: prettier and ESLint for `sms-dashboard/`,
   `cargo fmt --check` for `orange-pi-daemon/`, `check-nix` (nixfmt, deadnix,
-  statix) for `.nix` files. `nix fmt` formats every Nix file.
+  statix) for `.nix` files, `check-workflows` (actionlint, zizmor) for
+  `.github/workflows/`. `nix fmt` formats every Nix file. Every `uses:` is pinned
+  to a commit SHA with the version in a comment; zizmor rejects a tag.
 - **pre-push**, on the files the pushed commits change: `bun run check` for
   `sms-dashboard/`, `check-daemon` for the daemon and its control fixtures, the
   Orange Pi system eval for `flake.*` and `nixos-config/`, and `audit-deps` when a

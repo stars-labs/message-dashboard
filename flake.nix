@@ -236,6 +236,19 @@
             nodejs_22
           ];
 
+          # zizmor also requires every `uses:` to be pinned to a commit SHA.
+          check-workflows = pkgs.writeShellApplication {
+            name = "check-workflows";
+            runtimeInputs = with pkgs; [
+              actionlint
+              zizmor
+            ];
+            text = ''
+              actionlint "$@"
+              zizmor --offline "$@"
+            '';
+          };
+
           check-nix = pkgs.writeShellApplication {
             name = "check-nix";
             runtimeInputs = with pkgs; [
@@ -635,6 +648,7 @@
               balance-agent-cli
               release-balance-agent
               check-api-compat
+              check-workflows
               audit-deps
               ;
             default = sms-daemon;
@@ -705,6 +719,13 @@
                 files = "\\.nix$";
                 stages = [ "pre-commit" ];
               };
+              workflows = {
+                enable = true;
+                name = "actionlint, zizmor";
+                entry = lib.getExe check-workflows;
+                files = "^\\.github/workflows/.*\\.ya?ml$";
+                stages = [ "pre-commit" ];
+              };
               dashboard-check = {
                 enable = true;
                 name = "bun run check";
@@ -751,6 +772,7 @@
                 check-api-compat
                 check-daemon
                 check-nix
+                check-workflows
                 pi-route
               ]
               ++ dashboardTools

@@ -18,7 +18,9 @@ jobs:
     name: Dependency advisories and licenses (audit-deps)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
       - run: nix develop .#dashboard -c bun install --frozen-lockfile --cwd sms-dashboard
       - run: nix run .#audit-deps
