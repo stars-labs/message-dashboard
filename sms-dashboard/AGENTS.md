@@ -8,7 +8,8 @@
 
 ## Data model (quick ref)
 
-- `device_view` — always use for reads. Never query raw tables directly.
+- `device_view` — always use for device reads. Only `server/db/sims.ts` touches
+  `sims` and only `server/db/modems.ts` touches `modems`; lint enforces both.
 - `sims` — user inventory, source of truth. Daemon never writes it.
 - `sims.service_type` — manually verified. Never infer from ICCID or balance replies.
 - `modems.detected_iccid` — live field. `modems.current_iccid` is dead legacy.
@@ -37,6 +38,13 @@ get: os.iccidMappings.get.handler(({ context, input }) =>
   iccidMappingsHandler.get(context.request, input.params.id),
 ),
 ```
+
+The handler (`server/handlers/`) holds the logic; its SQL lives in `server/db/`,
+one file per domain. A db function takes the narrowest `D1<…>` it needs, parses
+rows with `queryAll` / `queryFirst` / `queryOne`, and runs a whole `batch` (a
+transaction) itself. `bun run lint` rejects `.prepare(` or `.batch(` outside
+`server/db/`, and `CREATE` / `DROP` / `ALTER` anywhere in `server/`: the schema
+changes only in `migrations/`.
 
 The dashboard calls it as `contractApi.iccidMappings.get({ params: { id } })`
 (`client/lib/api.ts`), the Balance Agent through `balance-agent/src/runner/control-client.ts`.

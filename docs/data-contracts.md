@@ -8,6 +8,8 @@
   `balance_managed` when operational health is driven directly by balance metrics.
   Never infer or write it from ICCID, detected operator, or balance replies.
 - Read device/SIM state through `device_view`, not ad hoc joins or legacy tables.
+  In the Worker only `server/db/sims.ts` reads or writes `sims` and only
+  `server/db/modems.ts` reads or writes `modems`; `bun run lint` enforces it.
 - `device_view` joins `sims.imei` to `modems.equipment_id`. The join key is IMEI,
   not ICCID.
 - Use `modems.detected_iccid`; `modems.current_iccid` is stale legacy data frozen

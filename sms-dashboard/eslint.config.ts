@@ -65,12 +65,15 @@ const D1_ACCESS = [
 
 const DEVICE_TABLE_MESSAGE =
   'Read devices from device_view. Only server/db/sims.ts touches sims, and only server/db/modems.ts touches modems.';
-const DEVICE_TABLE_SQL = '/\\b(from|join|into|update)\\s+(sims|modems)\\b/i';
+function touching(tables: string) {
+  const sql = `/\\b(from|join|into|update)\\s+(${tables})\\b/i`;
+  return [
+    { selector: `TemplateElement[value.raw=${sql}]`, message: DEVICE_TABLE_MESSAGE },
+    { selector: `Literal[value=${sql}]`, message: DEVICE_TABLE_MESSAGE },
+  ];
+}
 
-const DEVICE_TABLES = [
-  { selector: `TemplateElement[value.raw=${DEVICE_TABLE_SQL}]`, message: DEVICE_TABLE_MESSAGE },
-  { selector: `Literal[value=${DEVICE_TABLE_SQL}]`, message: DEVICE_TABLE_MESSAGE },
-];
+const DEVICE_TABLES = touching('sims|modems');
 
 const SCHEMA_CHANGE_MESSAGE =
   'Change the schema in a new migration (migrations/NNN_name.sql), never at runtime.';
@@ -80,34 +83,6 @@ const SCHEMA_CHANGES = [
   { selector: `TemplateElement[value.raw=${SCHEMA_CHANGE_SQL}]`, message: SCHEMA_CHANGE_MESSAGE },
   { selector: `Literal[value=${SCHEMA_CHANGE_SQL}]`, message: SCHEMA_CHANGE_MESSAGE },
 ];
-
-// Each moves its SQL into server/db/ and leaves this list; nothing joins it.
-const NOT_YET_ON_THE_DATA_LAYER = [
-  'server/handlers/balance-queries.ts',
-  'server/handlers/balance-runners.ts',
-  'server/handlers/balance-skill-runner.ts',
-  'server/handlers/calls.ts',
-  'server/handlers/carrier-billing-backfill.ts',
-  'server/handlers/carrier-bills.ts',
-  'server/handlers/carrier-web-balance.ts',
-  'server/handlers/control.ts',
-  'server/handlers/filters.ts',
-  'server/handlers/health.ts',
-  'server/handlers/iccid-mappings.ts',
-  'server/handlers/keywords.ts',
-  'server/handlers/messages.ts',
-  'server/utils/audit-log.ts',
-  'server/utils/carrier-billing-backfill.ts',
-  'server/utils/carrier-billing.ts',
-  'server/utils/filter-history.ts',
-  'server/utils/keyword-history.ts',
-  'server/utils/message-retention.ts',
-  'server/utils/spam-backfill.ts',
-  'server/utils/spam-filter.ts',
-  'server/utils/verification-backfill.ts',
-];
-
-const DEVICE_TABLE_OWNERS = ['server/db/sims.ts', 'server/db/modems.ts'];
 
 const ORPC_OC = {
   name: '@orpc/contract',
@@ -177,7 +152,7 @@ export default defineConfig([
   {
     name: 'Only server/db reaches D1',
     files: ['server/**/*.ts'],
-    ignores: ['server/lib/d1.ts', 'server/db/**', '**/*.test.ts', ...NOT_YET_ON_THE_DATA_LAYER],
+    ignores: ['server/lib/d1.ts', 'server/db/**', '**/*.test.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -191,15 +166,24 @@ export default defineConfig([
   {
     name: 'server/db reads devices from device_view',
     files: ['server/db/**/*.ts'],
-    ignores: ['**/*.test.ts', ...DEVICE_TABLE_OWNERS],
+    ignores: ['**/*.test.ts', 'server/db/sims.ts', 'server/db/modems.ts'],
     rules: {
       'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...DEVICE_TABLES, ...SCHEMA_CHANGES],
     },
   },
   {
-    name: 'The device tables owners, and the files not yet on the data layer',
-    files: [...DEVICE_TABLE_OWNERS, ...NOT_YET_ON_THE_DATA_LAYER],
-    rules: { 'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...SCHEMA_CHANGES] },
+    name: 'server/db/sims.ts owns sims, not modems',
+    files: ['server/db/sims.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...touching('modems'), ...SCHEMA_CHANGES],
+    },
+  },
+  {
+    name: 'server/db/modems.ts owns modems, not sims',
+    files: ['server/db/modems.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...touching('sims'), ...SCHEMA_CHANGES],
+    },
   },
   {
     name: 'Clients reach the Dashboard through the contract client',
