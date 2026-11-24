@@ -1,13 +1,11 @@
 <script lang="ts">
   import { confirmAction } from './confirm.svelte.js';
-  // Admin-only user/role administration. Reached only when the caller holds
-  // `users.read`; the server enforces that independently on both endpoints.
+  // The server enforces `users.read` independently on both endpoints.
   import { contractApi, errorMessage } from './api.js';
   import type { ManagedUser } from '../../shared/api/users.js';
   import { textOr } from '../../shared/text.js';
 
-  // The signed-in admin's own id, so we can disable their own row — the server refuses
-  // a self-role-change (see server/handlers/users.js) and the UI should not offer it.
+  // The server refuses a self-role-change, so the admin's own row is disabled.
   interface Props {
     currentUserId?: string | null;
   }
@@ -15,8 +13,7 @@
   let { currentUserId = null }: Props = $props();
 
   let users = $state<ManagedUser[]>([]);
-  // Role NAMES are deployment config (currently sms-admin / sms-viewer), so nothing here
-  // may compare against a hardcoded "admin". The server tells us which name is which.
+  // Role names are deployment config: never compare against a hardcoded "admin".
   let knownRoles = $state<string[]>([]);
   let adminRole = $state<string | null>(null);
   let viewerRole = $state<string | null>(null);
@@ -28,12 +25,11 @@
   const roleLabel = (role: string) =>
     role === adminRole ? '管理员' : role === viewerRole ? '查看者' : role;
 
-  // Sort: roleless users first (they need action), then alphabetical by email.
   let sortedUsers = $derived(
     [...users].sort((a, b) => {
       const aHasRole = !!a.role;
       const bHasRole = !!b.role;
-      if (aHasRole !== bHasRole) return aHasRole ? 1 : -1; // roleless first
+      if (aHasRole !== bHasRole) return aHasRole ? 1 : -1;
       return textOr(a.email, '').localeCompare(textOr(b.email, ''));
     }),
   );
@@ -80,7 +76,6 @@
     }
   }
 
-  // Outcome label: says what clicking does, not what the role is.
   function actionLabel(user: ManagedUser, role: string) {
     if (role === adminRole) return '提升为管理员';
     if (role === viewerRole) return user.role === adminRole ? '降级为查看者' : '设为查看者';
@@ -91,8 +86,7 @@
 </script>
 
 <div class="bg-white border-0 rounded-none p-0 lg:border lg:border-stone-200 lg:rounded-xl lg:p-6">
-  <!-- Warning hoisted out of the confirm dialog — users should know the
-       consequence before they click, not at the moment of confirmation. -->
+  <!-- Shown before the click, not only in the confirm dialog. -->
   <div
     class="flex items-start gap-3 px-4 py-3 bg-amber-50 border-y border-amber-200
     lg:mb-5 lg:border lg:rounded-xl text-sm text-amber-800"
@@ -165,10 +159,8 @@
           {#each sortedUsers as u (u.id)}
             {@const hasNoRole = !u.role}
             <tr class="border-b border-stone-50 last:border-0 {hasNoRole ? 'bg-red-50' : ''}">
-              <!-- 用户 -->
               <td class="px-3 py-3">
                 <div class="flex items-center gap-2.5">
-                  <!-- Avatar: ? for roleless, initials otherwise -->
                   <div
                     class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-sm font-bold
                     {hasNoRole ? 'bg-red-100 text-red-600' : 'bg-stone-100 text-stone-600'}"
@@ -181,7 +173,6 @@
                   </div>
                 </div>
               </td>
-              <!-- 角色 -->
               <td class="px-3 py-3">
                 <span
                   class="px-2 py-0.5 rounded text-xs font-medium
@@ -194,17 +185,15 @@
                   {u.role ? roleLabel(u.role) : '无角色'}
                 </span>
               </td>
-              <!-- 最近登录 -->
               <td class="px-3 py-3 text-stone-500 text-xs">
                 {u.last_login ? new Date(u.last_login).toLocaleString('zh-CN') : '从未'}
               </td>
-              <!-- 操作 — button name states the outcome, not the current state -->
+              <!-- The button name states the outcome, not the current role. -->
               <td class="px-3 py-3 text-right">
                 {#if u.id === currentUserId}
                   <span class="text-xs text-stone-400">当前登录用户</span>
                 {:else}
-                  <!-- Only show the button for the role the user doesn't currently have.
-                       Showing both (one always disabled) wastes space. -->
+                  <!-- Only the role the user does not have; showing both wastes space. -->
                   <div class="inline-flex flex-col gap-1 items-end">
                     {#each knownRoles.filter((r) => r !== u.role) as role (role)}
                       <button

@@ -10,9 +10,7 @@ import {
   onStart,
 } from './pull-to-refresh.js';
 
-// A pull that starts mid-list must stay a normal scroll. This is the assertion that
-// keeps the gesture from hijacking the message list, so it is tested from both
-// directions rather than only the happy path.
+// A pull that starts mid-list must stay a normal scroll; tested from both directions.
 describe('activation', () => {
   test('activates only at the top of the scroll container', () => {
     const state = createPullState();
@@ -34,7 +32,7 @@ describe('activation', () => {
   });
 
   test('ignores a new gesture while a refresh is in flight', () => {
-    // Otherwise a second pull fires loadData() concurrently with the first.
+    // Otherwise a second pull would overlap the first refresh.
     const state = createPullState();
     state.refreshing = true;
     onStart(state, 100, 0);
@@ -65,13 +63,13 @@ describe('damping', () => {
   });
 
   test('resists progressively — output falls behind input', () => {
-    // The rubber-band feel: past the threshold the indicator must lag the finger.
+    // Past the threshold the indicator must lag the finger.
     expect(damp(400)).toBeLessThan(400);
     expect(damp(THRESHOLD * 4)).toBeLessThan(THRESHOLD * 4);
   });
 
   test('tracks the finger closely at the start', () => {
-    // Without this the gesture feels dead for the first few pixels.
+    // Tracks the finger closely at first.
     expect(damp(10)).toBeGreaterThan(5);
   });
 });
@@ -117,10 +115,10 @@ describe('threshold', () => {
 
 describe('direction', () => {
   test('a horizontal swipe cancels the gesture', () => {
-    // The list has horizontally scrollable regions; the gesture must not eat them.
+    // Horizontally scrollable regions must keep their swipes.
     const state = createPullState();
     onStart(state, 100, 0);
-    onMove(state, 120, 300); // dy 20, dx 200
+    onMove(state, 120, 300);
     expect(state.active).toBe(false);
     expect(state.pull).toBe(0);
   });
@@ -128,7 +126,7 @@ describe('direction', () => {
   test('a mostly-vertical swipe survives some horizontal drift', () => {
     const state = createPullState();
     onStart(state, 100, 0);
-    onMove(state, 300, 120); // dy 200, dx 20
+    onMove(state, 300, 120);
     expect(state.active).toBe(true);
     expect(state.pull).toBeGreaterThan(0);
   });
@@ -141,7 +139,7 @@ describe('direction', () => {
   });
 
   test('once cancelled by direction it stays cancelled', () => {
-    // A finger that starts sideways then straightens must not snap into a pull.
+    // A swipe that starts sideways then straightens must not become a pull.
     const state = createPullState();
     onStart(state, 100, 0);
     onMove(state, 120, 300);
@@ -171,7 +169,7 @@ describe('reset', () => {
     onMove(state, 400, 100);
     expect(onEnd(state)).toBe('refresh');
 
-    state.refreshing = false; // what the component does when loadData() settles
+    state.refreshing = false;
     onStart(state, 100, 0);
     onMove(state, 400, 100);
     expect(onEnd(state)).toBe('refresh');

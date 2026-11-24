@@ -130,7 +130,7 @@
   let runnerStatus: BalanceRunnersResponse | null = $state(null);
   let runnerStatusLoading = $state(true);
   let billAccounts: BillAccount[] = $state([]);
-  /** Set when the account list failed to load; then unpaid bills cannot be trusted. */
+  // When set, unpaid bills cannot be trusted.
   let billAccountsError: string | null = $state(null);
   let bills: CarrierBill[] = $state([]);
   let billsLoaded = $state(false);
@@ -195,7 +195,6 @@
   function healthCount(status: SummaryStatus): number {
     return counts.get(status) ?? 0;
   }
-  // Counts live on the filter tabs (device-page pattern) instead of a separate summary bar.
   let filterTabs: (readonly [StatusFilter, string, number])[] = $derived([
     ['all', '全部', carrierRows.length],
     ['healthy', '正常', healthCount('healthy')],
@@ -234,15 +233,9 @@
       })
       .sort(compareOverviewRows);
   });
-  // Re-order the filtered rows so each secondary sits under its primary, with
-  // a depth marker for indentation. Applied after filtering so a carrier or
-  // status filter that excludes the primary renders an orphan secondary at
-  // depth 0 rather than hiding it.
+  // Grouped after filtering, so an orphan secondary renders at depth 0 instead of hiding.
   let groupedRows = $derived(groupByPrimary(filteredRows, (row) => row.phone));
-  // Map of primary_iccid -> its row, for the "余额随主卡 → NN" pointer on
-  // secondary rows. Built from filteredRows (pre-grouping) so the primary is
-  // found even though grouping re-orders rows. Absent when the primary has
-  // been filtered out (orphan secondary).
+  // Backs the "余额随主卡" pointer on secondary rows; absent for an orphan secondary.
   let primaryRowByIccid = $derived.by(() => {
     const map = new SvelteMap<string, BalanceRow>();
     for (const row of filteredRows) {
@@ -250,7 +243,6 @@
     }
     return map;
   });
-  // Resolve the primary row for a secondary; null if orphaned.
   function primaryOf(row: BalanceRow): BalanceRow | null {
     const iccid = row.phone.primary_iccid;
     return iccid === null ? null : (primaryRowByIccid.get(iccid) ?? null);
@@ -382,8 +374,7 @@
       billAccounts = result.accounts;
       billAccountsError = null;
     } catch (error) {
-      // Swallowing this made a failed fetch render as "nothing owed": postpaid
-      // rows silently fell back to 等待账单短信 and the 查看账单 button vanished.
+      // Must be surfaced: swallowing it renders a failed fetch as "nothing owed".
       billAccounts = [];
       billAccountsError = errorMessage(error, '账单账户加载失败');
     }
@@ -642,8 +633,7 @@
     return Number.isFinite(time) ? time : 0;
   }
 
-  // One absolute format across both tabs: 查询记录 used to print the year while
-  // its neighbour 余额概览 did not, one tab click apart.
+  // One absolute format across both tabs.
   function formatTime(value: string | null | undefined): string {
     if (!value) return '—';
     return formatClock(normalizeUtcTimestamp(value)) || '—';
@@ -948,9 +938,7 @@
     {/if}
 
     {#if activeTab === 'overview'}
-      <!-- Toolbar. One search input: it wraps onto its own row on a phone, where
-           living inside the horizontally scrolling chip strip put it ~600px
-           off-screen, and sits inline on desktop. -->
+      <!-- The search input wraps onto its own row on a phone; inside the horizontally scrolling chip strip it would be off-screen. -->
       <div
         class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex flex-wrap items-center gap-2 lg:flex-nowrap lg:flex-none"
       >
@@ -978,7 +966,6 @@
           />
         </div>
         <div class="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto">
-          <!-- filter tabs; count follows the label, same as the device page -->
           {#each filterTabs as [value, label, count] (value)}
             <button
               type="button"
@@ -994,7 +981,6 @@
             >
           {/each}
           <span class="w-px h-5 bg-stone-200 mx-1 shrink-0"></span>
-          <!-- carrier select -->
           <label class="sr-only" for="balance-carrier-filter">运营商筛选</label>
           <select
             id="balance-carrier-filter"
@@ -1141,7 +1127,6 @@
                       >{textOr(row.phone.flag, getCountryFlag(row.phone.country))}</span
                     >{textOr(row.phone.carrier, '—')}
                   </td>
-                  <!-- 主副卡 -->
                   <td class="px-4 py-3 whitespace-nowrap">
                     {#if row.phone.sim_role === 'secondary'}
                       {@const primary = primaryOf(row)}

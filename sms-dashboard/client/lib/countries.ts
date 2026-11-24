@@ -6,7 +6,6 @@ interface Country {
   flag: string;
 }
 
-/** A phone row or a raw number, either accepted by the inference helper. */
 type PhoneLike =
   | string
   | {
@@ -54,7 +53,6 @@ export function getCountryName(code: string | null | undefined): string {
 }
 
 export function inferCountryFromNumber(numberOrPhone: PhoneLike): string | null {
-  // Accept either a phone object or a raw number string
   if (typeof numberOrPhone === 'object' && numberOrPhone !== null) {
     const stated = textOr(numberOrPhone.country, textOr(numberOrPhone.mapped_country, null));
     if (stated !== null) return stated;

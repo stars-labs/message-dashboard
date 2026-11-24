@@ -1,7 +1,3 @@
-// Browser side of voice calling: thin API wrappers plus the pure rules the call
-// panel uses to decide what it may show. The rules live here, not in the
-// component, so they can be tested without a DOM or a microphone.
-
 import * as v from 'valibot';
 import {
   AnswerBody,
@@ -17,7 +13,6 @@ import { formatCardNumber } from './card-number.js';
 import { toError } from './error-origin.js';
 import { formatClock, toEpochMilliseconds } from './time.js';
 
-/** The SIM fields these selectors read. */
 interface CallPhone {
   iccid: string;
   number?: string | null;
@@ -27,28 +22,21 @@ interface CallPhone {
 
 type IceServer = IceServersResponse['iceServers'][number];
 
-/** The fields that say where a call is in its life. */
 type CallStage = Pick<LiveCall, 'direction' | 'state'>;
 
-/** The fields that say whether a logged call was missed. */
 type MissedCallFields = Pick<CallLogEntry, 'direction' | 'outcome'>;
 
-/** The call state label vocabulary. */
 type CallTone = 'idle' | 'ringing' | 'pending' | 'active';
 
 export async function fetchCallState(): Promise<LiveCall | null> {
   return (await contractApi.calls.state()).call;
 }
 
-/**
- * Same rule the Worker enforces in server/handlers/calls.ts. Checking it here first
- * gives an instant message instead of a round trip that is certain to fail.
- */
+// Mirrors the Worker's rule in server/handlers/calls.ts.
 export function isValidE164(value: unknown): boolean {
   return typeof value === 'string' && /^\+[1-9]\d{6,14}$/.test(value.trim());
 }
 
-/** Normalise user input: drop spaces, dashes and brackets, keep a leading +. */
 export function normaliseNumber(value: unknown): string {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
@@ -56,11 +44,6 @@ export function normaliseNumber(value: unknown): string {
   return plus + trimmed.replace(/[^\d]/g, '');
 }
 
-/**
- * A call's identity for display: the SIM it uses, matched against the phone list
- * the dashboard already loaded. Returns null when the SIM is unknown (a SIM that
- * was removed, or a list that has not loaded yet).
- */
 export function callSim(
   call: Pick<LiveCall, 'iccid'> | null | undefined,
   phones: CallPhone[] | null | undefined,
@@ -69,11 +52,7 @@ export function callSim(
   return phones.find((phone) => phone.iccid === call.iccid) ?? null;
 }
 
-/**
- * Seconds the call has been up. Counts from the answer for an inbound call and
- * from the start for an outbound one, so the timer shows talk time rather than
- * how long the phone rang.
- */
+// Inbound counts from the answer, so the timer shows talk time, not ring time.
 export function callElapsedSeconds(
   call: Partial<Pick<LiveCall, 'answered_at' | 'started_at'>> | null | undefined,
   nowMs: number = Date.now(),
@@ -85,7 +64,6 @@ export function callElapsedSeconds(
   return Math.max(0, Math.floor((nowMs - started) / 1000));
 }
 
-/** mm:ss, or h:mm:ss once a call passes an hour. */
 export function formatDuration(seconds: number | null | undefined): string {
   const known = seconds === null || seconds === undefined || Number.isNaN(seconds) ? 0 : seconds;
   const total = Math.max(0, Math.floor(known));
@@ -97,10 +75,6 @@ export function formatDuration(seconds: number | null | undefined): string {
     : `${pad(minutes)}:${pad(total % 60)}`;
 }
 
-/**
- * Which visual treatment a state gets. Kept here so the panel, the top bar and
- * any future surface cannot drift apart on what "ringing" looks like.
- */
 export function callTone(call: CallStage | null | undefined): CallTone {
   if (!call) return 'idle';
   if (call.state === 'ringing') return call.direction === 'inbound' ? 'ringing' : 'pending';
@@ -109,11 +83,7 @@ export function callTone(call: CallStage | null | undefined): CallTone {
   return 'pending';
 }
 
-/**
- * Turn an API or media failure into something a dispatcher can act on. The raw
- * messages are English Worker strings or DOMException names, neither of which
- * belongs in front of a user mid-call.
- */
+// Raw errors are English Worker strings or DOMException names; neither belongs in front of a user mid-call.
 export function describeCallError(error: unknown): string | null {
   if (!error) return null;
   const name =
@@ -148,7 +118,6 @@ export function describeCallError(error: unknown): string | null {
   return message;
 }
 
-/** Search a SIM by card number, phone number, carrier or ICCID. */
 export function matchesPhoneQuery(
   phone: CallPhone | null | undefined,
   query: string | null | undefined,
@@ -161,20 +130,12 @@ export function matchesPhoneQuery(
     .some((field) => String(field).toLowerCase().includes(q));
 }
 
-/** Poll quickly only while someone is looking at, or taking part in, a call. */
+// Each poll costs two KV reads (session and call lock) in the namespace that also holds
+// every login session; a flat 3 s would spend 57,600 reads a day per tab against the
+// 100,000 free-tier limit. Rings last 30 s or more, so idle polling can be slow.
 export const CALL_POLL_ACTIVE_MS = 3000;
 export const CALL_POLL_IDLE_MS = 10000;
 
-/**
- * How long to wait before asking for the call state again.
- *
- * Every poll costs two KV reads — the login session and the call lock — and
- * that namespace also holds every login session. At a flat 3 s one tab spent
- * 57,600 reads a day, so two tabs could exhaust the free tier's 100,000 and
- * sign everybody out. A ring lasts 30 s or more, so an idle dashboard can take
- * 10 s to notice one; it only needs to be quick once a call exists or the
- * panel is open.
- */
 export function callPollDelay({
   call = null,
   panelOpen = false,
@@ -191,13 +152,11 @@ const STATE_LABELS = {
   ended: '已结束',
 } as const satisfies Record<LiveCall['state'], string>;
 
-/** Human label for a call, or null when there is no call. */
 export function callStateLabel(call: Pick<LiveCall, 'state'> | null | undefined): string | null {
   if (!call) return null;
   return STATE_LABELS[call.state];
 }
 
-/** Only one call may exist across the fleet, so dialing needs a clear line. */
 export function canDial(call: object | null | undefined): boolean {
   return !call;
 }
@@ -206,15 +165,11 @@ export function canAnswer(call: CallStage | null | undefined): boolean {
   return call?.direction === 'inbound' && call.state === 'ringing';
 }
 
-/**
- * Hang-up must always be available while anything exists: it is also how a user
- * clears a stale lock left by a crashed call.
- */
+// Hang-up also clears a stale lock left by a crashed call.
 export function canHangup(call: object | null | undefined): boolean {
   return Boolean(call);
 }
 
-/** How a finished call reads in the log. */
 const OUTCOME_LABELS = {
   answered: '已接通',
   missed: '未接',
@@ -227,15 +182,11 @@ export function callOutcomeLabel(entry: Pick<CallLogEntry, 'outcome'> | null | u
   return entry ? OUTCOME_LABELS[entry.outcome] : '';
 }
 
-/** A call the operator should follow up on: it rang here and nobody answered. */
 export function isMissedCall(entry: MissedCallFields | null | undefined): boolean {
   return entry?.direction === 'inbound' && entry.outcome === 'missed';
 }
 
-/**
- * Missed calls the operator has not looked at yet, for the badge on the call
- * button. `seenAt` is the last time the call panel was opened.
- */
+// `seenAt` is the last time the call panel was opened.
 export function countMissedSince(
   entries: readonly (MissedCallFields & Pick<CallLogEntry, 'started_at'>)[] | null | undefined,
   seenAt: unknown,
@@ -248,7 +199,6 @@ export function countMissedSince(
   }).length;
 }
 
-/** Clock time for a log row. Shared with every other absolute time in the app. */
 export function formatCallTime(value: unknown, now: number = Date.now()): string {
   return formatClock(value, now);
 }
@@ -257,10 +207,7 @@ export async function fetchIceServers(): Promise<IceServer[]> {
   return (await contractApi.calls.ice()).iceServers;
 }
 
-/**
- * Call log, newest first. Read straight from D1 rather than the KV call lock,
- * so it is unaffected by the lock's TTL and shows calls that already ended.
- */
+// Read from D1, not the KV call lock, so it includes calls that already ended.
 export async function fetchCallHistory({
   limit = 30,
   offset = 0,
@@ -275,23 +222,17 @@ export async function fetchCallHistory({
   return { calls: page.calls, hasMore: page.has_more };
 }
 
-/** The browser's SDP offer and its mid, as /dial and /answer take them. */
 interface MediaOffer {
   offer: unknown;
   mid: string | null;
 }
 
-/** /dial additionally names the SIM and destination. */
 interface DialParams extends MediaOffer {
   iccid: string;
   number: string;
 }
 
-/**
- * The API surface call-session.ts drives; each returns the Worker's answer,
- * parsed. The PeerConnection's descriptions are checked against the Worker's own
- * body schemas first, so one that cannot be sent fails here with its message.
- */
+// Descriptions are validated against the Worker's body schemas before sending.
 export const callApi = {
   dial: (params: DialParams) => contractApi.calls.dial(v.parse(DialBody, params)),
   answer: (params: MediaOffer) => contractApi.calls.answer(v.parse(AnswerBody, params)),

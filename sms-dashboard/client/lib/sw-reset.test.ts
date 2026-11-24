@@ -1,7 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { resetDashboardCache, resetServiceWorker } from './sw-reset.js';
 
-/** Minimal stand-ins for the two browser APIs the reset touches. */
 function fakeEnv({
   registrations = 1,
   cacheKeys = ['workbox-precache-v2'],
@@ -44,9 +43,8 @@ describe('resetServiceWorker', () => {
   });
 
   it('still clears caches when unregistering throws', async () => {
-    // A half-reset is worse than either extreme: a live worker serving no cache is
-    // recoverable, a dead worker with a stale cache is not. Caches must be cleared
-    // even if unregister fails.
+    // Caches must be cleared even if unregister fails: a live worker with no cache is
+    // recoverable, a dead worker with a stale cache is not.
     const env = fakeEnv({
       unregister: mock(() => Promise.reject(new Error('boom'))),
       cacheKeys: ['stale'],

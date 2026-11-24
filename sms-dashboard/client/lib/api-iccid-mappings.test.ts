@@ -15,7 +15,6 @@ afterEach(() => {
   auth.baseUrl = originalBaseUrl;
 });
 
-/** Answers every request with `body` and `status`, recording "METHOD path". */
 function answerEveryRequest(body: unknown, status: number): string[] {
   const sent: string[] = [];
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(

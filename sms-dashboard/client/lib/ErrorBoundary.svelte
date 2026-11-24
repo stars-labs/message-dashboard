@@ -28,10 +28,8 @@
   }
 
   onMount(() => {
-    // These are GLOBAL listeners, so they see every error on the page — including ones
-    // thrown by browser extensions. A MetaMask injection failure used to blank the whole
-    // dashboard. Foreign errors are left alone: not shown, and not preventDefault()ed, so
-    // they still reach the console for whoever actually owns them.
+    // Global listeners see errors from browser extensions too. Foreign errors are neither
+    // shown nor preventDefault()ed, so they still reach the console.
     const handleWindowError = (event: ErrorEvent) => {
       const thrown: unknown = event.error;
       if (!thrown) return;

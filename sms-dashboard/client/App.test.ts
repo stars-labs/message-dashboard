@@ -13,11 +13,7 @@ import type { Phone, PhonesResponse } from '../shared/api/phones.js';
 import App from './App.svelte';
 import { auth } from './lib/auth.js';
 
-/**
- * The parsed app.css. Tests read declarations by selector and property and
- * compare them in a canonical form, so layout and quote style cannot change
- * what they assert.
- */
+// Declarations are compared in canonical form, so layout and quote style cannot change an assertion.
 const stylesheet = postcss.parse(readFileSync(new URL('./app.css', import.meta.url), 'utf8'));
 
 function cssValue(text: string): string {

@@ -1,14 +1,11 @@
-// Run with: bun run test client/lib/MessageDetail.test.ts
-// (bun run, not bare `bun test` — package.json adds --conditions=browser, without
-// which Svelte resolves its server build and every render() throws.)
+// Run through `bun run test`: package.json adds --conditions=browser, without which
+// Svelte resolves its server build and render() throws.
 import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ApiMessage } from '../../shared/api/messages.js';
 import MessageDetail from './MessageDetail.svelte';
 
-// A body long enough to exercise the reason this drawer exists. Production's
-// longest message is 776 characters; a third of all messages exceed the two
-// lines a list row can show.
+// Longer than the two lines a list row can show.
 const LONG_BODY =
   '【心级服务 让爱连接】尊敬的客户，感谢您长期以来的支持，' +
   '中国移动特开展“请您评价”调研活动，邀请您参与2道问题调研，期待您的10分满意！'.repeat(8);
@@ -49,9 +46,7 @@ describe('MessageDetail', () => {
       props: { message: received({ content: LONG_BODY, verification_code: null }) },
     });
 
-    // The whole body is present, not an ellipsised prefix.
     expect(getByText(LONG_BODY)).toBeTruthy();
-    // And nothing in the drawer re-imposes the row's two-line clamp.
     expect(container.querySelector('.line-clamp-2')).toBeNull();
   });
 
@@ -162,8 +157,7 @@ describe('MessageDetail', () => {
     expect(closed).toBe(false);
   });
 
-  // Mirrors BalanceQueryDetail's positioning so the mobile tab bar never covers
-  // the drawer's own controls.
+  // Same positioning as BalanceQueryDetail, so the tab bar never covers the drawer's controls.
   test('leaves room for the mobile tab bar', () => {
     const { container } = render(MessageDetail, { props: { message: received() } });
     expect(container.querySelector('.bottom-\\[var\\(--mobile-tab-bar-height\\)\\]')).toBeTruthy();
@@ -208,9 +202,7 @@ describe('MessageDetail', () => {
     expect(marks[0]?.textContent).toBe('抖音');
   });
 
-  // SMS content is fully attacker-controlled: anyone knowing a SIM's number can
-  // send arbitrary text. A previous {@html} implementation was an XSS vector
-  // (docs/SECURITY-REVIEW.md finding 2), so markup must arrive as inert text.
+  // SMS content is attacker-controlled, so markup must arrive as inert text.
   test('does not interpret markup in the message body', () => {
     const payload = '<img src=x onerror="alert(1)">恶意内容';
     const { container, getByText } = render(MessageDetail, {

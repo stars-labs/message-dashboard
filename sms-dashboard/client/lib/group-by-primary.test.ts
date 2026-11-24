@@ -58,7 +58,6 @@ test('balance-page shape: resolve through row.phone, preserve row payload', () =
   ];
   const out = groupByPrimary(rows, (row) => row.phone);
   expect(out.map((r) => r.phone.iccid)).toEqual(['P', 'S']);
-  // The balance row's own payload (checks) survives the spread.
   expect(out.find((r) => r.phone.iccid === 'S')?.checks).toEqual([{ id: 9 }]);
   expect(out.find((r) => r.phone.iccid === 'S')?.__depth).toBe(1);
 });

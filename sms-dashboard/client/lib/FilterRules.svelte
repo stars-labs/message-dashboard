@@ -197,9 +197,7 @@
 </script>
 
 <div class="bg-white lg:bg-transparent lg:space-y-4">
-  <!-- Guarantee banner — hoisted to the very top so users see it before
-       deciding whether to enable filtering. The old position (page description
-       second line, small text) meant users couldn't find the safety guarantee. -->
+  <!-- Kept at the top so users see the safety guarantee before enabling filtering. -->
   <div
     class="flex items-start gap-3 px-4 py-3 bg-emerald-50 border-y border-emerald-200
     lg:border lg:rounded-xl text-sm text-emerald-800"
@@ -255,7 +253,6 @@
     {/if}
   </div>
 
-  <!-- Add / edit -->
   <div class="bg-white border-b border-stone-200 p-4 lg:border lg:rounded-xl lg:shadow-sm">
     <h3 class="font-medium text-stone-900 mb-3">{editingId ? '编辑规则' : '添加规则'}</h3>
     <div class="grid gap-3 sm:grid-cols-[10rem_1fr_1fr_auto] sm:items-end">
@@ -313,7 +310,6 @@
     <p class="text-xs text-stone-400 mt-2">{activeHint}</p>
   </div>
 
-  <!-- Existing rules -->
   {#if loading}
     <div
       class="bg-white border-b border-stone-200 p-8 text-center text-stone-400 lg:border lg:rounded-xl"

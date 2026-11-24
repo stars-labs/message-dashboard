@@ -31,8 +31,7 @@ describe('needRefresh', () => {
   });
 
   it('does not resurrect the prompt while an update is already applying', () => {
-    // The new worker activating can fire another update event. Re-showing the bar
-    // mid-reload would flash a prompt the user already acted on.
+    // The activating worker can fire another update event after the user accepted.
     const s = createUpdateState();
     needRefresh(s);
     applyUpdate(s, () => Promise.resolve());
@@ -66,7 +65,6 @@ describe('applyUpdate', () => {
     needRefresh(s);
     applyUpdate(s, updateSW);
     expect(updateSW).toHaveBeenCalledTimes(1);
-    // true = take over and reload the page.
     expect(updateSW).toHaveBeenCalledWith(true);
   });
 

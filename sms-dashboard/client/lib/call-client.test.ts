@@ -164,7 +164,6 @@ describe('call log helpers', () => {
   });
 
   test('log timestamps drop the date only for today', () => {
-    // Beijing, like every other absolute time in the app.
     const now = Date.parse('2026-09-17T04:00:00.000Z');
     expect(formatCallTime('2026-09-17T01:05:00.000Z', now)).toBe('09:05');
     expect(formatCallTime('2026-09-15T14:30:00.000Z', now)).toBe('09/15 22:30');
@@ -185,7 +184,6 @@ describe('call state polling rate', () => {
   });
 
   test('the idle rate keeps several tabs inside the KV free tier', () => {
-    // Two KV reads per poll: the login session and the call lock.
     const readsPerTabPerDay = (86_400_000 / CALL_POLL_IDLE_MS) * 2;
     expect(readsPerTabPerDay * 5).toBeLessThan(100_000);
   });

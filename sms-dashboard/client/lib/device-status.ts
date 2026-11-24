@@ -1,14 +1,7 @@
-// Single source of truth for device status display.
+// Maps the status values the server emits from the device_view SQL CASE onto display buckets.
 //
-// The server emits exactly 6 canonical states from the device_view SQL CASE
-// (migrations 033/034). Previously three components each had their own status
-// vocabulary — PhoneList invented "online"/"registered"/"connected"/"stale"/
-// "unknown" that the server never sends. This module maps the 6 real server
-// values onto the 5 display buckets the redesign uses.
-//
-// Tailwind class strings must be complete literals here: the compiler finds
-// classes by scanning source text, so a template like `bg-${c}-500` would
-// produce nothing in the output bundle.
+// Tailwind class strings must be complete literals: the compiler scans source text, so a
+// template like `bg-${c}-500` would produce nothing in the bundle.
 
 import { textOr } from '../../shared/text.js';
 
@@ -69,8 +62,7 @@ const STATUS = new Map<string, DeviceStatusMeta>([
       sortOrder: 3,
     },
   ],
-  // unassigned and no_modem both mean the same thing to the user: the slot
-  // has no mapped number yet and needs action.
+  // Both mean the slot has no mapped number yet.
   ['unassigned', UNMAPPED],
   ['no_modem', UNMAPPED],
 ]);
@@ -83,32 +75,20 @@ const FALLBACK: DeviceStatusMeta = {
   sortOrder: 1,
 };
 
-/**
- * Return display metadata for a server-emitted status string.
- * Always returns a valid object — unknown values fall back to 离线.
- */
 export function getStatusMeta(status: string | null | undefined): DeviceStatusMeta {
   return (status ? STATUS.get(status) : undefined) ?? FALLBACK;
 }
 
-/** Whether a status requires user action (tinted row in the list). */
 export function isAnomalous(status: string | null | undefined): boolean {
   return getStatusMeta(status).sortOrder >= 2;
 }
 
-/**
- * Whether a mapped card is unavailable because of a runtime/device fault.
- * Mapping states stay separate so the management screen can offer a distinct
- * "待映射" filter instead of counting the same card in two buckets.
- */
+// Mapping states stay separate so "待映射" is its own filter and no card counts in two buckets.
 export function hasOperationalIssue(status: string | null | undefined): boolean {
   return ['offline', 'sim_error', 'iccid_mismatch'].includes(String(status));
 }
 
-/**
- * Resolve a stored device status against the live daemon connection. A stale
- * `active` value must not render as online after the daemon disconnects.
- */
+// A stale `active` value must not render as online after the daemon disconnects.
 export function getEffectiveDeviceStatus(
   status: string | null | undefined,
   daemonConnected: boolean,

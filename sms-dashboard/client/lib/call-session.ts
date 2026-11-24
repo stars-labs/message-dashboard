@@ -1,43 +1,32 @@
-// One browser-side voice call: microphone, RTCPeerConnection to the Realtime
-// SFU, and the Worker round trips that bridge it to the modem on the Pi.
-//
-//   getUserMedia -> offer -> dial|answer (Worker publishes the mic, returns answer)
-//   -> wait for the PeerConnection -> connect (Worker creates the Pi adapters and
-//   pulls the modem track) -> renegotiate when the SFU asks for it.
-//
-// Every browser API is injected so the sequence is testable without WebRTC.
+// Sequence: getUserMedia -> offer -> dial|answer (Worker publishes the mic, returns the
+// answer) -> wait for the PeerConnection -> connect (Worker creates the Pi adapters and
+// pulls the modem track) -> renegotiate when the SFU asks.
+// Browser APIs are injected so the sequence is testable without WebRTC.
 
-/** A PeerConnection that has not connected in this long will not connect. */
 const CONNECT_TIMEOUT_MS = 15_000;
 
-/** The audio track surface this drives: MediaStreamTrack in a browser. */
 interface TrackLike {
   enabled: boolean;
   stop(): void;
 }
 
-/** The microphone stream surface this drives: MediaStream in a browser. */
 interface MicLike<Track> {
   getTracks(): Track[];
   getAudioTracks(): Track[];
 }
 
-/** What a track event carries that this reads. `TrackEvent` is RTCTrackEvent in a browser. */
 interface TrackEventLike<Track, Stream> {
   streams: readonly Stream[];
   track: Track;
 }
 
-/** An SDP offer or answer as the PeerConnection holds it: RTCSessionDescriptionInit in a browser. */
 interface SdpLike {
   type: RTCSdpType;
   sdp?: string;
 }
 
-/**
- * The PeerConnection surface this drives. `Track`, `Stream` and `TrackEvent`
- * are MediaStreamTrack, MediaProvider and RTCTrackEvent in a browser.
- */
+// Minimal structural types over the browser's: MediaStreamTrack, MediaStream, MediaProvider,
+// RTCTrackEvent and RTCSessionDescriptionInit.
 interface ConnectionLike<Track, Stream, TrackEvent extends TrackEventLike<Track, Stream>> {
   connectionState: string;
   localDescription: SdpLike | null;
@@ -52,13 +41,11 @@ interface ConnectionLike<Track, Stream, TrackEvent extends TrackEventLike<Track,
   close(): void;
 }
 
-/** An SDP offer or answer as the Worker returns it. */
 interface Description {
   type: 'offer' | 'answer';
   sdp: string;
 }
 
-/** The call API call-session drives, matching callApi in call-client.ts. */
 interface CallSessionApi {
   dial(params: {
     iccid: string;
@@ -87,7 +74,6 @@ interface CallSessionDeps<
     bundlePolicy: 'max-bundle';
   }) => ConnectionLike<Track, Stream, TrackEvent>;
   getUserMedia: (constraints: { audio: true; video: false }) => Promise<MicLike<Track>>;
-  /** Wraps a far-end track that arrived without a stream: `new MediaStream([track])`. */
   streamOf: (track: Track) => Stream;
   audioElement: { srcObject: Stream | null; play(): Promise<void> } | null;
   connectTimeoutMs?: number;
@@ -151,7 +137,6 @@ export function createCallSession<
     if (closed) throw new Error('通话已结束');
   }
 
-  /** `start` is api.dial or api.answer, bound to its own arguments. */
   async function run(
     start: (offer: {
       offer: unknown;
@@ -210,18 +195,13 @@ export function createCallSession<
     dial: ({ iccid, number }: { iccid: string; number: string }) =>
       run(({ offer, mid }) => api.dial({ iccid, number, offer, mid })),
     answer: () => run(({ offer, mid }) => api.answer({ offer, mid })),
-    /** Local hang-up: stop media and release the fleet lock. */
     async hangup() {
       release();
       if (callId) await api.hangup(callId);
     },
-    /** The call ended elsewhere (far end, daemon, another tab): stop media only. */
+    // Stops media only, for a call that ended elsewhere.
     release,
-    /**
-     * Mute by disabling the microphone track rather than renegotiating: the
-     * audio path stays up, so unmuting is instant and the far end hears nothing
-     * in between.
-     */
+    // Disables the track instead of renegotiating, so unmuting is instant.
     setMuted(muted: boolean): boolean {
       mic?.getAudioTracks().forEach((track) => {
         track.enabled = !muted;

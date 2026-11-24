@@ -37,8 +37,7 @@
     isLoading = false,
   }: Props = $props();
 
-  // Debounced local search: the parent bind:searchTerm is updated after 200 ms
-  // so the full list re-filter only runs when the user pauses.
+  // The parent's bound searchTerm updates after 200 ms so the list re-filters only on pause.
   let searchInput = $state(searchTerm);
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   function handleSearchInput(e: Event & { currentTarget: HTMLInputElement }) {
@@ -49,7 +48,6 @@
     }, 200);
   }
 
-  // Status filter chips: all / online / offline / anomaly
   let statusChip = $state<StatusChip>('all');
 
   let filteredPhones = $derived(
@@ -75,7 +73,6 @@
 
         return matchesCountry && matchesSearch && matchesChip;
       })
-      // Anomalous cards sort to the top within any filter.
       .sort((a, b) => {
         const ao = getStatusMeta(a.status).sortOrder;
         const bo = getStatusMeta(b.status).sortOrder;
@@ -84,8 +81,7 @@
       }),
   );
 
-  // Status chip counts — always computed from the full list (not filteredPhones)
-  // so the badge numbers don't change when a chip is selected.
+  // Counted from the full list so badges do not change when a chip is selected.
   let onlineCount = $derived(phoneNumbers.filter((p) => p.status === 'active').length);
   let offlineCount = $derived(phoneNumbers.filter((p) => p.status === 'offline').length);
   let errorCount = $derived(phoneNumbers.filter((p) => isAnomalous(p.status)).length);
@@ -106,9 +102,7 @@
   {mobile ? '' : 'border border-stone-200/80 rounded-xl overflow-hidden'}"
   style={mobile ? '' : 'box-shadow: 0 1px 3px rgba(28,25,23,0.06);'}
 >
-  <!-- Header: search + filter chips -->
   <div class="p-3 border-b border-stone-200 flex-shrink-0 space-y-2 bg-white">
-    <!-- Search -->
     <div class="relative">
       <svg
         class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400 pointer-events-none"
@@ -133,7 +127,6 @@
       />
     </div>
 
-    <!-- Status chips -->
     <div class="flex flex-wrap items-center gap-1.5">
       <button
         onclick={() => {
@@ -182,7 +175,6 @@
     </div>
   </div>
 
-  <!-- List -->
   <div class="flex-1 min-h-0 overflow-y-auto">
     {#if isLoading}
       {#each [1, 2, 3, 4, 5] as row (row)}
@@ -268,9 +260,7 @@
           {@const q = searchTerm.trim().toLowerCase()}
           {@const anomalous = isAnomalous(phone.status)}
 
-          <!-- Using div+role rather than <button> here because the row may contain
-             a nested <button> (the 映射 action), and a button inside a button is
-             invalid HTML. The keyboard handler provides equivalent accessibility. -->
+          <!-- div+role, not <button>: the row can contain a nested <button> (映射), which is invalid HTML. -->
           <div
             role="button"
             tabindex="0"
@@ -290,10 +280,8 @@
                 : 'bg-white border-stone-100 hover:bg-stone-50'}
             {selected ? 'shadow-[inset_3px_0_0_#f97316]' : ''}"
           >
-            <!-- Status dot -->
             <span class="w-1.5 h-1.5 rounded-full shrink-0 {meta.dotClass}"></span>
 
-            <!-- Card number: the primary identifier -->
             <span
               class="font-mono text-sm font-semibold tabular-nums w-8 text-right shrink-0
             {phone.status === 'active' ? 'text-stone-800' : 'text-stone-400'}"
@@ -301,9 +289,7 @@
               {formatCardNumber(phone.sim_index)}
             </span>
 
-            <!-- Main info -->
             <div class="flex-1 min-w-0">
-              <!-- Primary line: flag + number -->
               <div class="flex items-center gap-1 text-sm font-medium font-mono leading-snug">
                 {#if phone.flag}<span class="text-base leading-none">{phone.flag}</span>{/if}
                 {#if phone.number}
@@ -355,7 +341,6 @@
               </div>
             </div>
 
-            <!-- Signal bars -->
             <div class="shrink-0">
               <SignalStrength
                 signal={phone.signal ?? 0}

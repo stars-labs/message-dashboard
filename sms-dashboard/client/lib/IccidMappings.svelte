@@ -70,8 +70,7 @@
   let sortKey = $state<SortKey | null>(null);
   let sortDirection = $state<'asc' | 'desc'>('asc');
 
-  // Apply a new deep-link filter once. The previous effect also depended on
-  // statusFilter, so every manual chip click was immediately reset to "error".
+  // Must not track statusFilter, or every manual chip click would reset to the deep-link value.
   let lastInitialStatusFilter = initialStatusFilter;
   $effect(() => {
     if (initialStatusFilter !== lastInitialStatusFilter) {
@@ -80,12 +79,7 @@
     }
   });
 
-  // ── Unified panel ─────────────────────────────────────────────────────────
-  // Single state object for add / edit. mode = 'add' | 'edit'.
-  // Previously this component had two completely separate form blocks with
-  // create-* and edit-* ids — 7 fields each, same structure. Gone.
-  let panel = $state<Panel | null>(null); // null = closed
-  // { mode: 'add', formData } | { mode: 'edit', mapping, formData }
+  let panel = $state<Panel | null>(null);
 
   function emptyForm(): MappingForm {
     return {
@@ -144,7 +138,6 @@
     error = null;
   }
 
-  // Collision warning: is the entered sim_index already taken by a different card?
   let simIndexConflict = $derived.by(() => {
     const current = panel;
     return current?.formData.sim_index
@@ -156,7 +149,6 @@
       : null;
   });
 
-  // ── Stats (for filter chips) ───────────────────────────────────────────────
   let activeCount = $derived(allMappingsCache.filter((m) => m.is_active === 'active').length);
   let errorCount = $derived(
     allMappingsCache.filter((m) => hasOperationalIssue(m.is_active)).length,
@@ -234,7 +226,6 @@
     });
   }
 
-  // ── Data loading ──────────────────────────────────────────────────────────
   async function loadMappings() {
     loading = true;
     error = null;
@@ -285,7 +276,7 @@
         const comparison = compareValues(sortValue(a, sortKey), sortValue(b, sortKey));
         if (comparison !== 0) return sortDirection === 'asc' ? comparison : -comparison;
       } else {
-        // Default remains action-oriented until a header is selected.
+        // Until a header is selected, rows that need action come first.
         const ao = getStatusMeta(a.is_active).sortOrder;
         const bo = getStatusMeta(b.is_active).sortOrder;
         if (ao !== bo) return ao - bo;
@@ -293,9 +284,7 @@
       return a.sim_index - b.sim_index;
     });
 
-    // Group secondaries immediately after their primary (shared helper).
-    // An orphan secondary (its primary filtered out) renders at depth 0
-    // rather than being dropped — a fix over the prior inline logic.
+    // An orphan secondary (its primary filtered out) renders at depth 0, not dropped.
     mappings = groupByPrimary(sorted, (row) => row);
   }
 
@@ -305,7 +294,6 @@
 
   onMount(loadMappings);
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
   async function handleSave() {
     const current = panel;
     if (current === null) return;
@@ -359,12 +347,10 @@
   }
 </script>
 
-<!-- ═══ Page ════════════════════════════════════════════════════════════════ -->
 <div
   class="relative overflow-hidden bg-white p-4 sm:p-6 lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:border lg:border-stone-200/80
   lg:rounded-xl lg:shadow-[0_1px_3px_rgba(28,25,23,0.06),0_1px_2px_rgba(28,25,23,0.04)]"
 >
-  <!-- Header -->
   <div
     class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 lg:flex-none"
   >
@@ -380,11 +366,9 @@
     </button>
   </div>
 
-  <!-- Filter chips + search -->
   <div class="flex flex-col sm:flex-row gap-2 mb-4 lg:flex-none">
     <div class="flex flex-wrap gap-1.5">
-      <!-- Same words as the device page and the status badge: 活动/未激活 named
-           the same rows as 在线/待映射 and made the two screens look unrelated. -->
+      <!-- Same labels as the device page and the status badge. -->
       {#each statusChips as chip (chip.value)}
         <button
           onclick={() => {
@@ -470,7 +454,6 @@
       >
     </div>
   {:else}
-    <!-- ── Desktop table ──────────────────────────────────────────────── -->
     <div
       class="hidden sm:block overflow-x-auto lg:flex-1 lg:min-h-0 lg:overflow-auto"
       data-desktop-table-scroll
@@ -520,7 +503,6 @@
                 ? meta.rowClass
                 : ''} {isSecondary ? 'bg-stone-50/60' : ''}"
             >
-              <!-- 卡号 -->
               <td class="py-2.5 {isSecondary ? 'pl-7 pr-3' : 'px-3'}">
                 {#if isSecondary}
                   <div class="flex items-center gap-1.5">
@@ -535,16 +517,13 @@
                   </span>
                 {/if}
               </td>
-              <!-- 号码 -->
               <td class="px-3 py-2.5 font-mono text-sm text-stone-800 whitespace-nowrap">
                 {#if m.phone_number}{m.phone_number}{:else}<span class="text-stone-300">—</span
                   >{/if}
               </td>
-              <!-- ICCID -->
               <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
                 {textOr(m.iccid, '—')}
               </td>
-              <!-- 运营商 -->
               <td class="px-3 py-2.5">
                 {#if m.carrier}
                   <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
@@ -566,7 +545,6 @@
                   <span class="text-stone-300">—</span>
                 {/if}
               </td>
-              <!-- 计费类型 -->
               <td class="px-3 py-2.5 whitespace-nowrap">
                 <span
                   class="inline-flex px-2 py-0.5 text-[11px] rounded-md border
@@ -579,7 +557,6 @@
                   {getSimServiceTypeLabel(m.service_type)}
                 </span>
               </td>
-              <!-- 主副卡 -->
               <td class="px-3 py-2.5 whitespace-nowrap">
                 <span
                   class="inline-flex px-2 py-0.5 text-[11px] rounded-md border
@@ -595,7 +572,6 @@
                   {getSimRoleLabel(m.sim_role)}
                 </span>
               </td>
-              <!-- 模块位置 (absorbs 设备ID + USB位置 + UP/DOWN) -->
               <td class="px-3 py-2.5 font-mono text-xs text-stone-500 whitespace-nowrap">
                 {#if pos}
                   {pos.path}
@@ -609,7 +585,6 @@
                   <span class="text-stone-300">—</span>
                 {/if}
               </td>
-              <!-- 信号 -->
               <td class="px-3 py-2.5 font-mono text-xs">
                 {#if m.signal_quality != null}
                   <span
@@ -625,7 +600,6 @@
                   <span class="text-stone-300">—</span>
                 {/if}
               </td>
-              <!-- 状态 -->
               <td class="px-3 py-2.5">
                 <span
                   class="inline-flex px-2 py-0.5 text-[11px] rounded-md font-medium border {meta.badgeClass}"
@@ -633,7 +607,6 @@
                   {meta.label}
                 </span>
               </td>
-              <!-- 余额阈值 — per-SIM override, or muted currency default -->
               <td class="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
                 {#if m.sim_role === 'secondary'}
                   <span class="text-stone-300">—</span>
@@ -650,7 +623,6 @@
                   {/if}
                 {/if}
               </td>
-              <!-- 备注 — shows what's wrong for anomalous rows -->
               <td class="px-3 py-2.5 text-xs text-stone-500 max-w-[180px]">
                 {#if anomalous && textOr(m.notes, null) === null}
                   <span class="text-stone-400 italic">{meta.label}</span>
@@ -658,7 +630,6 @@
                   {textOr(m.notes, '')}
                 {/if}
               </td>
-              <!-- 操作 -->
               <td class="px-3 py-2.5 text-right whitespace-nowrap">
                 {#if m.is_active === 'unassigned' || !m.phone_number}
                   <button
@@ -686,7 +657,6 @@
       </table>
     </div>
 
-    <!-- ── Mobile cards ────────────────────────────────────────────────── -->
     <div class="sm:hidden -mx-4 border-t border-stone-100">
       {#each mappings as m (m.iccid)}
         {@const meta = getStatusMeta(m.is_active)}
@@ -755,7 +725,6 @@
   {/if}
 </div>
 
-<!-- ═══ Unified add/edit panel ══════════════════════════════════════════════ -->
 {#if panel}
   <div
     class="fixed inset-0 bg-stone-900/40 flex items-center justify-center z-50 p-4"
@@ -771,7 +740,6 @@
       aria-label={panel.mode === 'add' ? '添加映射' : '编辑映射'}
       use:overlay={{ onClose: closePanel }}
     >
-      <!-- Panel header -->
       <div
         class="px-6 py-4 border-b border-stone-100 flex-shrink-0 flex items-center justify-between"
       >
@@ -794,7 +762,6 @@
         </button>
       </div>
 
-      <!-- Edit mode: read-only identity bar -->
       {#if panel.mode === 'edit'}
         <div class="px-6 py-3 bg-stone-50 border-b border-stone-100 flex-shrink-0">
           <div class="flex items-center gap-3 text-sm">
@@ -822,7 +789,6 @@
         </div>
       {/if}
 
-      <!-- Form body -->
       <div class="px-6 py-4 overflow-y-auto flex-1 min-h-0">
         {#if error && panel}
           <div
@@ -833,7 +799,6 @@
         {/if}
 
         <div class="grid grid-cols-2 gap-3">
-          <!-- Add mode: ICCID (free-entry, since we don't have unassigned-card list from daemon) -->
           {#if panel.mode === 'add'}
             <div class="col-span-2">
               <label
@@ -852,7 +817,6 @@
             </div>
           {/if}
 
-          <!-- 卡号 / sim_index — stays editable; collision warning shown -->
           <div class="col-span-2 sm:col-span-1">
             <label
               for="mapping-sim-index"
@@ -882,7 +846,6 @@
             {/if}
           </div>
 
-          <!-- 手机号 -->
           <div class="col-span-2 sm:col-span-1">
             <label
               for="mapping-number"
@@ -899,7 +862,6 @@
             />
           </div>
 
-          <!-- 国家 -->
           <div>
             <label
               for="mapping-country"
@@ -919,7 +881,6 @@
             </select>
           </div>
 
-          <!-- 运营商 -->
           <div>
             <label
               for="mapping-carrier"
@@ -936,7 +897,7 @@
             />
           </div>
 
-          <!-- 计费类型：只能由人工根据可靠来源确认 -->
+          <!-- Billing type is verified manually from a reliable source, never inferred. -->
           <div>
             <label
               for="mapping-service-type"
@@ -978,7 +939,6 @@
             </select>
           </div>
 
-          <!-- 余额阈值：留空走币种默认（CNY 100 / SGD 10 / HKD 100） -->
           <div>
             <label
               for="mapping-balance-threshold"
@@ -1000,7 +960,6 @@
             </p>
           </div>
 
-          <!-- 主副卡 -->
           <div>
             <label
               for="mapping-sim-role"
@@ -1055,7 +1014,6 @@
             ICCID、网络运营商或余额短信可靠识别；请从运营商账户、客服、合同/账单或明确服务短信确认。
           </p>
 
-          <!-- IMEI — read-only in edit, editable in add -->
           <div class="col-span-2">
             <label
               for="mapping-imei"
@@ -1096,7 +1054,6 @@
             </div>
           </div>
 
-          <!-- 备注 -->
           <div class="col-span-2">
             <label
               for="mapping-note"
@@ -1115,9 +1072,7 @@
         </div>
       </div>
 
-      <!-- Panel footer -->
       <div class="px-6 py-4 border-t border-stone-100 flex-shrink-0">
-        <!-- Edit mode: delete zone -->
         {#if panel.mode === 'edit'}
           {@const mapping = panel.mapping}
           <div class="mb-4 pt-3 border-t border-stone-100">

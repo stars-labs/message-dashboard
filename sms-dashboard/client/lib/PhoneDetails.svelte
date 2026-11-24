@@ -56,12 +56,10 @@
   let statusMeta = $derived(getStatusMeta(effectiveStatus));
   let signal = $derived(Number(phone?.signal) || 0);
   let cashBalance = $derived(getCashBalance(balanceCheck));
-  // carrier = user-maintained home label (sims table, never daemon-written)
-  // operator = daemon-detected serving network (AT+COPS?, live, may differ when roaming)
+  // carrier is the user-maintained home label; operator is the daemon-detected serving
+  // network (AT+COPS?), which can differ when roaming.
   let carrier = $derived(textOr(phone?.carrier, '—'));
   let operator = $derived(phone?.operator);
-  // For a secondary SIM, the primary it belongs to (looked up from the full
-  // phone list so we can show a human label, not just the raw ICCID).
   let primaryIccid = $derived(textOr(phone?.primary_iccid, null));
   let primarySim = $derived(
     phone?.sim_role === 'secondary' && primaryIccid !== null
@@ -78,8 +76,7 @@
     const normalized = value.endsWith('Z') ? value : `${value}Z`;
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return '—';
-    // Pinned to Shanghai like every other timestamp in the app: without it a
-    // browser in another timezone showed this field hours off from the list.
+    // Pinned to Shanghai like every timestamp in the app, whatever the browser timezone.
     return date.toLocaleString('zh-CN', {
       month: '2-digit',
       day: '2-digit',

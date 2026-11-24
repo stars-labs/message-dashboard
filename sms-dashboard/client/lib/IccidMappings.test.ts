@@ -22,7 +22,6 @@ function stubMappings(rows: Parameters<typeof mapping>[0][]): void {
   stubFetch(() => Response.json(mappingsResponse(rows)));
 }
 
-// A full GET /api/iccid-mappings row: the fields a test names, the rest empty.
 function mapping(
   row: Partial<IccidMapping> & Pick<IccidMapping, 'iccid' | 'phone_number' | 'sim_index'>,
 ): IccidMapping {

@@ -31,26 +31,17 @@
     isLoading?: boolean;
     newMessageIds?: ReadonlySet<string>;
     onClearPhone?: (() => void) | null;
-    /** Whether spam/marketing messages are currently being shown. */
     showFiltered?: boolean;
-    /** Called when the user flips the toggle; the parent refetches. */
     onToggleFiltered?: (() => void) | null;
-    /** Filter rules, used to name the rule that hid a message. */
     filterRules?: readonly Pick<FilterRule, 'id' | 'pattern' | 'note'>[];
     balanceChecks?: readonly BalanceCheck[];
     onOpenBalance?: ((check: BalanceCheck) => void) | null;
-    /** Called with the message when a row is activated; opens the detail drawer. */
     onOpenMessage?: ((message: ApiMessage) => void) | null;
-    /** Whether the server has an older page that is not in `messages` yet. */
     hasMore?: boolean;
-    /** Loads the next server page after locally available rows are exhausted. */
     onLoadMore?: (() => Promise<unknown>) | null;
     loadingMore?: boolean;
-    /** Set when the last load failed: the list below is stale or empty. */
     loadError?: string | null;
-    /** Set when the rows came from the local cache rather than the server. */
     fromCache?: boolean;
-    /** Retry handler for a failed load. */
     onRetry?: (() => void) | null;
   }
 
@@ -80,10 +71,8 @@
 
   let activeKeywords = $state<readonly HighlightKeyword[]>([]);
 
-  // id -> readable label, so a hidden message can say WHY it was hidden.
   let ruleLabels = $derived(new Map(filterRules.map((r) => [r.id, textOr(r.note, r.pattern)])));
 
-  // Subscribe to keywords store
   const unsubscribe = keywordsStore.subscribe((value) => {
     activeKeywords = value;
   });
@@ -92,7 +81,6 @@
     return unsubscribe;
   });
 
-  // Copy feedback: stores the message.id of the last-copied code for 2 s.
   let copiedId = $state<string | null>(null);
   let copiedCode = $state<string | null>(null);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -111,24 +99,18 @@
     }, 2000);
   }
 
-  // Content filter: verification codes, grouped balance conversations, or both.
-  // Default to 'all' so non-code messages (e.g. service notices, fee warnings)
-  // are visible immediately without manual filter switching.
+  // Defaults to 'all' so non-code messages (service notices, fee warnings) show immediately.
   let contentFilter = $state<'all' | 'code' | 'balance'>('all');
 
-  // Messages shown in the list, after both dimensions of filtering.
   let displayMessages = $derived.by(() => {
     let base = messages;
-    // Narrow to the selected card if one is chosen.
     if (selectedPhone) {
       base = base.filter((m) => m.phone_iccid === selectedPhone.iccid);
     }
     if (contentFilter === 'balance') return [];
-    // Content filter
     if (contentFilter === 'code') {
       base = base.filter((m) => textOr(m.verification_code, null) !== null);
     }
-    // Spam toggle — when showFiltered=false keep filtered messages hidden.
     if (!showFiltered) {
       base = base.filter((m) => m.filter_status !== 'filtered');
     }
@@ -191,10 +173,8 @@
   class="relative bg-white border-0 rounded-none shadow-none lg:border lg:border-stone-200
   lg:rounded-xl lg:shadow-raised flex flex-col h-full min-h-0"
 >
-  <!-- Explicit copy confirmation. Kept outside the scrolling rows so it never
-       changes the table layout. On mobile the list does not scroll internally,
-       so an absolutely positioned chip sat at the top of the document and was
-       invisible from row 15 onwards; there it is fixed above the tab bar. -->
+  <!-- Outside the scrolling rows so it never shifts the table. On mobile the list does not
+       scroll internally, so the chip is fixed above the tab bar to stay visible. -->
   <div
     class="fixed left-1/2 -translate-x-1/2 z-[70] pointer-events-none
       bottom-[calc(var(--mobile-tab-bar-height)+12px)]
@@ -229,10 +209,8 @@
     {/if}
   </div>
 
-  <!-- ── Header ───────────────────────────────────────────────────────────── -->
   <div class="px-4 py-3 border-b border-stone-100 flex-shrink-0">
     <div class="flex items-center justify-between gap-3">
-      <!-- Left: title + card indicator -->
       <div class="flex items-center gap-2 min-w-0">
         {#if selectedPhone}
           <span class="font-mono font-bold text-sm text-stone-900 tabular-nums shrink-0">
@@ -271,11 +249,9 @@
         {/if}
       </div>
 
-      <!-- Right: hint + content filter + spam toggle -->
       <div class="flex items-center gap-2 shrink-0">
         <span class="hidden lg:block text-[11px] text-stone-400">点击验证码即复制</span>
 
-        <!-- Content filter: segmented control -->
         <div class="flex items-center bg-stone-100 rounded-lg p-0.5 text-xs">
           <button
             onclick={() => {
@@ -303,8 +279,7 @@
           >
         </div>
 
-        <!-- Exact hidden totals require a history scan. Keep the audit control
-             available without turning every inbox load into an aggregate query. -->
+        <!-- No hidden-message total: it would need a history scan on every inbox load. -->
         {#if contentFilter === 'all'}
           <div class="w-px h-[18px] bg-stone-200 mx-0.5 lg:mx-1"></div>
 
@@ -315,7 +290,6 @@
             class="flex items-center gap-1.5 text-xs text-stone-600 hover:text-stone-900 transition-colors"
             title={!showFiltered ? '点击查看被规则隐藏的短信' : '点击隐藏垃圾短信'}
           >
-            <!-- Checkbox: filled when hiding spam (= checked state = hiding enabled) -->
             <span
               class="inline-flex items-center justify-center w-[13px] h-[13px] rounded-[3px] border transition-colors shrink-0
               {!showFiltered ? 'border-stone-500 bg-stone-500' : 'border-stone-300 bg-white'}"
@@ -345,13 +319,11 @@
     </div>
   </div>
 
-  <!-- ── Column headers (desktop only) ────────────────────────────────────── -->
   <div
     class="hidden lg:grid px-3 py-1.5 border-b border-stone-50 flex-shrink-0"
     style="grid-template-columns: 3px 250px 118px minmax(0, 1fr) 92px; gap: 0 16px;"
   >
     <div></div>
-    <!-- accent rail -->
     <div class="text-[11px] font-semibold text-stone-400 tracking-widest uppercase">
       发送 / 接收
     </div>
@@ -364,10 +336,8 @@
     </div>
   </div>
 
-  <!-- ── Message list ──────────────────────────────────────────────────────── -->
   <div class="flex-1 min-h-0 overflow-y-auto">
     {#if isLoading}
-      <!-- Loading skeleton: 4 rows with the same column layout -->
       {#each [1, 2, 3, 4] as row (row)}
         <div
           class="px-3 py-3 border-b border-stone-50 animate-pulse
@@ -387,7 +357,6 @@
           <div class="h-3 bg-stone-100 rounded w-16 ml-auto"></div>
         </div>
       {/each}
-      <!-- Mobile skeleton -->
       {#each [1, 2, 3, 4] as row (row)}
         <div class="lg:hidden p-3 border-b border-stone-100 animate-pulse space-y-2">
           <div class="flex gap-2">
@@ -430,7 +399,6 @@
             >
           {/if}
         {:else if !selectedPhone}
-          <!-- Three breathing dots — "waiting for codes" empty state per §9 -->
           <div class="flex gap-2 mb-4">
             <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
             <span class="w-3 h-3 rounded-full bg-emerald-200 animate-pulse [animation-delay:.2s]"
@@ -481,8 +449,7 @@
             '',
           )}
 
-          <!-- One responsive row tree. CSS-only desktop/mobile copies doubled every
-             message's DOM and keyword work even though one copy was hidden. -->
+          <!-- One responsive row tree: separate desktop and mobile copies doubled DOM and keyword work. -->
           <div
             role="button"
             tabindex="0"

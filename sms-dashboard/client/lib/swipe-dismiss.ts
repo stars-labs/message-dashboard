@@ -1,8 +1,5 @@
-// Edge-swipe state machine and Svelte action for mobile detail drawers.
-//
-// Kept independent from pull-to-refresh: this gesture only arms in the narrow
-// left-edge zone and only claims a clearly horizontal move. Vertical scrolling
-// therefore remains native, including when the touch starts near the edge.
+// Arms only in the narrow left-edge zone and claims only a clearly horizontal move, so
+// vertical scrolling stays native even when the touch starts near the edge.
 
 export const EDGE_WIDTH = 32;
 export const DISMISS_DISTANCE = 88;
@@ -11,10 +8,8 @@ const ACTIVATION_SLOP = 8;
 const HORIZONTAL_RATIO = 1.2;
 const SETTLE_MS = 180;
 
-/** Which way the current gesture was decided. Null until the slop is passed. */
 type SwipeAxis = 'horizontal' | 'vertical' | null;
 
-/** Gesture state carried between the touch handlers. */
 interface SwipeDismissState {
   active: boolean;
   axis: SwipeAxis;
@@ -85,12 +80,8 @@ export function onSwipeCancel(state: SwipeDismissState): void {
   state.distance = 0;
 }
 
-/**
- * Svelte action: `use:swipeDismiss={{ onDismiss }}`.
- *
- * The non-passive move listener exists only while an edge gesture is armed. This
- * avoids turning the full drawer into a permanent touch-blocking region in WebKit.
- */
+// Svelte action: `use:swipeDismiss={{ onDismiss }}`. The non-passive move listener exists
+// only while a gesture is armed, so the drawer is not a permanent touch-blocking region in WebKit.
 export function swipeDismiss(node: HTMLElement, options: SwipeDismissOptions = {}) {
   const state = createSwipeDismissState();
   const passive: AddEventListenerOptions = { passive: true };

@@ -7,7 +7,6 @@ import type {
 import type { DisplayStatus } from '../../shared/balance-status.js';
 import { textOr } from '../../shared/text.js';
 
-/** The display metadata for one balance-check status. */
 interface BalanceStatusMeta {
   label: string;
   className: string;
@@ -51,7 +50,6 @@ export function getBalanceStatusMeta(status: DisplayStatus): BalanceStatusMeta {
   return STATUS_META[status];
 }
 
-/** When the check last moved: its newest message, else the latest timestamp it carries. */
 export function getBalanceTimestamp(
   check: BalanceCheck,
   detail: BalanceCheckDetail | null = null,
@@ -66,7 +64,6 @@ export function getBalanceTimestamp(
   );
 }
 
-/** The messages of a check: from its loaded detail, else the outbound and reply it carries. */
 export function getBalanceConversation(
   check: BalanceCheck,
   detail: BalanceCheckDetail | null = null,
@@ -137,7 +134,7 @@ export function formatBalanceMetric(metric: BalanceMetric | null): string {
   return `${String(value)}${unit !== null && unit !== '' ? ` ${unit}` : ''}`;
 }
 
-/** D1 stores UTC without a zone; mark it as UTC so the browser does not read local time. */
+// D1 stores UTC without a zone; mark it as UTC so the browser does not read local time.
 export function normalizeUtcTimestamp<T extends string | null | undefined>(value: T): T | string {
   if (typeof value !== 'string' || value === '') return value;
   return /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;

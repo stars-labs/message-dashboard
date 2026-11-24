@@ -1,10 +1,7 @@
-// Run with: bun test client/lib/error-origin.test.js
 import { describe, expect, test } from 'bun:test';
 import { isForeignError, toError } from './error-origin.js';
 
 describe('isForeignError — browser extensions', () => {
-  // The reported bug: MetaMask's injected script rejected, and the dashboard replaced
-  // itself with "Something went wrong".
   test('treats a chrome-extension stack as foreign', () => {
     expect(
       isForeignError({
@@ -41,8 +38,7 @@ describe('isForeignError — benign browser noise', () => {
   });
 });
 
-// The boundary must still catch genuine application faults, or this fix would trade one
-// bug for a worse one.
+// The boundary must still catch genuine application faults.
 describe('isForeignError — real application errors', () => {
   test('does not treat an app bundle error as foreign', () => {
     expect(
@@ -85,8 +81,7 @@ describe('toError', () => {
     expect(toError('something broke').message).toBe('something broke');
   });
 
-  // The old code did `new Error(event.reason)`, which stringified the object into
-  // "i: Failed to connect to MetaMask" and lost the stack entirely.
+  // `new Error(event.reason)` would stringify the object and lose the stack.
   test('extracts message and stack from an error-like object', () => {
     const result = toError({ message: 'Failed to connect to MetaMask', stack: 'at foo.js:1:1' });
     expect(result.message).toBe('Failed to connect to MetaMask');

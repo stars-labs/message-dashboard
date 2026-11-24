@@ -36,8 +36,7 @@ describe('SwUpdatePrompt', () => {
       props: { registerServiceWorker: harness.registerServiceWorker },
     });
 
-    // ESLint sees a .svelte import through its module declaration, without the
-    // component's exports, so the export is checked before it is called.
+    // ESLint types a .svelte import without its exports, so check the export before calling it.
     const checkForUpdate = v.parse(v.function(), view.component['checkForUpdate']);
     await Promise.resolve(checkForUpdate());
 

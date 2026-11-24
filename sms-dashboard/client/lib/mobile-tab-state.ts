@@ -10,7 +10,6 @@ const ADMIN_TABS: readonly MobileTab[] = Object.freeze([
 const VIEWER_TABS: readonly MobileTab[] = Object.freeze(['dashboard', 'balances', 'send', 'more']);
 const MORE_VIEWS = new Set<string>(['keywords', 'filters', 'users']);
 
-/** Geometry every tab calculation shares. */
 interface TabGeometry {
   clientX: number;
   left: number;

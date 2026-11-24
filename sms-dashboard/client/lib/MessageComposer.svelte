@@ -63,11 +63,10 @@
   let simSearch = $state('');
   let showSimDropdown = $state(false);
   let selectedSimDisplay = $state('');
-  let selectedCountryCode = $state('+65'); // Default to Singapore
+  let selectedCountryCode = $state('+65');
   let showCountryDropdown = $state(false);
   let draftReady = $state(false);
 
-  // Common country codes
   const countryCodes = [
     { code: '', country: '不加区号', short: 'NONE' },
     { code: '+65', country: '🇸🇬 Singapore', short: 'SG' },
@@ -87,35 +86,28 @@
     { code: '+33', country: '🇫🇷 France', short: 'FR' },
   ];
 
-  // Get full phone number with country code
   function getFullPhoneNumber() {
     const num = recipientNumber.trim();
-    // If already has + prefix, use as-is
     if (num.startsWith('+')) {
       return num;
     }
-    // The country code is optional so carrier short codes (for example 10010)
-    // can be submitted unchanged.
+    // Optional so carrier short codes (for example 10010) go out unchanged.
     if (!selectedCountryCode) return num;
     return `${selectedCountryCode}${num}`;
   }
 
-  // Get unique recipient numbers from sent messages
   let recipientHistory = $state(
     [
       ...new Set(
         messages.flatMap((msg) => (msg.type === 'sent' && msg.recipient ? [msg.recipient] : [])),
       ),
     ].slice(0, 20),
-  ); // Keep last 20 unique recipients
+  );
 
-  // Filter recipient history based on search
   let filteredRecipients = $derived(
     recipientHistory.filter((num) => num.includes(recipientSearch) || recipientSearch === ''),
   );
 
-  // Filter available SIM cards based on search
-  // Include phones that are online, registered, or have any other active status
   let availablePhones = $derived(
     phoneNumbers.filter(
       (p) =>
@@ -147,12 +139,8 @@
     }),
   );
 
-  // Sync SIM selection + display when selectedPhone changes. The legacy version
-  // was a reactive `$: if (selectedPhone)` block; $effect tracks the same prop
-  // and runs the same side effects after each change.
   $effect(() => {
     if (selectedPhone) {
-      // Always update the sender SIM when a different phone is selected in the list
       recipientSIM = selectedPhone.iccid;
       const phone = availablePhones.find((p) => p.iccid === selectedPhone.iccid);
       if (phone) {
@@ -170,10 +158,8 @@
 
     sendingStatus = 'sending';
 
-    // Get full phone number with country code
     const fullPhoneNumber = getFullPhoneNumber();
 
-    // Store recipient in localStorage for persistence (store with country code)
     const storedRecipients = v.parse(
       RecipientList,
       JSON.parse(textOr(localStorage.getItem('recipientHistory'), '[]')),
@@ -183,7 +169,6 @@
       localStorage.setItem('recipientHistory', JSON.stringify(storedRecipients.slice(0, 50)));
     }
 
-    // Send actual message via WebSocket
     const sentMessage: SentMessage = {
       phone_iccid: recipientSIM,
       phoneNumber: fullPhoneNumber,
@@ -234,8 +219,7 @@
     { name: '营销模板', content: '限时优惠！全场商品8折，快来选购吧！' },
   ];
 
-  // Restore the route draft after navigation or a refresh. Wait until restore is
-  // complete before persisting so the initial empty state cannot overwrite it.
+  // Persist only after restore completes, or the initial empty state overwrites the draft.
   onMount(() => {
     try {
       const storedRecipients = v.parse(
@@ -281,7 +265,6 @@
     );
   });
 
-  // Close dropdown when clicking outside
   function handleClickOutside(event: MouseEvent) {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -304,7 +287,6 @@
 
 <svelte:window onclick={handleClickOutside} />
 
-<!-- Desktop Composer -->
 <div
   class="hidden lg:flex lg:flex-col bg-white border border-stone-200/80 rounded-xl h-full min-h-0"
   style="box-shadow: 0 1px 3px rgba(28,25,23,0.06);"
@@ -313,7 +295,6 @@
     <h2 class="text-lg font-bold text-stone-900">发送短信</h2>
   </div>
   <div class="flex-1 overflow-y-auto p-4">
-    <!-- SIM Card Selection -->
     <div class="mb-4 relative sim-input-container">
       <label for="sim-selection" class="block text-sm font-medium text-stone-600 mb-2">
         发送卡
@@ -335,8 +316,6 @@
         placeholder="卡号 / 号码 / 运营商 / ICCID"
         class="w-full px-4 py-2 cyber-input"
       />
-
-      <!-- SIM Cards Dropdown -->
       {#if showSimDropdown && filteredSims.length > 0}
         <div
           class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
@@ -377,14 +356,11 @@
         </div>
       {/if}
     </div>
-
-    <!-- Recipient Number -->
     <div class="mb-4 relative recipient-input-container">
       <label for="recipient-number" class="block text-sm font-medium text-stone-600 mb-2">
         接收号码
       </label>
       <div class="flex gap-2">
-        <!-- Country Code Selector -->
         <div class="relative country-code-container">
           <button
             type="button"
@@ -429,7 +405,6 @@
             </div>
           {/if}
         </div>
-        <!-- Phone Number Input -->
         <input
           id="recipient-number"
           type="text"
@@ -443,8 +418,6 @@
           class="flex-1 px-4 py-2 cyber-input"
         />
       </div>
-
-      <!-- Recipient History Dropdown -->
       {#if showRecipientHistory && filteredRecipients.length > 0}
         <div
           class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-48 overflow-y-auto z-50"
@@ -480,8 +453,6 @@
         </div>
       {/if}
     </div>
-
-    <!-- Message Templates -->
     <div class="mb-4">
       <div id="template-label" class="block text-sm font-medium text-stone-600 mb-2">快速模板</div>
       <div class="flex flex-wrap gap-2" role="group" aria-labelledby="template-label">
@@ -497,8 +468,6 @@
         {/each}
       </div>
     </div>
-
-    <!-- Message Content -->
     <div class="mb-4">
       <label for="message-content" class="block text-sm font-medium text-stone-600 mb-2">
         短信内容
@@ -513,8 +482,6 @@
         字数：{messageContent.length} / 500
       </div>
     </div>
-
-    <!-- Send Button -->
     <button
       onclick={handleSend}
       disabled={sendingStatus === 'sending'}
@@ -549,10 +516,8 @@
       {/if}
     </button>
   </div>
-  <!-- end scrollable content -->
 </div>
 
-<!-- Mobile route content. The App owns the header and persistent bottom tab bar. -->
 {#if mobilePage}
   <section
     data-mobile-composer
@@ -566,7 +531,6 @@
     </div>
 
     <div class="p-4">
-      <!-- SIM Card Selection -->
       <div class="mb-4 relative sim-input-container">
         <label for="mobile-sim-selection" class="block text-sm font-medium text-stone-600 mb-2">
           发送卡
@@ -588,8 +552,6 @@
           placeholder="卡号 / 号码 / 运营商 / ICCID"
           class="w-full px-4 py-2 cyber-input"
         />
-
-        <!-- SIM Cards Dropdown -->
         {#if showSimDropdown && filteredSims.length > 0}
           <div
             class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-60 overflow-y-auto z-50"
@@ -624,14 +586,11 @@
           </div>
         {/if}
       </div>
-
-      <!-- Recipient Number -->
       <div class="mb-4 relative recipient-input-container">
         <label for="mobile-recipient-number" class="block text-sm font-medium text-stone-600 mb-2">
           接收号码
         </label>
         <div class="flex gap-2">
-          <!-- Country Code Selector -->
           <div class="relative country-code-container">
             <button
               type="button"
@@ -676,7 +635,6 @@
               </div>
             {/if}
           </div>
-          <!-- Phone Number Input -->
           <input
             id="mobile-recipient-number"
             type="text"
@@ -690,8 +648,6 @@
             class="flex-1 px-4 py-2 cyber-input"
           />
         </div>
-
-        <!-- Recipient History Dropdown -->
         {#if showRecipientHistory && filteredRecipients.length > 0}
           <div
             class="absolute top-full left-0 right-0 mt-1 tech-card border border-stone-200 rounded-lg shadow-xl shadow-gray-900 max-h-48 overflow-y-auto z-50"
@@ -727,8 +683,6 @@
           </div>
         {/if}
       </div>
-
-      <!-- Message Templates -->
       <div class="mb-4">
         <div id="mobile-template-label" class="block text-sm font-medium text-stone-600 mb-2">
           快速模板
@@ -746,8 +700,6 @@
           {/each}
         </div>
       </div>
-
-      <!-- Message Content -->
       <div class="mb-4">
         <label for="mobile-message-content" class="block text-sm font-medium text-stone-600 mb-2">
           短信内容
@@ -762,8 +714,6 @@
           字数：{messageContent.length} / 500
         </div>
       </div>
-
-      <!-- Send Button -->
       <button
         onclick={handleSend}
         disabled={sendingStatus === 'sending'}

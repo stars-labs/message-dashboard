@@ -1,17 +1,11 @@
-// Segment logic for MessageHighlight.svelte.
-//
-// Extracted from the component so it can be unit tested: this code slices
-// attacker-controlled SMS text, and a bug here either garbles a displayed message or
-// (previously) produced an XSS sink. See docs/SECURITY-REVIEW.md finding 2.
+// Slices attacker-controlled SMS text: a bug here garbles messages or creates an XSS sink.
 
 export const DEFAULT_KEYWORD_COLOR = '#3B82F6';
 
-// Mirrors shared/keyword-color.ts. Duplicated deliberately rather than imported:
-// the client must not trust the server's validation for a value it puts in a style
-// attribute, and rows written before that validation existed may hold anything.
+// Mirrors shared/keyword-color.ts, duplicated on purpose: the client must not trust server
+// validation for a value it puts in a style attribute, and older rows may hold anything.
 const HEX_COLOR = /^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 
-/** A keyword as stored, as the highlighter reads it. */
 export interface HighlightKeyword {
   keyword?: string | null;
   color?: string | null;
@@ -20,30 +14,20 @@ export interface HighlightKeyword {
   whole_word?: boolean | number | null;
 }
 
-/** One rendered slice: plain text, or a keyword match with its style. */
 interface HighlightSegment {
   text: string;
   match: { color: string; tag: string | null } | null;
 }
 
-/**
- * Coerce a stored keyword colour to something safe for a CSS custom property.
- * Anything that is not a plain hex literal becomes the default.
- */
+// Anything that is not a plain hex literal becomes the default, so it is safe in a CSS custom property.
 export function safeColor(color: unknown): string {
   return typeof color === 'string' && HEX_COLOR.test(color.trim())
     ? color.trim()
     : DEFAULT_KEYWORD_COLOR;
 }
 
-/**
- * Split `text` into consecutive segments, marking keyword matches.
- *
- * Returns null when there is nothing to highlight, so the caller can render the raw string.
- *
- * Concatenating every segment's `text` always reproduces `text.trim()` exactly — the
- * segments are a partition, never a transformation.
- */
+// Returns null when there is nothing to highlight. The segments' `text` concatenates to
+// `text.trim()` exactly: a partition, never a transformation.
 export function getSegments(
   text: string | null | undefined,
   kws: readonly HighlightKeyword[] | null | undefined,
@@ -65,8 +49,7 @@ export function getSegments(
         `\\b${searchKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
         kw.case_sensitive ? 'g' : 'gi',
       );
-      // matchAll advances past zero-length matches on its own, so a pathological
-      // keyword cannot spin here the way a manual lastIndex loop could.
+      // matchAll advances past zero-length matches itself, unlike a manual lastIndex loop.
       for (const m of trimmed.matchAll(regex)) {
         matches.push({
           position: m.index,
@@ -91,10 +74,9 @@ export function getSegments(
 
   if (matches.length === 0) return null;
 
-  // Sort by position, then priority (earlier in kws array = higher priority)
+  // Stable sort: ties keep kws order, where earlier means higher priority.
   matches.sort((a, b) => a.position - b.position);
 
-  // Remove overlaps (keep first match at each position)
   const filtered: typeof matches = [];
   let lastEnd = -1;
   for (const m of matches) {

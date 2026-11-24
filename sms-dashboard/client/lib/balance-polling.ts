@@ -13,7 +13,6 @@ const ACTIVE_QUERY_STATUSES = new Set([
   'web_human_required',
 ]);
 
-/** The fields polling decisions read off a balance check. */
 interface PollableCheck {
   id: string;
   display_status?: string | null;

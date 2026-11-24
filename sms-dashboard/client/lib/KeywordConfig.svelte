@@ -27,8 +27,7 @@
   let historySince = $state(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10));
   const historyRuns = new SvelteMap<number, HistoryProgress>();
 
-  // 5 preset colours matching the design. These must be complete literal strings
-  // so Tailwind includes them in the bundle.
+  // Complete literal strings, so Tailwind includes them in the bundle.
   const PRESET_COLORS = [
     { hex: '#3B82F6', bg: 'bg-blue-500', label: '蓝' },
     { hex: '#10B981', bg: 'bg-emerald-500', label: '绿' },
@@ -46,7 +45,6 @@
     whole_word: false,
   });
 
-  // Live preview of the highlight effect — updates as the form changes.
   let previewText = $derived(
     formData.keyword ? `您的验证码是 ${formData.keyword}839204` : '验证码：123456',
   );
@@ -211,7 +209,6 @@
     }
   }
 
-  // Human-readable match description.
   function matchLabel(kw: KeywordWithUsage) {
     if (kw.whole_word && kw.case_sensitive) return '整词 · 区分大小写';
     if (kw.whole_word) return '整词';
@@ -284,7 +281,6 @@
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-stone-200 text-left">
-            <!-- 效果预览 210 / 标签 96 / 优先级 60 / 匹配方式 96 / 命中 flex / 启用 72 / 操作 -->
             <th
               class="px-4 py-2.5 text-[11px] font-semibold text-stone-400 tracking-widest uppercase"
               >效果预览</th
@@ -322,14 +318,12 @@
                 ? ''
                 : 'opacity-55'}"
             >
-              <!-- 效果预览: shows a real highlighted sample instead of a raw hex value -->
               <td class="px-4 py-2.5 font-mono text-xs max-w-[210px]">
                 <MessageHighlight
                   content={`您的${kw.keyword}是 839204`}
                   keywords={[{ keyword: kw.keyword, color: kw.color, tag: kw.tag }]}
                 />
               </td>
-              <!-- 标签 -->
               <td class="px-4 py-2.5">
                 <span
                   class="inline-flex px-2 py-0.5 rounded text-xs font-medium"
@@ -338,15 +332,11 @@
                   {kw.tag}
                 </span>
               </td>
-              <!-- 优先级 -->
               <td class="px-4 py-2.5 font-mono text-center tabular-nums">{kw.priority}</td>
-              <!-- 匹配方式 — human readable, collapses two checkboxes -->
               <td class="px-4 py-2.5 text-stone-500 text-xs">{matchLabel(kw)}</td>
-              <!-- 命中次数 -->
               <td class="px-4 py-2.5 font-mono text-right tabular-nums text-stone-500"
                 >{kw.usage_count || 0}</td
               >
-              <!-- 启用开关-->
               <td class="px-4 py-2.5 text-right">
                 <button
                   onclick={() => toggle(kw)}
@@ -361,7 +351,6 @@
                   ></span>
                 </button>
               </td>
-              <!-- 操作 -->
               <td class="px-4 py-2.5">
                 <div class="flex items-center gap-1">
                   {#if kw.is_active}
@@ -479,7 +468,6 @@
       {/each}
     </div>
 
-    <!-- Priority explainer card -->
     <div
       class="px-4 py-3 bg-stone-50 border-b border-stone-200 lg:mt-4 lg:border lg:rounded-xl text-xs text-stone-500"
     >
@@ -489,7 +477,6 @@
   {/if}
 </div>
 
-<!-- ─── Add / Edit dialog ────────────────────────────────────────────────── -->
 {#if showDialog}
   <dialog
     open
@@ -523,7 +510,6 @@
         </button>
       </div>
 
-      <!-- Live preview — updates as you type -->
       <div class="px-6 py-3 bg-stone-50 border-b border-stone-100 flex-shrink-0">
         <p class="text-[11px] font-semibold text-stone-400 uppercase tracking-widest mb-1">
           效果预览
@@ -573,7 +559,7 @@
           />
         </div>
 
-        <!-- 5 preset colour swatches — no colour picker (hard to use precisely on mobile) -->
+        <!-- Preset swatches only: a colour picker is hard to use precisely on mobile. -->
         <div>
           <p class="block text-xs font-semibold text-stone-500 mb-2 tracking-wide uppercase">
             颜色
@@ -610,7 +596,6 @@
           />
         </div>
 
-        <!-- Matching options as toggle rows -->
         <div class="space-y-1">
           <label class="flex items-center justify-between py-2.5 cursor-pointer">
             <span class="text-sm text-stone-700">整词匹配</span>

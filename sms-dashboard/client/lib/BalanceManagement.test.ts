@@ -37,7 +37,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const originalBaseUrl = auth.baseUrl;
 let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>> | undefined;
 
-/** A D1-style UTC timestamp (`YYYY-MM-DD HH:MM:SS`) offset from now. */
 function d1Timestamp(offsetMs: number): string {
   return new Date(Date.now() + offsetMs).toISOString().slice(0, 19).replace('T', ' ');
 }
@@ -356,9 +355,7 @@ const check = balanceCheck({
   status: 'parsed',
   method: 'sms',
   profile_carrier: 'China Mobile',
-  // Relative to now, not a fixed date: balance data older than
-  // PREPAID_STALE_DAYS (35) is classed as 数据过期, so a hardcoded 2026-08-14
-  // turned three tests red on 2026-09-18 with no code change at all.
+  // Relative to now: balance data older than PREPAID_STALE_DAYS (35) is classed as 数据过期.
   requested_at: d1Timestamp(-2 * DAY_MS - 7_000),
   completed_at: d1Timestamp(-2 * DAY_MS),
   metrics: [metric({ value: 264.33, currency: 'CNY' })],
@@ -557,11 +554,9 @@ describe('balance management', () => {
     const view = render(BalanceManagement, {
       props: { phoneNumbers: [phone], balanceChecks: [check] },
     });
-    // Wait on the capability that can only appear after the status loads.
     await waitFor(() => {
       expect(view.getByText('需要人工验证')).toBeTruthy();
     });
-    // Same three words as the daemon's own health: 正常 / 部分异常 / 离线.
     expect(view.getAllByText('正常').length).toBeGreaterThan(0);
     expect(view.getByText('浏览器任务逐张处理')).toBeTruthy();
   });
@@ -926,7 +921,6 @@ describe('balance management', () => {
     await waitFor(() => {
       expect(previewScopes).toEqual([[unicomPhone.iccid]]);
     });
-    // The scope renders once the preview answers, after the request is sent.
     await waitFor(() => {
       expect(view.getByText(/查询范围：/).parentElement?.textContent).toContain('联通');
     });
@@ -981,7 +975,6 @@ describe('balance management', () => {
     });
 
     expect(view.container.querySelectorAll('[data-mobile-balance-row]')).toHaveLength(1);
-    // One placeholder across every SIM search in the app.
     expect(inputOf(view.getByRole('searchbox', { name: '搜索 SIM' })).placeholder).toBe(
       '卡号 / 号码 / 运营商 / ICCID',
     );

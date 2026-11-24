@@ -18,7 +18,6 @@ interface Sdp {
   sdp: string;
 }
 
-/** Minimal fake PeerConnection that records the negotiation sequence. */
 function fakePeerFactory(log: LogEntry[], { connect = true } = {}) {
   const created: FakePeer[] = [];
   class FakePeer {

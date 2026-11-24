@@ -5,10 +5,8 @@ import type { BalanceCheck, BalanceMetric } from '../../shared/api/balance-check
 import type { Phone } from '../../shared/api/phones.js';
 import { textOr } from '../../shared/text.js';
 
-/** The phone fields a balance threshold depends on. */
 type ThresholdPhone = Pick<Phone, 'country' | 'balance_threshold'>;
 
-/** The phone fields the balance overview reads. */
 type BalancePhone = ThresholdPhone &
   Pick<Phone, 'iccid' | 'service_type' | 'sim_role' | 'primary_iccid'>;
 
@@ -23,7 +21,6 @@ interface BalanceThreshold {
   currency: string | null;
 }
 
-/** One rendered balance row. */
 interface BalanceRow<P extends BalancePhone> {
   phone: P;
   checks: BalanceCheck[];
@@ -123,8 +120,7 @@ function timestampValue(check: BalanceCheck): number {
   return Number.isFinite(time) ? time : 0;
 }
 
-// Cancellations and superseded jobs are operational noise — not real query failures.
-// They should not make a SIM appear as "查询失败" when no balance was ever obtained.
+// Cancellations and superseded jobs are not real query failures.
 function isCancelledCheck(check: BalanceCheck): boolean {
   const err = check.error ?? '';
   return (
@@ -146,7 +142,6 @@ export function getBalanceThreshold(
     textOr(metric?.currency, null) ??
     (phone.country === null ? undefined : COUNTRY_CURRENCIES.get(phone.country)) ??
     null;
-  // Per-SIM override wins; none falls back to the currency default.
   if (phone.balance_threshold !== null && Number.isFinite(phone.balance_threshold)) {
     return { value: phone.balance_threshold, currency };
   }
@@ -170,9 +165,7 @@ export function buildBalanceRows<P extends BalancePhone>(
     const phoneChecks = (checksByIccid.get(phone.iccid) ?? [])
       .slice()
       .sort((a, b) => timestampValue(b) - timestampValue(a));
-    // Use the newest non-cancelled check for health classification so that
-    // operational cancellations (rate-limit holds, triggered-in-error batches)
-    // don't permanently mark a SIM as 查询失败 when no balance was ever obtained.
+    // Cancellations (rate-limit holds, batches triggered in error) must not mark a SIM as 查询失败.
     const latestSignificantCheck = phoneChecks.find((check) => !isCancelledCheck(check)) ?? null;
     const balanceCheck = phoneChecks.find((check) => getCashBalance(check) !== null) ?? null;
     const balanceMetric = getCashBalance(balanceCheck);
@@ -184,7 +177,7 @@ export function buildBalanceRows<P extends BalancePhone>(
     const expiryTimestamp = expiryCheck ? getBalanceTimestamp(expiryCheck) : null;
     const expiryDate = expiryMetric?.expires_at?.slice(0, 10) ?? null;
 
-    // Secondary SIMs follow their primary's balance — health is not independently meaningful.
+    // Secondary SIMs follow their primary's balance, so their own health is not meaningful.
     const healthResult: { summaryStatus: SummaryStatus; reasons: string[] } =
       phone.sim_role === 'secondary'
         ? { summaryStatus: 'never_observed', reasons: ['never_observed'] }

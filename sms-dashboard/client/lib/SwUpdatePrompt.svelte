@@ -1,11 +1,4 @@
 <script lang="ts">
-  /**
-   * "New version available" bar.
-   *
-   * Registration lives here rather than in main.ts so the prompt state and the
-   * registration callbacks cannot drift apart. All the decision logic is in
-   * sw-update.ts; this file is the rendering and the wiring to the browser.
-   */
   import { onMount } from 'svelte';
   import {
     applyUpdate,
@@ -19,7 +12,6 @@
 
   type Updater = (reloadPage?: boolean) => Promise<void>;
 
-  /** The part of the PWA plugin's registerSW this uses; the plugin's own fits it. */
   type RegisterServiceWorker = (options: {
     immediate: boolean;
     onNeedRefresh(): void;
@@ -28,7 +20,6 @@
   }) => Updater;
 
   interface Props {
-    /** Stands in for registerSW, so tests need no service worker. */
     registerServiceWorker?: RegisterServiceWorker | null;
   }
 
@@ -46,9 +37,7 @@
     let disposed = false;
 
     async function register() {
-      // Dynamic import: the virtual module only exists when the PWA plugin is active,
-      // so a static import would break `vite dev` runs without it. Tests inject the
-      // same registration contract without replacing browser globals.
+      // Dynamic import: the virtual module exists only when the PWA plugin is active.
       try {
         const registerSW: RegisterServiceWorker =
           registerServiceWorker ?? (await import('virtual:pwa-register')).registerSW;
@@ -66,8 +55,7 @@
           },
         });
       } catch {
-        // No service worker support, or the virtual module is unavailable. The app is
-        // fully functional without it, so this is not worth surfacing.
+        // The app works without a service worker; nothing to surface.
         registerError(update);
       }
     }
@@ -88,10 +76,8 @@
 </script>
 
 {#if update.available}
-  <!-- The shared variable keeps this above the safe-area-aware mobile tab bar;
-       desktop has no tab bar so it anchors to the bottom edge.
-       z-[45] is deliberately between the tab bar (z-40) and modals/detail panels
-       (z-50) — at z-50 this bar would cover an open message detail sheet. -->
+  <!-- z-[45] sits between the tab bar (z-40) and modals/detail panels (z-50); at z-50 it
+       would cover an open message detail sheet. -->
   <div
     class="fixed inset-x-3 bottom-[var(--mobile-tab-bar-height)] lg:inset-x-auto lg:right-4 lg:bottom-4 lg:max-w-sm z-[45]"
     role="status"

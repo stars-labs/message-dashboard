@@ -94,31 +94,24 @@
   let selectedPhoneIccid = $state<string | null>(null);
   let selectedPhone = $state<ViewPhone | null>(null);
 
-  // Manual function to update selected phone
   function updateSelectedPhone() {
     selectedPhone = selectedPhoneIccid
       ? (phoneNumbers.find((p) => p.iccid === selectedPhoneIccid) ?? null)
       : null;
   }
 
-  // Manual function to handle phone selection changes
   function handlePhoneSelection() {
     updateSelectedPhone();
     void loadMessagesForPhone(selectedPhoneIccid);
     void refreshBalanceChecksForView();
   }
 
-  // Centralized function to calculate online devices.
-  // Daemon liveness is tracked by the heartbeat (offline after 3 min silence),
-  // not by per-device updated_at. Device sync is incremental — updated_at only
-  // changes when modem state changes, so a time-window filter would exclude
-  // stable online devices. sim_status='active' is the sole online signal.
+  // Device sync is incremental, so updated_at only moves when modem state changes;
+  // a time-window filter would drop stable online devices. status 'active' is the signal.
   function calculateOnlineDevices(phones: readonly ViewPhone[]) {
     return phones.filter((p) => p.status === 'active').length;
   }
 
-  // Device counts come from the already-loaded phone list. Keeping a second D1
-  // aggregate for the same facts made the dashboard poll the whole message table.
   function updateStatsFromPhones() {
     stats.onlineDevices = calculateOnlineDevices(phoneNumbers);
     stats.totalDevices = phoneNumbers.length;
@@ -132,7 +125,6 @@
   let balanceChecks = $state<BalanceCheck[]>([]);
   let balanceDetailCheck = $state<BalanceCheck | null>(null);
   let balanceDetail = $state<BalanceCheckDetail | null>(null);
-  // The message whose full body is open in the detail drawer, or null.
   let messageDetail = $state<ApiMessage | null>(null);
   let latestSelectedBalanceCheck = $derived(
     selectedPhoneIccid
@@ -142,25 +134,23 @@
   let phoneNumbers = $state<ViewPhone[]>([]);
   let user = $state<MeResponse['user'] | null>(null);
   let loading = $state(true);
-  let dataLoading = $state(true); // Track data loading separately
+  let dataLoading = $state(true);
   let currentView = $state<View>('dashboard');
   let iccidMappingsFilter = $state<'all' | 'error'>('all');
   let showIccidMappingDialog = $state(false);
-  let showMoreMenu = $state(false); // iOS bottom tab: 更多 sheet
-  let showSendDrawer = $state(false); // desktop: send drawer (<1600px)
+  let showMoreMenu = $state(false);
+  let showSendDrawer = $state(false);
   let toasts = $state<ToastItem[]>([]);
-  let messageRequestId = 0; // Prevents stale message responses from overwriting newer ones
+  let messageRequestId = 0;
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let pollInFlight = false;
   const POLL_INTERVAL_MS = 60000;
   const DAEMON_POLL_INTERVAL_MS = 300000;
   let lastDaemonPollAt = 0;
-  let newMessageIds = $state<Set<string>>(new Set()); // Track newly arrived message IDs for "新" badge
+  let newMessageIds = $state<Set<string>>(new Set());
 
-  // Spam/marketing filtering. Exact totals require scanning message history, so the
-  // control exposes the filtered view without maintaining an expensive count.
   let showFiltered = $state(false);
-  let filterRules = $state<FilterRule[]>([]); // Loaded lazily, only to name the rule that hid a message
+  let filterRules = $state<FilterRule[]>([]);
 
   async function toggleFiltered() {
     showFiltered = !showFiltered;
@@ -174,13 +164,11 @@
     }
     await loadMessagesForPhone(selectedPhoneIccid, { resetSync: true });
   }
-  let lastKnownTimestamp = $state<string | null>(null); // Only flag messages newer than this as "新"
+  let lastKnownTimestamp = $state<string | null>(null);
   let daemonRefreshing = $state(false);
   let showDaemonDetails = $state(false);
 
-  // Voice calls. `activeCall` mirrors the Worker's single fleet-wide call lock and
-  // is polled while the tab is visible; `callSession` owns this tab's microphone
-  // and PeerConnection and is plain (non-reactive) because it holds browser objects.
+  // `callSession` is non-reactive because it holds browser objects (microphone, PeerConnection).
   let showCallPanel = $state(false);
   let activeCall = $state<LiveCall | null>(null);
   let callBusy = $state(false);
@@ -189,7 +177,6 @@
   let callMuted = $state(false);
   let callHistory = $state<CallLogEntry[]>([]);
   let callHistoryLoading = $state(false);
-  // Last time the call panel was opened, so the badge counts only new misses.
   let callsSeenAt = $state(readCallsSeenAt());
   let callClock = $state(Date.now());
   let callSession: CallSession | null = null;
@@ -200,22 +187,15 @@
   let titleBeforeRing: string | null = null;
   let activeCallId: string | null = null;
   let swUpdatePrompt = $state<{ checkForUpdate(): Promise<unknown> } | null>(null);
-  // The dashboard must never present a failed fetch as a healthy, quiet fleet.
+  // A failed fetch must never look like a healthy, quiet fleet.
   let authError = $state<string | null>(null);
   let dataError = $state<string | null>(null);
   let messagesFromCache = $state(false);
 
-  // Pull-to-refresh reuses loadData() rather than reloading the page: it refetches
-  // phones, messages, and the balance rows needed by the current view, then sets dataLoading to
-  // false, so re-running it updates in place without flashing the skeleton.
   let pullRefreshing = $state(false);
 
-  // Clears persistent SMS rows plus the service worker/HTTP caches, then reloads.
-  // The reload fetches only the current first page; it does not rescan D1 history.
   async function handleResetLocalCache() {
     showMoreMenu = false;
-    // This wipes the offline cache and reloads: from a circular-arrow icon it
-    // reads as a refresh, so it has to say what it actually does first.
     const confirmed = await confirmAction({
       title: '清除本地缓存',
       message:
@@ -246,8 +226,7 @@
     }
   }
 
-  // A counter, not Date.now(): two toasts raised in the same millisecond shared
-  // an id, so keyed rendering dropped one of them.
+  // Not Date.now(): same-millisecond toasts would share a key.
   let toastSeq = 0;
   function showToast(message: string, type: ToastItem['type'] = 'info', duration = 4000) {
     toastSeq += 1;
@@ -270,17 +249,11 @@
     totalDevices: 0,
   });
 
-  // Anomaly counts for the health strip, derived from the live phone list.
-  // Computed here (in App) so the same numbers feed both the health strip and
-  // the status-alert banner without duplicating the filter logic.
   let anomalySimError = $derived(phoneNumbers.filter((p) => p.status === 'sim_error').length);
   let anomalyMismatch = $derived(phoneNumbers.filter((p) => p.status === 'iccid_mismatch').length);
   let anomalyOffline = $derived(phoneNumbers.filter((p) => p.status === 'offline').length);
   let daemonMeta = $derived(getDaemonStatusMeta(daemonStatus.status));
-  // Permission gate. `user.permissions` comes from /api/auth/me, which derives it from
-  // the caller's Auth0 roles. This is UX only — the server enforces the same rules on
-  // every endpoint, so hiding a control is a convenience, never a security boundary.
-  // Reading `user` inside the function body is enough for runes to re-track it.
+  // UX only: the server enforces the same permissions on every endpoint.
   function can(permission: string) {
     return user?.permissions.includes(permission) ?? false;
   }
@@ -382,8 +355,7 @@
   }
 
   function navigate(view: View) {
-    // Route changes own the whole visible surface. A detail drawer left mounted
-    // above the new route makes a successful tab click look broken.
+    // A drawer left open above the new route makes the tab click look broken.
     messageDetail = null;
     balanceDetailCheck = null;
     showPhoneList = false;
@@ -394,15 +366,13 @@
     if (view === 'balances') void refreshBalanceChecksForView();
   }
 
-  // Hash routing handler
   function handleHashChange() {
     const hash = window.location.hash.slice(1);
     const requested = hash === '' ? 'dashboard' : hash;
 
     if (!isView(requested)) return;
 
-    // A viewer typing #keywords would otherwise land on a page whose every API call
-    // 403s, which looks like a broken app rather than a permission boundary.
+    // Otherwise a viewer typing #keywords lands on a page whose API calls all 403.
     if (user && !can(VIEW_PERMISSION[requested])) {
       currentView = 'dashboard';
       window.location.hash = 'dashboard';
@@ -412,8 +382,7 @@
     currentView = requested;
   }
 
-  // Re-run the guard once permissions arrive: onMount fires handleHashChange before
-  // getUser() resolves, so a deep link is validated only after `user` is known.
+  // onMount runs handleHashChange before getUser() resolves; re-validate deep links once `user` is known.
   $effect(() => {
     if (user) handleHashChange();
   });
@@ -423,11 +392,7 @@
     return stamp === null ? 0 : new Date(stamp).getTime();
   }
 
-  // Load the bounded dashboard data. Message reads go through the IndexedDB-backed
-  // API helper so repeat visits use an ingestion-time cursor instead of re-reading
-  // the first page from D1.
   async function loadData() {
-    // Only proceed if user is authenticated
     if (!user) {
       dataLoading = false;
       return;
@@ -453,7 +418,6 @@
       if (!('failed' in messagesResponse)) {
         messages = mergeMessagePage([], messagesResponse.data, { replace: true });
         hasMoreMessagePages = hasMoreMessages(messagesResponse.pagination);
-        // Set high-water mark so polls only flag messages newer than what we loaded
         const newest = messages.reduce((max, m) => {
           const t = messageTime(m);
           return t > max ? t : max;
@@ -465,19 +429,16 @@
         hasMoreMessagePages = false;
         dataError = '短信列表加载失败';
       }
-      // Rows served from the local cache are not live; the inbox says so.
       messagesFromCache =
         !('failed' in messagesResponse) && messagesResponse.sync.is_offline === true;
 
       balanceChecks = nextBalanceChecks;
       await checkDaemonStatus();
 
-      // Mark data as loaded
       dataLoading = false;
     } catch (error) {
       console.warn('Failed to load data:', error);
-      // Keep whatever was on screen. Zeroing the counters here read as "the
-      // whole fleet is offline" when all that happened was a failed request.
+      // Keep what was on screen: zeroed counters would read as an offline fleet.
       dataError = errorMessage(error, '数据加载失败');
       dataLoading = false;
     }
@@ -487,15 +448,12 @@
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
 
-    // No callback step and no token to pick out of the URL: the session arrives as an
-    // HttpOnly cookie, so asking the server who we are is the only check.
-    // See docs/SECURITY-REVIEW.md finding 4.
+    // The session is an HttpOnly cookie, so asking the server is the only check.
     try {
       user = await auth.getUser();
       authError = null;
     } catch (error) {
-      // The identity service failing is not the same as being signed out: the
-      // login button would just bounce. Say the server is unreachable instead.
+      // Not signed out: a login button would just bounce.
       authError = errorMessage(error, '无法连接服务器');
     }
 
@@ -524,7 +482,6 @@
 
   function selectPhone(phone: Pick<Phone, 'iccid'> | null) {
     balanceDetailCheck = null;
-    // Switching cards makes an open message from the previous card irrelevant.
     messageDetail = null;
     messages = [];
     hasMoreMessagePages = false;
@@ -533,7 +490,6 @@
     showPhoneList = false;
   }
 
-  // Load messages for a specific phone (race-condition safe)
   async function loadMessagesForPhone(
     phoneIccid: string | null,
     { replace = true, resetSync = false }: { replace?: boolean; resetSync?: boolean } = {},
@@ -550,13 +506,12 @@
         ...(resetSync ? { reset_sync: 1 } : {}),
       });
 
-      // Discard if user switched phones while we were loading
+      // Stale response: the user switched phones while loading.
       if (requestId !== messageRequestId) return;
 
       if (replace || hasMoreMessages(response.pagination)) {
         hasMoreMessagePages = hasMoreMessages(response.pagination);
       }
-      // Detect genuinely new messages: must have a timestamp newer than anything we've seen
       if (lastKnownTimestamp && messages.length > 0) {
         const cutoff = new Date(lastKnownTimestamp).getTime();
         console.log(
@@ -573,7 +528,6 @@
             '[New Message Detection] Added new message IDs, newMessageIds size:',
             newMessageIds.size,
           );
-          // Auto-clear "新" badges after 10 seconds (design: highlight fades to a normal row)
           setTimeout(() => {
             freshIds.forEach((id) => newMessageIds.delete(id));
             console.log('[New Message Detection] Auto-cleared badges after 10s');
@@ -587,7 +541,6 @@
           messages.length,
         );
       }
-      // Update the high-water mark to the newest timestamp in this batch
       const newest = response.data.reduce(
         (max, m) => {
           const t = messageTime(m);
@@ -606,9 +559,7 @@
     } catch (error) {
       if (requestId !== messageRequestId) return;
       console.error('[App] Failed to load messages:', error);
-      // Do not clear messages on poll failure — keep whatever is already loaded.
-      // Clearing on transient errors (e.g. network blip, wrangler restart) blanks
-      // the UI even though the previous data is still valid.
+      // Keep the loaded messages: a transient error must not blank valid data.
     }
   }
 
@@ -713,9 +664,7 @@
   function handleIccidMappingSuccess(updated: SavedMapping) {
     const { phone_iccid, phone_number, ...rest } = updated;
 
-    // Update the phone in our local list. Spread the full response so
-    // sim_role / primary_iccid / carrier / etc. stay in sync after an edit —
-    // not just phone_number.
+    // Spread the full response so sim_role, primary_iccid and carrier stay in sync.
     const phoneIndex = phoneNumbers.findIndex((p) => p.iccid === phone_iccid);
     const current = phoneNumbers[phoneIndex];
     if (current) {
@@ -735,23 +684,20 @@
     content: string;
   }) {
     try {
-      // Send message via HTTP API
       const response = await api.sendMessage({
         phone_iccid: newMessage.phone_iccid,
         recipient: newMessage.recipient,
         content: newMessage.content,
       });
 
-      // Find the sender's phone number from the selected SIM's ICCID
       const senderPhone = phoneNumbers.find((p) => p.iccid === newMessage.phone_iccid);
       const senderNumber = textOr(senderPhone?.number, newMessage.phone_iccid);
 
-      // Add to local messages immediately with sending status using backend ID
       const sentMessage: ApiMessage = {
-        id: response.messageId, // Use the actual message ID from backend
+        id: response.messageId,
         phone_iccid: newMessage.phone_iccid,
-        phone_number: senderNumber, // CORRECT: Sender's number (发送卡号)
-        recipient: newMessage.recipient, // CORRECT: Recipient's number (接收号码)
+        phone_number: senderNumber,
+        recipient: newMessage.recipient,
         content: newMessage.content,
         timestamp: new Date().toISOString(),
         type: 'sent',
@@ -829,7 +775,6 @@
     await handleRefreshDaemon();
   }
 
-  // Background polling for new messages and device status
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
@@ -850,7 +795,7 @@
           await checkDaemonStatus();
         }
       } catch {
-        // Silently ignore polling errors
+        // The next tick retries.
       } finally {
         pollInFlight = false;
       }
@@ -866,12 +811,8 @@
     stopCallPolling();
   }
 
-  // ── Voice calls ──────────────────────────────────────────────────────────
-  // Polling reads KV only (never D1) and pauses while the tab is hidden, so an
-  // idle dashboard costs at most one KV read every 3 s per visible tab.
-  // A timeout chain rather than an interval, so the delay can follow the state:
-  // quick while a call exists or the panel is open, slow otherwise. See
-  // callPollDelay for why the idle rate matters.
+  // Polling reads KV only (never D1) and pauses while the tab is hidden.
+  // A timeout chain, not an interval, so the delay can follow the call state.
   function startCallPolling() {
     if (callPollInterval || !can('messages.read')) return;
     const tick = async () => {
@@ -885,8 +826,7 @@
     document.addEventListener('visibilitychange', pollWhenVisible);
   }
 
-  // A ring that started while the tab was hidden should show the moment the
-  // operator comes back, not up to ten seconds later.
+  // A ring that started while the tab was hidden must show immediately on return.
   function pollWhenVisible() {
     if (document.visibilityState === 'visible') void refreshCallState();
   }
@@ -905,7 +845,7 @@
     try {
       applyCallState(await fetchCallState());
     } catch {
-      // A failed poll keeps the last known state; the next tick retries.
+      // Keep the last known state; the next tick retries.
     } finally {
       callPollInFlight = false;
     }
@@ -919,7 +859,6 @@
       callSession = null;
       callMuted = false;
     }
-    // A call just disappeared: its row is now final, so refresh the log.
     if (!call && activeCallId) void loadCallHistory();
     activeCallId = call?.id ?? null;
     // Surface a new incoming call once, without reopening a panel the user closed.
@@ -933,7 +872,6 @@
     }
   }
 
-  // Ticks only while a call is up, so the top bar timer costs nothing when idle.
   $effect(() => {
     if (!activeCall || activeCall.state === 'ringing') return;
     const timer = setInterval(() => (callClock = Date.now()), 1000);
@@ -948,8 +886,7 @@
       : null,
   );
 
-  // An inbound call must be noticeable from another tab: it rings and takes over
-  // the tab title until it is answered, rejected, or gone.
+  // Must be noticeable from another tab: ring and take over the tab title.
   $effect(() => {
     const call = activeCall;
     const ringing = call?.direction === 'inbound' && call.state === 'ringing';
@@ -967,7 +904,6 @@
     document.title = `☎ 来电 ${call.number ?? ''}`.trim();
   });
 
-  // Per-viewer convenience only: which misses this browser has already shown.
   function readCallsSeenAt() {
     try {
       return localStorage.getItem('calls.seen_at');
@@ -985,7 +921,7 @@
       const { calls } = await fetchCallHistory({ limit: 30 });
       callHistory = calls;
     } catch {
-      // The log is a convenience; a failed load must not disturb call control.
+      // A failed log load must not disturb call control.
     } finally {
       callHistoryLoading = false;
     }
@@ -1067,7 +1003,6 @@
 </script>
 
 {#if loading}
-  <!-- Loading: three breathing dots, matches the empty-state pattern -->
   <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
     <div class="flex gap-2">
       <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -1076,8 +1011,7 @@
     </div>
   </div>
 {:else if authError}
-  <!-- The identity service is unreachable. Offering a login button here would
-       bounce the operator straight back, so say what is wrong and offer a retry. -->
+  <!-- Identity service unreachable: a login button would bounce straight back, so offer a retry. -->
   <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
     <div class="w-full max-w-[460px] mx-4">
       <div class="bg-white border border-stone-200 rounded-2xl p-10 shadow-raised text-center">
@@ -1099,11 +1033,9 @@
     </div>
   </div>
 {:else if !user}
-  <!-- Login: product mark + tagline + button + daemon status footnote (§9) -->
   <div class="min-h-screen flex items-center justify-center bg-[#F7F5F2]">
     <div class="w-full max-w-[460px] mx-4">
       <div class="bg-white border border-stone-200 rounded-2xl p-10 shadow-raised text-center">
-        <!-- Product mark: favicon + title -->
         <div class="flex items-center justify-center gap-2.5 mb-5">
           <img src="/favicon.svg" alt="" class="w-[52px] h-[52px] rounded-xl" />
         </div>
@@ -1128,11 +1060,8 @@
   </div>
 {:else}
   <div class="min-h-screen lg:h-screen lg:flex lg:flex-col lg:overflow-hidden bg-[#F7F5F2]">
-    <!-- Header — matches design §一 exactly:
-         product mark · title · nav (4 items) · daemon pill · send button · avatar -->
     <header class="bg-white border-b border-stone-200 sticky top-0 z-40 lg:flex-shrink-0">
       <div class="px-4 lg:px-5 flex items-center h-[52px] gap-3 lg:gap-6">
-        <!-- Product mark + title -->
         <div class="flex items-center gap-2.5 shrink-0">
           <img src="/favicon.svg" alt="" class="w-[30px] h-[30px] rounded-[8px]" />
           <span class="text-[17px] leading-none font-semibold text-stone-900 tracking-[-0.01em]"
@@ -1140,7 +1069,6 @@
           >
         </div>
 
-        <!-- Nav — 4 items per design (desktop only) -->
         <nav class="hidden lg:flex items-center gap-0.5 flex-1">
           <button
             onclick={() => {
@@ -1206,7 +1134,6 @@
           {/if}
         </nav>
 
-        <!-- Right side: daemon pill + send button + avatar -->
         <div class="hidden lg:flex items-center gap-3 ml-auto shrink-0">
           {#if can('messages.read')}
             <button
@@ -1253,7 +1180,6 @@
             </button>
           {/if}
 
-          <!-- Daemon status pill -->
           <button
             onclick={openDaemonDetails}
             aria-haspopup="dialog"
@@ -1275,7 +1201,7 @@
             {/if}
           </button>
 
-          <!-- Send button — only on <1600px (≥1600px has resident 3rd column) -->
+          <!-- Only below 1600px; wider layouts have the resident send column. -->
           {#if can('messages.send')}
             <button
               onclick={() => (showSendDrawer = !showSendDrawer)}
@@ -1313,7 +1239,6 @@
             </svg>
           </button>
 
-          <!-- Avatar -->
           {#if user}
             {@const initials = textOr(user.name, textOr(user.email, '?')).charAt(0).toUpperCase()}
             <button
@@ -1380,18 +1305,11 @@
         {/if}
       </div>
     </header>
-    <!-- Content below header fills remaining height on desktop. The mobile padding
-         uses the same safe-area-aware height as the fixed bottom tab bar. -->
-    <!-- Pull-to-refresh wraps the whole content area so every mobile view gets it.
-         Standalone (home-screen) launches hide Safari's own pull-to-refresh, so the
-         gesture has to come from the app. Desktop binds no listeners. -->
+    <!-- Mobile bottom padding matches the fixed tab bar height. Pull-to-refresh binds no listeners on desktop. -->
     <PullToRefresh onRefresh={handlePullRefresh}>
       <div
         class="pb-[var(--mobile-tab-bar-height)] lg:pb-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden"
       >
-        <!-- Daemon offline / error banner (§9 error state).
-         "下面显示的是那时的数据" — reassures users the existing data is still visible.
-         No "查看硬件诊断" button — that page doesn't exist. -->
         {#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
           <div class="bg-red-50 border-b border-red-200 px-4 py-3">
             <div class="flex items-start gap-3">
@@ -1425,7 +1343,6 @@
           </div>
         {/if}
 
-        <!-- Status Alert Banner -->
         {#if phoneNumbers.some((p) => ['sim_error', 'iccid_mismatch'].includes(p.status))}
           <div class="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
             <div class="flex items-center justify-between">
@@ -1476,18 +1393,10 @@
           </div>
         {/if}
 
-        <!-- Mobile nav: bottom tab bar (rendered at the bottom of the outer div).
-         The old horizontal button row crammed 5 items into 390px with ~32px
-         tap targets (below the 44px iOS minimum) and wrapped on narrow screens.
-         Replaced by a 4-tab bottom bar: 验证码 / 设备 / 发送 / 更多.
-         "更多" is a sheet that lists 规则 and 用户管理 per permission. -->
-
         {#if currentView === 'dashboard'}
           <ErrorBoundary componentName="Dashboard">
-            <!-- Health Strip — flat full-width bar, 40px, matches design §一 exactly. -->
             <div class="lg:flex-shrink-0 bg-white border-b border-stone-200 flex-shrink-0">
               <div class="flex items-center gap-6 px-5 h-10 overflow-x-auto">
-                <!-- Online count: 22px bold mono + /95 small + label -->
                 <div class="flex items-baseline gap-1.5 shrink-0">
                   <span
                     class="font-mono text-[22px] font-semibold text-stone-900 leading-none tabular-nums tracking-[-0.02em]"
@@ -1500,9 +1409,6 @@
                   <span class="text-xs text-stone-600">张卡在线</span>
                 </div>
 
-                <!-- Anomaly chips — only rendered when the count is non-zero so the
-                 strip stays uncluttered when everything is healthy. Each links to
-                 the ICCID page pre-filtered to the anomaly group. -->
                 {#if anomalySimError > 0 || anomalyMismatch > 0 || anomalyOffline > 0}
                   <div class="h-4 w-px bg-stone-200 shrink-0"></div>
                   <div class="flex items-center gap-3 shrink-0">
@@ -1550,9 +1456,7 @@
               </div>
             </div>
 
-            <!-- Main Content.
-           Desktop grid: 2xl (≥1600px) = 3 cols (phone · messages · send),
-           lg-2xl (<1600px) = 2 cols (phone · messages), send is a drawer. -->
+            <!-- Desktop grid: 3 columns (phone, messages, send) from 1600px, 2 below with send as a drawer. -->
             <div
               class="px-0 sm:px-4 lg:px-5 lg:pt-4 lg:pb-4 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col"
             >
@@ -1634,7 +1538,6 @@
                   </div>
                 {/if}
 
-                <!-- Desktop Phone List — fixed 288px column -->
                 <div class="hidden lg:flex lg:flex-col h-full min-h-0">
                   <PhoneList
                     {phoneNumbers}
@@ -1647,7 +1550,6 @@
                   />
                 </div>
 
-                <!-- Message View Column — fills remaining space -->
                 <div
                   class="flex flex-col h-full min-h-0 {selectedPhone
                     ? 'lg:grid lg:grid-rows-[minmax(300px,1fr)_auto] lg:gap-3'
@@ -1697,7 +1599,6 @@
                   {/if}
                 </div>
 
-                <!-- Send panel: resident 3rd column at ≥1600px, hidden below -->
                 {#if can('messages.send')}
                   <div class="hidden 2xl:flex 2xl:flex-col h-full min-h-0">
                     <MessageComposer
@@ -1727,7 +1628,6 @@
           </ErrorBoundary>
         {:else if currentView === 'iccid-mappings'}
           <ErrorBoundary componentName="IccidMappings">
-            <!-- ICCID Mappings View -->
             <div class="px-0 py-0 sm:px-4 sm:py-6 lg:px-8 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
               <IccidMappings initialStatusFilter={iccidMappingsFilter} />
             </div>
@@ -1793,10 +1693,8 @@
           </ErrorBoundary>
         {/if}
       </div>
-      <!-- end content wrapper -->
     </PullToRefresh>
 
-    <!-- ── Send drawer (<1600px, desktop only) ──────────────────────────── -->
     {#if showSendDrawer && can('messages.send')}
       <div
         class="hidden lg:block 2xl:hidden fixed inset-0 z-30 bg-stone-900/28"
@@ -1856,9 +1754,7 @@
       />
     {/if}
 
-    <!-- ── iOS bottom tab bar ────────────────────────────────────────────── -->
-    <!-- lg:hidden: desktop uses the top nav. The safe-area padding keeps controls
-         clear of both Safari chrome and the home indicator. -->
+    <!-- The safe-area padding keeps controls clear of Safari chrome and the home indicator. -->
     <nav
       class="mobile-tab-bar lg:hidden fixed bottom-0 left-0 right-0 z-40
       bg-white border-t border-stone-200
@@ -1876,7 +1772,6 @@
     >
       <span class="mobile-tab-selection" data-mobile-tab-selection aria-hidden="true"></span>
 
-      <!-- 验证码 tab -->
       <button
         onclick={() => {
           handleMobileTabClick('dashboard');
@@ -1896,7 +1791,6 @@
         <span class="text-[10px] font-semibold leading-none">验证码</span>
       </button>
 
-      <!-- 设备 tab — links to iccid-mappings; gated to phones.write -->
       {#if canManagePhones}
         <button
           onclick={() => {
@@ -1923,7 +1817,6 @@
         </button>
       {/if}
 
-      <!-- 余额 tab -->
       <button
         onclick={() => {
           handleMobileTabClick('balances');
@@ -1955,7 +1848,6 @@
         <span class="text-[10px] font-semibold leading-none">余额</span>
       </button>
 
-      <!-- 发送 tab — a first-class route, like the other primary tabs. -->
       <button
         onclick={() => {
           handleMobileTabClick('send');
@@ -1983,7 +1875,6 @@
         <span class="text-[10px] font-semibold leading-none">发送</span>
       </button>
 
-      <!-- 更多 tab — reveals a sheet with 规则 + 用户管理 -->
       <button
         onclick={() => {
           handleMobileTabClick('more');
@@ -2000,7 +1891,6 @@
       </button>
     </nav>
 
-    <!-- ── 更多 bottom sheet ────────────────────────────────────────────── -->
     {#if showMoreMenu}
       <div
         class="lg:hidden fixed inset-0 z-[35] bg-stone-900/20"
@@ -2230,7 +2120,6 @@
       </div>
     {/if}
   </div>
-  <!-- end outer -->
 {/if}
 
 {#if showDaemonDetails}
@@ -2276,7 +2165,6 @@
   </div>
 {/if}
 
-<!-- ICCID Mapping Dialog -->
 <IccidMappingDialog
   phone={phoneToMap}
   bind:show={showIccidMappingDialog}
@@ -2287,7 +2175,6 @@
   }}
 />
 
-<!-- Toast notifications, stacked so concurrent toasts stay readable. -->
 {#if toasts.length}
   <div class="fixed top-4 right-4 z-[100] flex flex-col gap-2 items-end">
     {#each toasts as toast (toast.id)}
@@ -2303,9 +2190,7 @@
   </div>
 {/if}
 
-<!-- One confirmation dialog for every destructive action in the app. -->
 <ConfirmHost />
 
-<!-- Service worker update prompt. Outside the main layout because it is a fixed
-     overlay and must not participate in the app's flex chain. -->
+<!-- Fixed overlay: kept outside the main layout so it stays out of the flex chain. -->
 <SwUpdatePrompt bind:this={swUpdatePrompt} />

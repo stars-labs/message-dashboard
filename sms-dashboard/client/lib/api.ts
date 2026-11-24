@@ -13,17 +13,13 @@ import { auth } from './auth.js';
 import { contractClient } from './contract-link.js';
 import { messageCache } from './message-cache.js';
 
-// Runtime cursors keep polling cheap even when IndexedDB is unavailable or the
-// current view deliberately avoids persistent caching (for example spam audit).
+// Keeps polling incremental when IndexedDB is unavailable or the view skips the persistent cache.
 const volatileMessageCursors = new Map<string, string>();
 
-/**
- * The error body, read leniently: a proxy or crash can answer without one. Routes
- * on the contract answer RFC 9457 problems, which carry `title` instead of `error`.
- */
+// Lenient: a proxy or crash can answer without a body. Contract routes answer RFC 9457
+// problems, which carry `title` instead of `error`.
 const ErrorBody = v.partial(v.object({ ...ErrorResponse.entries, title: v.string() }));
 
-/** A request the server refused or answered in a shape this client does not know. */
 export class ApiError extends Error {
   readonly status: number;
 
@@ -34,14 +30,12 @@ export class ApiError extends Error {
   }
 }
 
-/** What to show for a caught failure: its message, or `fallback` when it has none. */
 export function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? textOr(error.message, fallback) : fallback;
 }
 
 type QueryValue = string | number | boolean;
 
-/** Parameters /api/messages accepts, plus the two that steer the client cache. */
 interface GetMessagesParams {
   phone_iccid?: string;
   limit?: number;
@@ -55,7 +49,6 @@ interface GetMessagesParams {
   offset?: number;
 }
 
-/** How a messages result was assembled: the server's window, and what the cache added. */
 interface MessageSync {
   server_time?: string;
   is_incremental?: boolean;
@@ -65,11 +58,7 @@ interface MessageSync {
   is_offline?: boolean;
 }
 
-/**
- * GET /api/messages as the client sees it: the server's page, possibly merged
- * with cached rows, or the cached rows alone while the server is unreachable.
- * `failed` means neither was available.
- */
+// `failed` means neither the server nor the cache had anything.
 type MessagesResult =
   | {
       success: true;
@@ -79,15 +68,11 @@ type MessagesResult =
     }
   | { data: []; pagination: Record<string, never>; failed: true };
 
-/** Sends a request the contract client built; a refusal or failure is an ApiError. */
 async function send(built: Request): Promise<Response> {
-  // Credentials travel as the HttpOnly auth_token cookie, which the browser attaches
-  // itself — there is no token for JavaScript to read or forward.
-  // See docs/SECURITY-REVIEW.md finding 4.
+  // Auth is the HttpOnly auth_token cookie; JavaScript never sees a token.
   return checked(await fetch(built, { credentials: 'same-origin' }));
 }
 
-/** The response when it succeeded; otherwise the ApiError it stands for. */
 async function checked(response: Response): Promise<Response> {
   if (response.status === 401) {
     auth.logout();
@@ -97,9 +82,7 @@ async function checked(response: Response): Promise<Response> {
   if (!response.ok) {
     const body = parseJson(await response.text(), ErrorBody);
     const errorBody = body.ok ? body.value : { error: 'Unknown error' };
-    // Include `detail` when the server sends one. Without it an upstream failure
-    // surfaced as a bare "Auth0 Management API request failed" with the actual cause
-    // (missing scope, bad credentials, absent role) only visible in the Worker logs.
+    // `detail` carries the upstream cause (missing scope, bad credentials) that is otherwise only in Worker logs.
     const base = textOr(
       errorBody.error ?? errorBody.title,
       `Request failed with status ${String(response.status)}`,
@@ -111,13 +94,8 @@ async function checked(response: Response): Promise<Response> {
   return response;
 }
 
-/**
- * The routes served through the contract, for a signed-in dashboard. Failures
- * arrive as ApiError, and a 401 signs the user out.
- */
 export const contractApi = contractClient(() => auth.baseUrl, send);
 
-/** Query parameters as the URL carries them: text, and absent when undefined. */
 function queryText(
   params: Readonly<Record<string, QueryValue | undefined>>,
 ): Record<string, string> {
@@ -128,7 +106,6 @@ function queryText(
   );
 }
 
-/** A limit of 0 or none means the default. */
 function positiveOr(value: number | undefined, fallback: number): number {
   return value === undefined || value === 0 ? fallback : value;
 }
@@ -151,28 +128,21 @@ function offlinePage(messages: ApiMessage[], limit: number): MessagesResult {
 }
 
 export const api = {
-  // Cache management
   cache: {
     async clear() {
       await messageCache.clearCache();
     },
   },
 
-  // No getAuthToken(): the session is an HttpOnly cookie that JavaScript cannot read,
-  // and callers do not need it — fetch sends it automatically.
-  // See docs/SECURITY-REVIEW.md finding 4.
-
   async getPhones(): Promise<Phone[]> {
     try {
       return (await contractApi.messages.phones()).data;
     } catch (error) {
       console.warn('Failed to get phones:', error);
-      // Return empty array instead of throwing
       return [];
     }
   },
 
-  // Messages - with client-side caching for reduced D1 reads
   async getMessages(params: GetMessagesParams = {}): Promise<MessagesResult> {
     const phoneIccid = textOr(params.phone_iccid, null);
     const includeFiltered = isTrue(params.include_filtered);
@@ -185,7 +155,6 @@ export const api = {
     const limit = positiveOr(params.limit, 500);
 
     try {
-      // Step 1: Get cached messages first for immediate display
       let cachedMessages: ApiMessage[] = [];
       let lastSyncTime: string | null = null;
 
@@ -203,11 +172,9 @@ export const api = {
         lastSyncTime = null;
       }
 
-      // Step 2: Fetch new messages from API (incremental if we have cache)
       const { force_refresh: _forceRefresh, reset_sync: _resetSync, ...apiParams } = params;
       if (lastSyncTime && !forceRefresh) {
         apiParams.since = lastSyncTime;
-        // Reduce limit for incremental sync since we're only getting new messages
         apiParams.limit = Math.min(positiveOr(params.limit, 100), 100);
       }
 
@@ -246,19 +213,16 @@ export const api = {
       const newMessages = response.data;
       const serverTime = response.sync.server_time;
 
-      // Step 3: Cache new messages
       if (persistentCacheEnabled && newMessages.length > 0) {
         try {
           await messageCache.cacheMessages(newMessages);
-          // Prune old messages to keep IndexedDB bounded
           messageCache.pruneCache(200).catch(() => undefined);
         } catch (cacheErr) {
           console.warn('[API] Cache write failed:', cacheErr);
         }
       }
 
-      // Step 4: Advance only after every incremental page completed. Forced
-      // history pagination must not move the live ingestion cursor.
+      // Forced history pagination must not move the live ingestion cursor.
       if (!forceRefresh) {
         volatileMessageCursors.set(cacheKey, serverTime);
         if (persistentCacheEnabled) {
@@ -270,12 +234,8 @@ export const api = {
         }
       }
 
-      // Step 5: Merge new messages with cached.
-      //
-      // A server row always wins over the cached copy with the same id: an
-      // incremental response now also carries outbound rows whose status
-      // changed (已发送 / 发送失败), and dropping them as "duplicates" was why a
-      // sent SMS stayed at 等待发送 for the life of the cache.
+      // A server row wins over the cached copy with the same id: incremental
+      // responses also carry outbound rows whose status changed.
       if (response.sync.is_incremental && cachedMessages.length > 0) {
         const existingIds = new Set(cachedMessages.map((m) => m.id));
         const uniqueNewMessages = newMessages.filter((m) => !existingIds.has(m.id));
@@ -284,7 +244,6 @@ export const api = {
           ...uniqueNewMessages,
           ...cachedMessages.map((m) => freshById.get(m.id) ?? m),
         ];
-        // Sort by timestamp descending and limit
         merged.sort((a, b) => timeOf(b) - timeOf(a));
 
         return {
@@ -292,8 +251,7 @@ export const api = {
           data: merged.slice(0, limit),
           pagination: {
             ...response.pagination,
-            // An incremental response only describes newly ingested rows. A
-            // full local page may still have older server pages behind it.
+            // An incremental response covers only new rows; a full local page may have older server pages behind it.
             has_more: response.pagination.has_more || cachedMessages.length >= limit,
           },
           sync: {
@@ -304,7 +262,6 @@ export const api = {
         };
       }
 
-      // Full refresh - return API data directly
       return {
         success: true,
         data: response.data,
@@ -316,7 +273,6 @@ export const api = {
     } catch (error) {
       console.warn('Failed to get messages:', error);
 
-      // Try to return cached data on error
       try {
         const cachedMessages = await messageCache.getCachedMessages(phoneIccid, limit);
         if (cachedMessages.length > 0) return offlinePage(cachedMessages, limit);
@@ -324,8 +280,7 @@ export const api = {
         console.warn('[API] Cache fallback failed:', cacheErr);
       }
 
-      // Nothing from the API and nothing cached: say so. Returning a bare empty
-      // page here made an outage render as a healthy, quiet inbox.
+      // An empty page would make an outage render as a healthy, quiet inbox.
       return { data: [], pagination: {}, failed: true };
     }
   },
@@ -350,13 +305,11 @@ export const api = {
     }
   },
 
-  // ICCID Mappings
   iccidMappings: {
     async list(params: Readonly<Record<string, QueryValue | undefined>> = {}) {
       return await contractApi.iccidMappings.list({ query: queryText(params) });
     },
 
-    /** The saved SIM; the status says only whether it was new. */
     async create(data: v.InferInput<typeof CreateIccidMappingBody>) {
       return (await contractApi.iccidMappings.create(data)).body;
     },
@@ -370,7 +323,3 @@ export const api = {
     },
   },
 };
-
-// Nothing to pick up from the URL any more: the login callback delivers the session as
-// an HttpOnly cookie rather than a `?token=` parameter.
-// See docs/SECURITY-REVIEW.md finding 4.

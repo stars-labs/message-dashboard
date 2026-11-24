@@ -1,16 +1,8 @@
 <script lang="ts">
   import { formatFullTime } from './time.js';
-  // Full SMS body, unabridged.
-  //
-  // The list rows clamp the body to two lines (a design requirement — see
-  // docs/design_handoff_sms_dashboard/README.md), but a third of real messages
-  // exceed 70 characters and the longest in production is 776, so the clamped row
-  // alone left no way to read a long SMS at all. This drawer is that way.
-  //
-  // Layout mirrors BalanceQueryDetail.svelte deliberately: same fixed positioning,
-  // same 480px desktop panel, same full-screen-above-the-tab-bar treatment on
-  // mobile. Two detail surfaces opening from the same list should not feel like
-  // two different apps.
+  // List rows clamp the body to two lines, so this drawer is the only way to read a long SMS.
+  // Layout mirrors BalanceQueryDetail.svelte (480px desktop panel, full screen above the
+  // tab bar on mobile) so both detail surfaces feel alike.
   import { onMount } from 'svelte';
   import { fly } from 'svelte/transition';
   import MessageHighlight from './MessageHighlight.svelte';
@@ -33,7 +25,6 @@
     message: ApiMessage | null;
     selectedPhone?: SelectedPhone | null;
     keywords?: readonly HighlightKeyword[];
-    /** Filter rules, so a hidden message can name the rule that hid it. */
     filterRules?: readonly Pick<FilterRule, 'id' | 'pattern' | 'note'>[];
     onClose?: (() => void) | null;
   }
@@ -73,15 +64,12 @@
       : textOr(selectedPhone?.flag, ''),
   );
 
-  // Which rule hid this message, by name where one is available.
   let ruleLabel = $derived.by(() => {
     if (!isFiltered) return null;
     const rule = filterRules.find((r) => r.id === message?.filter_rule_id);
     return rule ? textOr(rule.note, rule.pattern) : null;
   });
 
-  // Copy feedback, shared by the code chip and the copy-whole-body button.
-  // Mirrors SimpleMessageView's 2-second pattern so the interaction feels identical.
   let copied = $state<'code' | 'body' | null>(null);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -126,7 +114,7 @@
         flex flex-col will-change-transform"
       style="box-shadow: -16px 0 40px rgba(28,25,23,.16);"
     >
-      <!-- Copy confirmation. Outside the scroll area so it is always visible. -->
+      <!-- Outside the scroll area so it is always visible. -->
       <div
         class="absolute top-[70px] left-1/2 -translate-x-1/2 z-10 pointer-events-none"
         aria-live="polite"
@@ -205,7 +193,6 @@
       </header>
 
       <div class="flex-1 min-h-0 overflow-y-auto">
-        <!-- 接收卡 + 时间 -->
         <div class="grid grid-cols-2 border-b border-stone-100 bg-stone-50/70">
           <div class="px-4 py-3 border-r border-stone-100 min-w-0">
             <p class="text-[11px] text-stone-400">接收卡</p>
@@ -223,7 +210,6 @@
           </div>
         </div>
 
-        <!-- 验证码 -->
         {#if hasCode}
           <section class="px-4 lg:px-5 py-5 border-b border-stone-100">
             <h3 class="text-xs font-semibold text-stone-500">验证码</h3>
@@ -242,7 +228,7 @@
           </section>
         {/if}
 
-        <!-- 正文：完整，不截断。长短信靠父级滚动。 -->
+        <!-- Full body, not truncated; long messages scroll in the parent. -->
         <section class="px-4 lg:px-5 py-5 border-b border-stone-100">
           <div class="flex items-center justify-between gap-3">
             <h3 class="text-xs font-semibold text-stone-500">短信内容</h3>
@@ -272,7 +258,6 @@
           </p>
         </section>
 
-        <!-- 发送失败原因 -->
         {#if isSent && message.error_message}
           <section class="px-4 lg:px-5 py-5 border-b border-stone-100">
             <h3 class="text-xs font-semibold text-stone-500">失败原因</h3>
@@ -280,7 +265,6 @@
           </section>
         {/if}
 
-        <!-- 审计信息 -->
         <section class="px-4 lg:px-5 py-5">
           <h3 class="text-xs font-semibold text-stone-500">审计信息</h3>
           <dl class="mt-3 grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">

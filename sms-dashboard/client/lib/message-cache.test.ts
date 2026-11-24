@@ -32,7 +32,6 @@ function message(id: string, phoneIccid: string | null, timestamp: string): ApiM
   };
 }
 
-/** Writes a row straight into the store, bypassing the typed API, as an old client would have. */
 async function storeRaw(row: object): Promise<void> {
   await messageCache.getCachedMessages();
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -75,7 +74,7 @@ describe('message cache', () => {
   });
 
   test('returns a phone’s newest messages when it has more than the limit', async () => {
-    // Ids are random in production, so their order says nothing about age.
+    // Ids are random in production, so id order says nothing about age.
     await messageCache.cacheMessages([
       message('z-oldest', 'sim-a', '2026-09-01T00:00:00.000Z'),
       message('a-newest', 'sim-a', '2026-09-03T00:00:00.000Z'),

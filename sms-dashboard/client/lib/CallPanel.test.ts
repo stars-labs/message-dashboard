@@ -78,7 +78,7 @@ function loggedCall(overrides: Partial<CallLogEntry> = {}): CallLogEntry {
   };
 }
 
-// Field names match /api/phones (device_view): `number`, not `phone_number`.
+// Field names follow /api/phones (device_view): `number`, not `phone_number`.
 const phones: DialablePhone[] = [
   phone(),
   phone({

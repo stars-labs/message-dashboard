@@ -1,5 +1,3 @@
-// Smoke coverage for Toast: rendered output and user-visible behaviour, never
-// which reactivity primitive is used internally.
 import { describe, expect, test } from 'bun:test';
 import { render, cleanup } from '@testing-library/svelte';
 import Toast from './Toast.svelte';
@@ -30,8 +28,7 @@ describe('Toast', () => {
     cleanup();
   });
 
-  // The close button is the one interactive element. `duration: 0` disables the
-  // auto-dismiss timer so this asserts the click path alone.
+  // `duration: 0` disables auto-dismiss so this asserts the click path alone.
   test('invokes onClose after the dismiss button is clicked', async () => {
     let closed = false;
     const { getByRole } = render(Toast, {
@@ -45,7 +42,7 @@ describe('Toast', () => {
     });
 
     getByRole('button').click();
-    // dismiss() defers onClose by 200ms to let the exit animation run.
+    // dismiss() defers onClose by 200ms for the exit animation.
     await new Promise((resolve) => setTimeout(resolve, 260));
 
     expect(closed).toBe(true);

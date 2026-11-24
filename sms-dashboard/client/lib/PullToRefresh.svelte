@@ -1,17 +1,6 @@
 <script lang="ts">
-  /**
-   * Mobile pull-to-refresh wrapper.
-   *
-   * Launching from the iOS home screen enters standalone display mode, which hides
-   * the browser chrome. Safari's pull-to-refresh lives in that chrome, so it
-   * disappears and no API can restore it — the gesture has to be re-implemented
-   * here. The W3C handing `overscroll-behavior` to authors reflects the same
-   * division of responsibility.
-   *
-   * Regular Safari already owns pull-to-refresh. Registering a second gesture there
-   * makes WebKit arbitrate touches between the page and browser chrome, so this
-   * implementation is restricted to installed/standalone web apps.
-   */
+  // Standalone iOS apps lose Safari's pull-to-refresh. In regular Safari a second gesture
+  // would make WebKit arbitrate touches with the browser chrome, so this runs only when installed.
   import { onMount, type Snippet } from 'svelte';
   import {
     THRESHOLD,
@@ -39,30 +28,21 @@
   const nonPassive: AddEventListenerOptions = { passive: false };
   let moveListening = false;
 
-  // Matches the app's `lg:` breakpoint: desktop has real browser chrome and its own
-  // refresh affordances, so no listeners are attached there at all.
+  // Matches the app's `lg:` breakpoint; no listeners are attached on desktop.
   const isDesktop = () =>
     typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
 
   function isStandalone() {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
 
-    // On iOS this property is the source of truth. Do not OR it with the media
-    // query: WebKit has reported incorrect display-mode matches in Safari tabs.
+    // On iOS this property is authoritative; the media query can match wrongly in Safari tabs.
     if ('standalone' in navigator) return navigator.standalone === true;
 
     return window.matchMedia('(display-mode: standalone)').matches;
   }
 
-  /**
-   * Find whichever element actually scrolls under the touch.
-   *
-   * The layout makes this genuinely ambiguous: SimpleMessageView has an unprefixed
-   * `overflow-y-auto` that applies on mobile, but its root is `h-full` inside an
-   * ancestor chain with no unprefixed height constraint, so the document may be the
-   * real scroller instead. Walking up from the touch target handles either without
-   * guessing, and falls back to the document scroll position.
-   */
+  // Either an inner `overflow-y-auto` element or the document may be the real scroller on
+  // mobile, so walk up from the touch target and fall back to the document.
   function scrollTopAt(target: EventTarget | null): number {
     let node = target instanceof Element ? target : null;
     while (node && node !== document.body && node !== document.documentElement) {
@@ -89,9 +69,7 @@
     if (touch === undefined) return;
     const next = onMove(gesture, touch.clientY, touch.clientX);
 
-    // Only take over the gesture once it is genuinely ours, so ordinary scrolling
-    // and sideways swipes keep their native behaviour. cancelable is false once the
-    // browser has already committed the touch to scrolling.
+    // cancelable is false once the browser has committed the touch to scrolling.
     if (next > 0 && event.cancelable) event.preventDefault();
 
     pull = next;
@@ -146,8 +124,8 @@
     const host = container;
     if (isDesktop() || !isStandalone() || !host) return;
 
-    // Keep the large content region out of WebKit's permanent non-passive touch
-    // region. The move listener exists only for a gesture that started at the top.
+    // The non-passive move listener is added only for a gesture that started at the top,
+    // keeping the content out of WebKit's permanent non-passive touch region.
     host.addEventListener('touchstart', handleTouchStart, passive);
     host.addEventListener('touchend', onTouchEnd, passive);
     host.addEventListener('touchcancel', handleTouchCancel, passive);
@@ -162,15 +140,12 @@
 
   const label = $derived(refreshing ? '正在刷新' : pull >= THRESHOLD ? '松手刷新' : '下拉刷新');
 
-  // Arrow rotates through 180° as the pull approaches the trigger point.
   const rotation = $derived(Math.min(pull / THRESHOLD, 1) * 180);
 </script>
 
-<!-- The mobile listener host must generate a box. iOS WebKit uses rendered hit-test
-     regions to decide whether a touch sequence has a non-passive move listener; a
-     boxless `display: contents` host lets WebKit commit the gesture to scrolling
-     before preventDefault() can claim it. Desktop has no listeners, so `lg:contents`
-     preserves the existing flex layout there. -->
+<!-- The mobile host must generate a box: iOS WebKit finds non-passive move listeners through
+     rendered hit-test regions, so a `display: contents` host would let it commit the gesture
+     to scrolling before preventDefault(). Desktop has no listeners, so `lg:contents` is safe. -->
 <div bind:this={container} class="relative block lg:contents" data-pull-to-refresh-root>
   <div
     class="lg:hidden pointer-events-none fixed inset-x-0 top-[env(safe-area-inset-top)] h-16 z-20
@@ -209,9 +184,7 @@
     <span class="text-xs font-medium">{label}</span>
   </div>
 
-  <!-- Live region so the refresh is announced rather than being a purely visual
-       change. Kept out of the transformed indicator to avoid it being read on every
-       pixel of movement. -->
+  <!-- Live region outside the transformed indicator, so it is not announced on every pixel of movement. -->
   <div class="sr-only" role="status" aria-live="polite">
     {refreshing ? '正在刷新' : ''}
   </div>

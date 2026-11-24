@@ -1,16 +1,5 @@
-/**
- * Service worker kill switch.
- *
- * A service worker that ships broken is uniquely hard to recover from: reverting the
- * code does not uninstall it from devices that already have it, and the user cannot
- * clear it from iOS Safari's UI in any discoverable way. This gives support a
- * concrete instruction to hand out ("open 更多 and tap 重置离线缓存") instead of
- * "delete the app and re-add it".
- *
- * Injected environment rather than reaching for globals, so the ordering and the
- * failure handling are testable without a browser.
- */
-/** The globals this uses, injectable so the ordering is testable. */
+// Kill switch: reverting code does not uninstall a broken worker from devices that have it,
+// and iOS Safari offers no discoverable way to clear it.
 interface SwResetEnv {
   navigator?: {
     serviceWorker?: { getRegistrations(): Promise<{ unregister(): Promise<boolean> }[]> };
@@ -44,8 +33,7 @@ export async function resetServiceWorker(
         unregistered += 1;
       }
     } catch {
-      // Keep going: clearing the caches still helps, and stopping here would leave
-      // the worse of the two states (worker gone in spirit, stale cache intact).
+      // Keep going: clearing the caches still helps.
       ok = false;
     }
   }
@@ -65,10 +53,7 @@ export async function resetServiceWorker(
   return { ok, unregistered, cachesDeleted };
 }
 
-/**
- * Clear both persistent message data (IndexedDB) and offline application caches.
- * The operations are independent so one failure never prevents the other cleanup.
- */
+// The two cleanups are independent: one failing must not skip the other.
 export async function resetDashboardCache({
   clearMessageCache,
   resetOfflineCache,

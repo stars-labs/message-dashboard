@@ -1,6 +1,5 @@
 export const MESSAGE_PAGE_SIZE = 100;
 
-/** The fields paging reads off a message. */
 interface PagedMessage {
   id: string;
   timestamp?: string | null;

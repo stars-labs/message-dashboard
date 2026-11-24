@@ -83,8 +83,7 @@ describe('MessageComposer mobile route', () => {
     await fireEvent.click(button);
 
     await waitFor(() => {
-      // The copy must not invite a blind retry: a send that failed after the
-      // Worker accepted it may already be on its way to a real handset.
+      // The copy must not invite a blind retry: the Worker may already have accepted the send.
       expect(button.textContent).toContain('提交失败，请先查看发送记录');
     });
     expect(content.value).toBe('retry this message');

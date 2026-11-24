@@ -222,8 +222,7 @@ describe('outbound status updates', () => {
     const result = await api.getMessages({ phone_iccid: 'iccid-1', limit: 100 });
 
     const row = result.data.find((m) => m.id === 'outbound-1');
-    // 等待发送 → 已发送 must survive the merge; dropping it as a duplicate was
-    // why a sent SMS never changed state.
+    // 等待发送 -> 已发送 must survive the merge, not be dropped as a duplicate.
     expect(row?.status).toBe('sent');
     expect(result.data).toHaveLength(1);
   });

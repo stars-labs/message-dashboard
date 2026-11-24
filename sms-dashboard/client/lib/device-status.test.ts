@@ -1,4 +1,3 @@
-// Run with: bun test client/lib/device-status.test.js
 import { describe, expect, test } from 'bun:test';
 import {
   getEffectiveDeviceStatus,
@@ -25,9 +24,9 @@ describe('getStatusMeta', () => {
   });
 
   test('unknown string falls back gracefully (does not throw)', () => {
-    const m = getStatusMeta('searching'); // old PhoneList-invented value
+    const m = getStatusMeta('searching');
     expect(m).toBeTruthy();
-    expect(m.label).toBe('离线'); // fallback
+    expect(m.label).toBe('离线');
   });
 
   test('null and undefined fall back gracefully', () => {

@@ -15,7 +15,6 @@
   let visible = $state(false);
 
   onMount(() => {
-    // Trigger enter animation
     requestAnimationFrame(() => {
       visible = true;
     });
@@ -48,8 +47,7 @@
   } as const satisfies Record<ToastType, string>;
 </script>
 
-<!-- Positioned by the parent's stack, not by itself: two self-positioned toasts
-     landed on the same pixel and hid each other. -->
+<!-- Positioned by the parent's stack: self-positioned toasts would overlap. -->
 <div
   role="alert"
   aria-live="assertive"

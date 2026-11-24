@@ -16,7 +16,6 @@ afterEach(() => {
   globalThis.confirm = originalConfirm;
 });
 
-/** Answers the component's requests; `handler` sees each as a Request. */
 function stubFetch(handler: (request: Request) => Response): void {
   auth.baseUrl = 'https://example.com';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(

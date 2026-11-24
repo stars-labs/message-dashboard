@@ -3,7 +3,6 @@ interface ModemPosition {
   isLastKnown: boolean;
 }
 
-/** The row fields this reads: the live USB path and the last one seen. */
 interface ModemPathMapping {
   usb_path?: string | null;
   last_usb_path?: string | null;

@@ -56,8 +56,7 @@
     onClose?: (() => void) | null;
   }
 
-  // Media (microphone, RTCPeerConnection) is owned by the parent and injected
-  // through these callbacks, so this panel stays testable without a browser.
+  // Media (microphone, RTCPeerConnection) is owned by the parent and reached through callbacks.
   let {
     call = null,
     phones = [],
@@ -81,7 +80,6 @@
   let localError = $state<string | null>(null);
   let now = $state(Date.now());
 
-  // The timer only ticks while a call is up, so an idle dashboard does no work.
   $effect(() => {
     if (!call || call.state === 'ringing') return;
     const timer = setInterval(() => {
@@ -113,7 +111,6 @@
     localError = null;
   }
 
-  /** Tapping a log row loads it back into the dialer, ready to call again. */
   function reuse(entry: LoggedCall) {
     const matched = callable.find((phone) => phone.iccid === entry.iccid);
     if (matched) {
@@ -351,7 +348,6 @@
         {/if}
       </div>
 
-      <!-- Call log. Tapping a row loads it back into the dialer. -->
       <div class="border-t border-stone-100">
         <p class="px-4 pt-3 pb-1 text-[11px] text-stone-400">通话记录</p>
         {#if historyLoading && history.length === 0}
@@ -370,7 +366,6 @@
                   }}
                   class="w-full px-4 py-2.5 flex items-center gap-2.5 text-left hover:bg-stone-50"
                 >
-                  <!-- Inbound arrows point in, outbound point out; missed is red. -->
                   <svg
                     class="w-3.5 h-3.5 shrink-0 {missed
                       ? 'text-rose-500'

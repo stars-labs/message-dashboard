@@ -1,4 +1,3 @@
-/** Convert API/D1 timestamps to epoch milliseconds. */
 export function toEpochMilliseconds(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string' || !value.trim()) return null;
@@ -26,13 +25,7 @@ export function formatTimeAgo(value: unknown, now: number = Date.now()): string 
   return `${Math.floor(diff / 86400000)}天前`;
 }
 
-/**
- * Absolute event time, Beijing. `HH:MM` for today, `MM/DD HH:MM` before that.
- *
- * One format for every event in the app. Seconds were noise — nobody triages an
- * OTP to the second — and they cost column width on a phone; the year was noise
- * too, and it appeared in one balance tab but not its neighbour.
- */
+// Beijing time: `HH:MM` for today, `MM/DD HH:MM` before that. One format for every event.
 export function formatClock(value: unknown, now: number = Date.now()): string {
   const timestamp = toEpochMilliseconds(value);
   if (timestamp === null) return '';
@@ -57,7 +50,6 @@ export function formatClock(value: unknown, now: number = Date.now()): string {
       });
 }
 
-/** The same instant with its year, for detail views where the date matters. */
 export function formatFullTime(value: unknown): string {
   const timestamp = toEpochMilliseconds(value);
   if (timestamp === null) return '—';

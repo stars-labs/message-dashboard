@@ -1,16 +1,6 @@
 <script lang="ts">
-  // Renders SMS content with keyword matches highlighted.
-  //
-  // This component displays fully attacker-controlled text: anyone who knows one of the
-  // SIM phone numbers can send an SMS containing arbitrary content. It previously built
-  // an HTML string and rendered it with `{@html}`, escaping the message text and tag but
-  // NOT the keyword colour, which let a stored colour like `red" onmouseover="..."` break
-  // out of the style attribute and run script in an operator's browser.
-  // See docs/SECURITY-REVIEW.md finding 2.
-  //
-  // There is no `{@html}` here any more. Matches are emitted as real elements and every
-  // interpolation — text, tag and colour — goes through Svelte's escaping. The slicing
-  // logic lives in message-highlight.ts so it can be unit tested.
+  // The SMS text is attacker-controlled. Never use `{@html}` here: every interpolation
+  // (text, tag, colour) must go through Svelte's escaping.
   import { getSegments, type HighlightKeyword } from './message-highlight.js';
 
   interface Props {
@@ -23,9 +13,8 @@
   let segments = $derived(getSegments(content, keywords));
 </script>
 
-<!-- Deliberately one line with no whitespace between block tags: segments are adjacent
-     runs of the original SMS text, so any newline or indentation Svelte kept as a text
-     node would insert spaces into the rendered message. -->
+<!-- No whitespace between block tags: segments are adjacent runs of the SMS text, so any
+     newline or indentation kept as a text node would add spaces to the message. -->
 <span class="break-words"
   >{#if segments}{#each segments as segment, index (index)}{#if segment.match}<mark
           class="kw-hl"

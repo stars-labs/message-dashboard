@@ -1,5 +1,3 @@
-// The active keyword list, loaded once and shared by the views that highlight
-// keyword matches.
 import { writable, get } from 'svelte/store';
 import type { Keyword } from '../../shared/api/keywords.js';
 import { contractApi } from './api.js';
@@ -10,7 +8,7 @@ const _loading = writable(false);
 export const keywords = { subscribe: _keywords.subscribe };
 
 async function loadKeywords(): Promise<Keyword[]> {
-  if (get(_loading)) return []; // Prevent concurrent loads
+  if (get(_loading)) return [];
 
   _loading.set(true);
 

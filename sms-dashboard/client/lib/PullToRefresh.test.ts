@@ -50,10 +50,7 @@ function dispatchTouch(target: HTMLElement, type: string, { x = 0, y = 0 } = {})
   return event;
 }
 
-/**
- * The touch listeners added to elements while `run` renders. Only the gesture
- * root adds any: PullToRefresh has no touch attributes for Svelte to delegate.
- */
+// Only the gesture root adds listeners: PullToRefresh has no touch attributes for Svelte to delegate.
 async function touchListenersAdded(run: () => Promise<void>): Promise<string[]> {
   const spy = spyOn(Element.prototype, 'addEventListener');
   try {

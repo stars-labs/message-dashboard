@@ -49,9 +49,6 @@
   let saving = $state(false);
   let error = $state<string | null>(null);
 
-  // Repopulate the form fields whenever a new phone is passed in. The legacy
-  // version used a reactive `$: if (phone)` block; $effect tracks the same
-  // dependency and runs after every change to `phone`.
   $effect(() => {
     if (!phone) return;
     phoneNumber = phone.number;
@@ -100,12 +97,10 @@
         service_type_source: serviceType === 'unknown' ? null : serviceTypeSource,
         sim_role: simRole,
         primary_iccid: simRole === 'secondary' ? primaryIccid : null,
-        // NO status field - computed dynamically by API
+        // No status field: the API computes it.
       });
 
-      // Spread the full updated phone so the caller's cache stays in sync —
-      // passing only phone_number left sim_role/primary_iccid stale, so the
-      // phone detail showed "standalone" after editing the role.
+      // Spread the full phone so the caller's copy keeps sim_role and primary_iccid in sync.
       onsuccess?.({ phone_iccid: phone.iccid, ...response.data });
       close();
     } catch (err) {
@@ -310,7 +305,6 @@
             class="w-full px-3 py-2 cyber-input resize-none"></textarea>
         </div>
 
-        <!-- Status display (read-only, computed from hardware) -->
         <div>
           <span class="block text-sm font-medium text-stone-500 mb-1">状态</span>
           <div class="text-sm px-3 py-2 bg-stone-50 rounded-lg border border-stone-200">

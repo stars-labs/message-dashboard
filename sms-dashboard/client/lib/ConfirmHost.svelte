@@ -1,6 +1,4 @@
 <script lang="ts">
-  // Renders whatever confirmAction() is currently asking. Mounted once, at the
-  // app root, so every destructive action shares one dialog.
   import { confirmState, registerConfirmHost } from './confirm.svelte.js';
   import { overlay } from './overlay.js';
 

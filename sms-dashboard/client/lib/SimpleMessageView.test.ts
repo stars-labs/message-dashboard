@@ -261,9 +261,7 @@ describe('SimpleMessageView row activation', () => {
     expect(opened[0]).toBe(received);
   });
 
-  // Regression guard: the row opens the drawer, so the copy chip must stop the
-  // click from bubbling. Without stopPropagation, tapping a code both copies AND
-  // opens the drawer, which makes the primary interaction of the app feel broken.
+  // The row opens the drawer, so the copy chip must stop the click from bubbling.
   test('copying a verification code does NOT open the drawer', async () => {
     const opened: ApiMessage[] = [];
     const view = renderList((m) => {

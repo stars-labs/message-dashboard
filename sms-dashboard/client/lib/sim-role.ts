@@ -1,6 +1,4 @@
-// SIM primary/secondary role. China SIMs may be sold as a primary card plus
-// one or more supplementary cards; only the primary is balance-queried.
-// See migrations/059_add_sim_primary_secondary.sql.
+// Only the primary card is balance-queried; secondaries follow it.
 
 type SimRole = 'standalone' | 'primary' | 'secondary';
 

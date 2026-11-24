@@ -240,7 +240,6 @@ describe('balance overview', () => {
     const [row] = buildBalanceRows([sim('cn1', 'CN')], checks, now);
 
     expect(row?.health).toBe('never_observed');
-    // latestCheck should be null — all checks were cancelled
     expect(row?.latestCheck).toBeNull();
   });
 
@@ -254,7 +253,6 @@ describe('balance overview', () => {
     ];
     const [row] = buildBalanceRows([sim('cn1', 'CN')], checks, now);
 
-    // The non-cancelled failed check should still drive the query-failed summary.
     expect(row?.health).toBe('query_failed');
     expect(row?.latestCheck?.status).toBe('failed');
   });

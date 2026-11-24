@@ -1,19 +1,13 @@
 <script lang="ts">
   interface Props {
-    /** 0-100 signal strength. */
+    // signal is 0-100; rssi and rsrp are dBm; rsrq and snr are dB.
     signal?: number | null;
     status?: string;
-    /** dBm. */
     rssi?: number | null;
-    /** dB. */
     rsrq?: number | null;
-    /** dBm. */
     rsrp?: number | null;
-    /** dB. */
     snr?: number | null;
-    /** Compact mode for list view. */
     compact?: boolean;
-    /** Whether this is the initial page load. */
     isInitialLoad?: boolean;
   }
 
@@ -28,7 +22,6 @@
     isInitialLoad = false,
   }: Props = $props();
 
-  // Calculate signal bars (0-4) based on signal percentage
   function getSignalBars(value: number | null) {
     const validSignal = value ?? 0;
     if (validSignal >= 75) return 4;
@@ -38,7 +31,6 @@
     return 0;
   }
 
-  // Get signal quality label
   function getSignalQuality(value: number | null) {
     const validSignal = value ?? 0;
     if (validSignal >= 75) return '优秀';
@@ -73,7 +65,6 @@
 </script>
 
 {#if compact}
-  <!-- Compact view for list -->
   <div class="flex items-center gap-1.5">
     {#if status === 'online' || status === 'active' || status === 'registered' || status === 'connected'}
       <div class="flex gap-0.5 items-end">
@@ -109,7 +100,6 @@
       </div>
     {:else if status === 'unknown'}
       {#if isInitialLoad}
-        <!-- Show loading animation during initial load -->
         <div class="flex gap-0.5 items-end">
           {#each [1, 2, 3, 4] as bar (bar)}
             <div
@@ -120,7 +110,6 @@
         </div>
         <span class="text-xs text-stone-400">加载中…</span>
       {:else}
-        <!-- Show data expired only after initial load -->
         <div class="flex gap-0.5 items-end">
           {#each [1, 2, 3, 4] as bar (bar)}
             <div
@@ -148,7 +137,6 @@
     {/if}
   </div>
 {:else}
-  <!-- Detailed view -->
   <div class="bg-white rounded-lg p-3 space-y-2 border border-stone-200">
     <div class="flex items-center justify-between">
       <span class="text-sm font-medium text-stone-600">信号强度</span>
@@ -247,7 +235,6 @@
 {/if}
 
 <style>
-  /* Add smooth transitions for signal bars */
   div {
     transition: background-color 0.3s ease;
   }

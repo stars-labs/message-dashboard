@@ -10,8 +10,7 @@ const kw = (over = {}) => ({
   ...over,
 });
 
-// Concatenating segments must always reproduce the trimmed input. This is the property
-// that guarantees the rewrite away from {@html} did not garble displayed messages.
+// Concatenating segments must always reproduce the trimmed input.
 const rebuild = (segments: ReturnType<typeof getSegments>, original: string) =>
   segments === null ? original.trim() : segments.map((s) => s.text).join('');
 
@@ -102,8 +101,7 @@ describe('getSegments — matching', () => {
   });
 });
 
-// The XSS payloads. The component binds match.color into style:--kw-color, so a
-// non-hex value must never survive to the template.
+// The component binds match.color into style:--kw-color, so a non-hex value must never reach the template.
 describe('safeColor', () => {
   test('passes through valid hex', () => {
     expect(safeColor('#3B82F6')).toBe('#3B82F6');
@@ -133,8 +131,6 @@ describe('safeColor', () => {
     expect(safeColor({})).toBe(DEFAULT_KEYWORD_COLOR);
   });
 
-  // End-to-end through getSegments: a payload stored on the keyword row must arrive at
-  // the template already neutralised.
   test('a malicious stored colour is neutralised in the segments', () => {
     const segments = getSegments('your code is 1234', [
       kw({ color: 'red" onmouseover="fetch(\'//evil\')' }),

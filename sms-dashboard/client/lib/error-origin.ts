@@ -1,20 +1,12 @@
-// Decide whether a global error belongs to this app.
-//
-// ErrorBoundary listens on window 'error' and 'unhandledrejection', which fire for
-// EVERYTHING on the page — including browser extensions. A MetaMask injection failure was
-// enough to replace the whole dashboard with "Something went wrong", because the boundary
-// treated a foreign rejection as an app crash and called preventDefault() on it.
-//
-// Extension scripts are identifiable by their URL protocol, which appears in the error's
-// filename or its stack.
+// window 'error' and 'unhandledrejection' also fire for browser extensions, which must not
+// replace the dashboard with an error screen. Extension scripts are identifiable by their
+// URL protocol in the error's filename or stack.
 
 const EXTENSION_PROTOCOL = /\b(?:chrome|moz|safari|ms-browser|chrome-untrusted)-extension:\/\//i;
 
-// Benign browser noise that is not an application fault.
 const IGNORABLE_MESSAGES = [
-  // Fired by browsers when a ResizeObserver callback is still settling; harmless.
   /ResizeObserver loop (?:limit exceeded|completed with undelivered notifications)/i,
-  // Opaque cross-origin script error — no useful detail, and never actionable.
+  // Opaque cross-origin script error: no detail, never actionable.
   /^Script error\.?$/i,
 ];
 
@@ -24,7 +16,6 @@ interface ErrorSource {
   message?: string | undefined;
 }
 
-/** True when the error did not come from application code. */
 export function isForeignError(source: ErrorSource | null | undefined): boolean {
   if (!source) return false;
 
@@ -40,13 +31,7 @@ export function isForeignError(source: ErrorSource | null | undefined): boolean 
   return false;
 }
 
-/**
- * Normalise whatever an 'unhandledrejection' carries into an Error.
- *
- * `new Error(event.reason)` was the previous approach, which stringified a rejected Error
- * object and destroyed its stack — that is where the mangled "i: Failed to connect to
- * MetaMask" text came from, `i` being the minified class name.
- */
+// Wrapping a rejected Error in `new Error(reason)` would stringify it and lose its stack.
 export function toError(reason: unknown): Error {
   if (reason instanceof Error) return reason;
 
@@ -65,8 +50,7 @@ export function toError(reason: unknown): Error {
   return new Error('Unhandled promise rejection');
 }
 
-// Typed as the runtime behaves: an object whose toJSON returns undefined
-// stringifies to undefined, which lib.d.ts does not admit.
+// lib.d.ts omits that JSON.stringify returns undefined for an object whose toJSON does.
 const stringify: (value: unknown) => string | undefined = JSON.stringify;
 
 function safeStringify(value: unknown): string {

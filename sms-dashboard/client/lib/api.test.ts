@@ -18,13 +18,11 @@ afterEach(() => {
   auth.baseUrl = originalBaseUrl;
 });
 
-/** A request the client made, with the options it passed to fetch alongside it. */
 interface Sent {
   url: string;
   init: RequestInit | undefined;
 }
 
-/** Answers with `response` and records each request the client made. */
 function answer(response: () => Response): Sent[] {
   const requests: Sent[] = [];
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(

@@ -6,10 +6,7 @@ import { contract } from '../../shared/api/contract/index.js';
 
 type ContractClient = ContractRouterClient<typeof contract>;
 
-/**
- * A client for the contract served at `baseUrl()`, typed from it. `send` sends
- * each request; answers are checked against the contract's schemas.
- */
+// Answers are checked against the contract's schemas.
 export function contractClient(
   baseUrl: () => string,
   send: (request: Request) => Promise<Response>,

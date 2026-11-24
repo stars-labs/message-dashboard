@@ -1,19 +1,11 @@
-// Incoming-call ringtone. A dispatcher watching another tab needs to hear a
-// call arrive, and the dashboard ships no audio assets, so the tone is
-// synthesised: two short beeps a second apart, repeating while the call rings.
-//
-// The AudioContext is injected so this can be tested without WebAudio, and every
-// call is guarded: autoplay policy blocks audio until the page has been
-// interacted with, and a blocked ringtone must never break call handling.
+// Synthesised because the dashboard ships no audio assets. Every call is guarded: autoplay
+// policy blocks audio until the page has been interacted with, and a blocked ringtone must
+// never break call handling.
 
 const BEEP_HZ = 880;
 const BEEP_MS = 220;
 const PATTERN_MS = 2400;
 
-/**
- * The subset of AudioContext this uses, so tests can pass a stub. `Node` is
- * the audio node type: AudioNode for a real AudioContext.
- */
 interface AudioContextLike<Node> {
   currentTime: number;
   destination: Node;
@@ -53,7 +45,7 @@ export function createRingtone<Node>(
       const gain = audio.createGain();
       oscillator.type = 'sine';
       oscillator.frequency.value = BEEP_HZ;
-      // Ramped rather than switched, so the beep does not click.
+      // Ramped, not switched, so the beep does not click.
       gain.gain.setValueAtTime(0.0001, at);
       gain.gain.exponentialRampToValueAtTime(0.12, at + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, at + BEEP_MS / 1000);
