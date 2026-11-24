@@ -140,6 +140,11 @@
               ];
             };
             sourceRoot = "source/orange-pi-daemon";
+            # stdenv makes only sourceRoot writable; the export_bindings tests
+            # write to TS_RS_EXPORT_DIR, ../sms-dashboard/shared/daemon-wire.
+            postUnpack = ''
+              chmod -R u+w -- "$sourceRoot/.."
+            '';
 
             cargoLock = {
               lockFile = ./orange-pi-daemon/Cargo.lock;
