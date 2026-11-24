@@ -198,10 +198,6 @@ impl VoiceBridge {
         })
     }
 
-    // ---------------------------------------------------------------------
-    // Listener
-    // ---------------------------------------------------------------------
-
     pub async fn serve(self: Arc<Self>, config: VoiceBridgeConfig) -> Result<()> {
         // reqwest may already have installed one; either way ring is the provider.
         let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
@@ -348,10 +344,6 @@ impl VoiceBridge {
         self.run_leg(request, ws).await;
         Ok(())
     }
-
-    // ---------------------------------------------------------------------
-    // Call lifecycle
-    // ---------------------------------------------------------------------
 
     async fn run_leg<S>(
         self: Arc<Self>,
@@ -508,9 +500,9 @@ impl VoiceBridge {
             }
         }
 
-        // Voice over USB must be on before the call is set up (verified
-        // 2026-09-16 for dialing). Whether it is accepted while an incoming call
-        // is ringing is unverified, so for answers a refusal is logged, not fatal.
+        // Voice over USB must be on before the call is set up. Whether it is
+        // accepted while an incoming call is ringing is unverified, so for
+        // answers a refusal is logged, not fatal.
         let pcm = self
             .at(modem_id, "AT+QPCMV=1,0", Duration::from_secs(3))
             .await?;
@@ -621,10 +613,6 @@ impl VoiceBridge {
             self.end_call(&call_id, CallEndReason::RemoteHangup).await;
         }
     }
-
-    // ---------------------------------------------------------------------
-    // Incoming calls
-    // ---------------------------------------------------------------------
 
     /// Keep one URC reader per voice-capable modem with a known SIM.
     pub async fn run_urc_readers(self: Arc<Self>) {
@@ -750,10 +738,6 @@ impl VoiceBridge {
     }
 }
 
-// -------------------------------------------------------------------------
-// Audio pumps
-// -------------------------------------------------------------------------
-
 fn open_nmea(port: &str) -> Result<AsyncFd<File>> {
     Ok(AsyncFd::new(AtModemManager::open_serial(port)?)?)
 }
@@ -768,12 +752,9 @@ const EMPTY_READ_PAUSE: Duration = Duration::from_millis(100);
 /// A tty opened with VMIN=0 can report readiness and then return 0 bytes, so an
 /// empty read is retried. But when the USB device disappears the tty is hung
 /// up: it reports readable forever, `read` returns 0 forever, and `clear_ready`
-/// does not clear the closed state. The first version of this loop therefore
-/// never suspended — one spinning reader pinned a runtime worker, four of them
-/// pinned all four, and the whole daemon (SMS collection, heartbeats, and the
-/// stall watchdog that lived on the same runtime) stopped while the process
-/// stayed alive. That was the outage of 2026-09-18 and the 23-hour one of
-/// 2026-09-20; both began with a USB re-enumeration.
+/// does not clear the closed state. A loop that trusts readiness then never
+/// suspends: each spinning reader pins a runtime worker, and enough of them
+/// stall the whole daemon while the process stays alive.
 async fn read_some(fd: &AsyncFd<File>, buf: &mut [u8]) -> std::io::Result<usize> {
     let mut empty_reads = 0u32;
     loop {
@@ -905,7 +886,6 @@ async fn pump_nmea(
     }
 }
 
-/// `up` leg: modem audio out to the SFU.
 async fn pump_up<S>(
     mut ws: tokio_tungstenite::WebSocketStream<S>,
     mut audio: broadcast::Receiver<Arc<Vec<u8>>>,
@@ -939,7 +919,6 @@ where
     }
 }
 
-/// `down` leg: browser audio in from the SFU.
 async fn pump_down<S>(
     mut ws: tokio_tungstenite::WebSocketStream<S>,
     to_modem: mpsc::Sender<Vec<u8>>,
@@ -1040,8 +1019,7 @@ mod tests {
         assert_eq!(&buf[..n], b"RING\r\n");
     }
 
-    /// The regression for the 2026-09-18 and 2026-09-20 outages: a port whose
-    /// device vanished must end the read, not spin on it forever.
+    /// A port whose device vanished must end the read, not spin on it forever.
     #[tokio::test]
     async fn read_some_fails_instead_of_spinning_when_the_port_hangs_up() {
         let (fd, peer) = pair();

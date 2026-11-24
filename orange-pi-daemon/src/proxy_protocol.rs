@@ -1,10 +1,9 @@
 //! PROXY protocol v1, as sent by nginx `stream { proxy_protocol on; }`.
 //!
-//! The voice bridge now sits behind an nginx SNI router that shares port 443
-//! with `NetBird`. A plain TCP proxy would make every connection look like it came
-//! from 127.0.0.1, which defeats the Cloudflare allowlist. With the PROXY
-//! protocol nginx prefixes each connection with one text line naming the real
-//! source, and the bridge reads that line before the TLS handshake begins.
+//! The voice bridge sits behind an nginx SNI router that shares port 443 with
+//! `NetBird`. A plain TCP proxy would make every connection look like it came
+//! from 127.0.0.1, which defeats the Cloudflare allowlist; the PROXY line names
+//! the real source and is read before the TLS handshake.
 //!
 //! Spec: <https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt>, §2.1.
 

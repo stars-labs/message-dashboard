@@ -1,4 +1,3 @@
-// Test program to verify SMS deletion on SIM cards
 use anyhow::Result;
 use orange_pi_daemon_rust::identifiers::Iccid;
 use orange_pi_daemon_rust::message_store::MessageStore;
@@ -9,19 +8,15 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
     tracing_subscriber::fmt().with_env_filter("debug").init();
 
     info!("🔬 SMS Deletion Test Program");
     info!("=============================");
 
-    // Initialize MessageStore
     let message_store = Arc::new(MessageStore::new("/tmp/test_messages.db")?);
 
-    // Initialize ModemManager with native D-Bus
     let modem_manager = Arc::new(ModemManager::new().await);
 
-    // Check if native D-Bus is available
     if modem_manager.is_using_native_dbus() {
         info!("✅ Using native D-Bus for direct communication");
     } else {
@@ -35,7 +30,6 @@ async fn main() -> Result<()> {
     info!("\n🎯 Testing deletion on modem: {}", modem_id);
     info!("   ICCID: {}", iccid);
 
-    // Get messages from this modem
     info!("\n📥 Getting messages from modem...");
     let messages = modem_manager
         .get_new_messages_with_paths(&modem_id, &iccid, &message_store)
@@ -49,7 +43,6 @@ async fn main() -> Result<()> {
 
     log_first_messages(&messages);
 
-    // Try to delete first message
     let Some(first_msg) = messages.first() else {
         return Ok(());
     };
@@ -57,11 +50,9 @@ async fn main() -> Result<()> {
     info!("   Modem ID: {}", modem_id);
     info!("   SMS Path: {}", first_msg.sms_path);
 
-    // Try deletion using different methods
     info!("\n=== METHOD 1: Direct ModemManager delete ===");
     delete_with_modem_manager(&modem_manager, &modem_id, &first_msg.sms_path).await;
 
-    // Try using mmcli directly as a comparison
     info!("\n=== METHOD 2: Direct mmcli command ===");
     let cmd = format!(
         "mmcli -m {} --messaging-delete-sms={}",
@@ -69,7 +60,6 @@ async fn main() -> Result<()> {
     );
     run_over_ssh("mmcli", &cmd).await?;
 
-    // Try using busctl directly
     info!("\n=== METHOD 3: Direct busctl command ===");
     let busctl_cmd = format!(
         "busctl call org.freedesktop.ModemManager1 /org/freedesktop/ModemManager1/Modem/{} org.freedesktop.ModemManager1.Modem.Messaging Delete o {}",
@@ -77,7 +67,6 @@ async fn main() -> Result<()> {
     );
     run_over_ssh("busctl", &busctl_cmd).await?;
 
-    // Check if message still exists
     info!("\n🔍 Checking if message still exists...");
     let remaining = modem_manager
         .get_new_messages_with_paths(&modem_id, &iccid, &message_store)
@@ -104,9 +93,7 @@ async fn find_modem_with_sim(modem_manager: &ModemManager) -> Result<Option<(Str
         return Ok(None);
     }
 
-    // Take first modem with a SIM card
     for modem_id in modems.iter().take(5) {
-        // Check first 5 modems
         if let Ok(Some(iccid)) = modem_manager.get_iccid(modem_id).await {
             info!("📱 Modem {} has SIM with ICCID: {}", modem_id, iccid);
             return Ok(Some((modem_id.clone(), iccid)));

@@ -1,8 +1,3 @@
-//! Modem Manager - Direct AT commands for 100+ modems
-//!
-//! Uses direct AT commands via serial ports. No ModemManager/D-Bus needed.
-//! Set `USE_DBUS=1` to use legacy D-Bus mode (requires `ModemManager` service).
-
 use crate::at_modem::AtModemManager;
 use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use crate::message_store::{Segment, StoredSegment};
@@ -16,25 +11,20 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-/// Backend mode
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BackendMode {
-    /// Direct AT commands via serial port (default, fastest)
     AtCommand,
-    /// D-Bus via `ModemManager` (legacy, requires `ModemManager` service)
+    /// Selected with `USE_DBUS=1`; requires the `ModemManager` service.
     DBus,
 }
 
 /// Keep a cached modem only while its port still belongs to the USB device it
 /// was discovered on.
 ///
-/// A port path alone is not enough. When the kernel re-enumerates a bus, ttyUSB
-/// numbers are handed out afresh: on 2026-09-21 a cached "/dev/ttyUSB41" (an AT
-/// port) came back as the DIAG port of a different modem. Checking only that the
-/// path existed kept the stale entry, every scan then timed out on it, and
-/// rediscovery skipped the modem that now owned that path because "one of its
-/// ports is already in use". Two modems lost per collision, nine SIMs unread
-/// overnight, no error anywhere but a timeout counter.
+/// A port path alone is not enough: when the kernel re-enumerates a bus, ttyUSB
+/// numbers are handed out afresh, so a cached AT port path can come back as the
+/// DIAG port of a different modem, and rediscovery would skip that modem because
+/// one of its ports is "already in use".
 fn retain_present_cached_modems(
     cache: &mut HashMap<String, CachedPort>,
     groups: &BTreeMap<String, Vec<String>>,
@@ -178,8 +168,6 @@ mod tests {
         assert_eq!(cache.keys().collect::<Vec<_>>(), vec!["2"]);
     }
 
-    /// The 2026-09-21 case: the path still exists, but a re-enumeration handed
-    /// it to another modem. Keeping it meant scanning a DIAG port forever.
     #[test]
     fn a_cached_port_that_moved_to_another_device_is_dropped() {
         let mut cache = HashMap::from([("41".to_string(), cached("/dev/ttyUSB41", "1-1.3.2.1"))]);
@@ -196,15 +184,12 @@ mod tests {
 
 #[derive(Clone)]
 pub struct ModemManager {
-    /// AT command backend
     at_modem: Arc<AtModemManager>,
-    /// D-Bus client (only loaded in `DBus` mode)
+    /// Only loaded in `DBus` mode.
     dbus_client: Option<Arc<crate::dbus_client::DBusClient>>,
-    /// Signal quality cache
     signal_cache: Arc<SignalCache>,
-    /// `modem_id` -> AT port path, populated at discovery
+    /// `modem_id` -> AT port, populated at discovery.
     port_cache: Arc<RwLock<HashMap<String, CachedPort>>>,
-    /// Backend mode
     mode: BackendMode,
 }
 
@@ -228,7 +213,6 @@ fn signal_from_percent(percent: u32) -> Result<SignalData> {
 
 impl ModemManager {
     pub async fn new() -> Self {
-        // Check mode from environment
         let use_dbus = std::env::var("USE_DBUS").is_ok_and(|v| v == "1");
 
         let mode = if use_dbus {
@@ -239,7 +223,6 @@ impl ModemManager {
             BackendMode::AtCommand
         };
 
-        // Only load D-Bus client if needed
         let dbus_client = if mode == BackendMode::DBus {
             let client = crate::dbus_client::DBusClient::new().await;
             if !client.is_available() {
@@ -259,7 +242,6 @@ impl ModemManager {
         }
     }
 
-    /// Check if available
     pub fn is_available(&self) -> bool {
         match self.mode {
             BackendMode::AtCommand => true, // AT commands always available if ports exist
@@ -267,22 +249,18 @@ impl ModemManager {
         }
     }
 
-    /// Check if using native D-Bus
     pub fn is_using_native_dbus(&self) -> bool {
         self.mode == BackendMode::DBus
     }
 
-    /// Check if using AT commands
     pub fn is_using_at_commands(&self) -> bool {
         self.mode == BackendMode::AtCommand
     }
 
-    /// Get current backend mode
     pub fn get_backend_mode(&self) -> BackendMode {
         self.mode
     }
 
-    /// List all modem IDs
     pub async fn list_modems(&self) -> Result<Vec<String>> {
         match self.mode {
             BackendMode::AtCommand => {
@@ -312,14 +290,13 @@ impl ModemManager {
         }
     }
 
-    /// Find modems that are NOT already active and bring them online, merging them into
-    /// the port cache. For a candidate AT port that is silent, attempt one USB reset +
-    /// re-probe (recovers modems wedged at the USB level). Returns the `modem_ids` added.
+    /// Bring modems that are not already active online, merging them into the port
+    /// cache. A silent device gets one USB reset and re-probe. Returns the `modem_ids`
+    /// added.
     ///
-    /// Deliberately skips modems already in `known` or the cache: re-probing a healthy,
-    /// busy modem could collide with the reader loop on the serial port and trigger a
-    /// needless reset. The serial probes/resets run WITHOUT holding the cache lock so
-    /// the reader's `get_port` is never blocked; the lock is taken only to insert.
+    /// Modems already in `known` or the cache are skipped: re-probing a busy modem could
+    /// collide with the reader loop on the serial port and trigger a needless reset.
+    /// Serial probes run without the cache lock so the reader's `get_port` never blocks.
     ///
     /// AT-command mode only; in D-Bus mode `ModemManager` handles its own hotplug.
     pub async fn rediscover_and_merge(
@@ -330,15 +307,11 @@ impl ModemManager {
             return Ok(Vec::new());
         }
 
-        // Snapshot ports already served (so we skip whole devices that are working).
         let active_ports: std::collections::HashSet<String> = {
             let cache = self.port_cache.read().await;
             cache.values().map(|cached| cached.port.clone()).collect()
         };
 
-        // Walk each physical modem (USB device); skip ones that already have a working
-        // port. For the rest, probe ports in order to find AT; if all are silent, try a
-        // USB reset on the first port then re-probe. Holds no lock during serial I/O.
         let mut found: Vec<(String, String)> = Vec::new();
         let mut reset_recovered = 0;
         for (_dev, dev_ports) in AtModemManager::ttyusb_by_usb_device()? {
@@ -354,7 +327,6 @@ impl ModemManager {
                     break;
                 }
             }
-            // All ports silent — attempt a USB reset on the first port, then re-probe.
             if at_port.is_none() {
                 if let Some(first) = dev_ports.first() {
                     match self.at_modem.reset_usb_port(first).await {
@@ -434,9 +406,7 @@ impl ModemManager {
     }
 
     /// Drop a modem from the cache so the next reconcile probes its USB device
-    /// again — including the USB reset that rediscovery applies to a silent one.
-    /// Used after a modem has timed out on several consecutive scans; a cached
-    /// entry never gets that treatment on its own.
+    /// again, including the USB reset that rediscovery applies to a silent one.
     pub async fn forget_modem(&self, modem_id: &str) {
         if let Some(cached) = self.port_cache.write().await.remove(modem_id) {
             warn!(
@@ -471,13 +441,12 @@ impl ModemManager {
         self.at_modem.voice_command(&port, command, timeout).await
     }
 
-    /// Get the stable USB topology path (e.g. `1-1.4.2.2.2`) for a modem ID.
+    /// Stable USB topology path, e.g. `1-1.4.2.2.2`.
     pub async fn get_usb_path(&self, modem_id: &str) -> Option<String> {
         let port = self.get_port(modem_id).await;
         AtModemManager::usb_topology_for_port(&port)
     }
 
-    /// Get ICCID
     pub async fn get_iccid(&self, modem_id: &str) -> Result<Option<Iccid>> {
         match self.mode {
             BackendMode::AtCommand => {
@@ -494,9 +463,7 @@ impl ModemManager {
         }
     }
 
-    /// Get signal quality (cached)
     pub async fn get_signal_quality(&self, modem_id: &str) -> Result<SignalData> {
-        // Check cache first
         if let Some(cached) = self.signal_cache.get(modem_id).await {
             return Ok(cached);
         }
@@ -523,7 +490,6 @@ impl ModemManager {
         Ok(signal)
     }
 
-    /// Get device details
     pub async fn get_device_details(
         &self,
         modem_id: &str,
@@ -574,7 +540,6 @@ impl ModemManager {
         }
     }
 
-    /// Get phone number
     pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<SimNumber>> {
         match self.mode {
             BackendMode::AtCommand => {
@@ -591,7 +556,6 @@ impl ModemManager {
         }
     }
 
-    /// Get operator name
     pub async fn get_operator(&self, modem_id: &str) -> Result<Option<String>> {
         match self.mode {
             BackendMode::AtCommand => {
@@ -608,7 +572,6 @@ impl ModemManager {
         }
     }
 
-    /// Health check for a modem (diagnostic)
     pub async fn health_check(
         &self,
         modem_id: &str,
@@ -626,8 +589,8 @@ impl ModemManager {
         }
     }
 
-    /// Get new SMS messages with paths/indices
-    /// Handles multipart message assembly across polling cycles using persistent storage
+    /// Multipart messages are assembled across polling cycles from segments buffered in
+    /// the message store.
     pub async fn get_new_messages_with_paths(
         &self,
         modem_id: &str,
@@ -649,15 +612,12 @@ impl ModemManager {
         let port = self.get_port(modem_id).await;
         let sms_list = self.at_modem.list_sms(&port).await?;
 
-        // Group multipart messages by (sender, ref_id, total_parts)
-        // Messages with concat_info are buffered, messages without are returned immediately
         let mut multipart_groups: HashMap<(SmsAddress, u8, u8), Vec<crate::at_modem::AtSms>> =
             HashMap::new();
         let mut complete_messages: Vec<MessageWithPath> = Vec::new();
 
         for sms in sms_list {
             if let Some(ref concat_info) = sms.concat_info {
-                // This is part of a multipart message - buffer it
                 let key = (
                     sms.sender.clone(),
                     concat_info.ref_id,
@@ -669,7 +629,6 @@ impl ModemManager {
                     warn!("Skipping SMS {} without a recorded storage", sms.index);
                     continue;
                 };
-                // Single-part message - convert immediately
                 complete_messages.push(MessageWithPath {
                     message: Message {
                         phone_iccid: iccid.clone(),
@@ -684,7 +643,6 @@ impl ModemManager {
             }
         }
 
-        // Process multipart groups with persistent buffering
         for ((sender, ref_id, total_parts), parts) in multipart_groups {
             let group = MultipartGroup {
                 iccid,
@@ -723,7 +681,6 @@ impl ModemManager {
             ..
         } = *group;
 
-        // Store new parts to database
         for part in parts {
             let Some(concat_info) = part.concat_info.as_ref() else {
                 warn!("Skipping segment without concatenation info");
@@ -748,7 +705,6 @@ impl ModemManager {
             }
         }
 
-        // Check if all parts are now available (including previously buffered ones)
         let message =
             match message_store.get_segments_with_storage(iccid, sender, ref_id, total_parts) {
                 Ok(segments) if segments.len() == usize::from(total_parts) => {
@@ -766,7 +722,6 @@ impl ModemManager {
                     Self::orphaned_message(group, &segments)
                 }
                 Ok(segments) => {
-                    // Still incomplete - parts buffered in database
                     debug!(
                         "Buffering multipart message: {}/{} parts for ref_id={} from {}",
                         segments.len(),
@@ -782,14 +737,12 @@ impl ModemManager {
                 }
             };
 
-        // Delete assembled segments from buffer
         if let Err(e) = message_store.delete_segments(iccid, ref_id) {
             warn!("Failed to delete segments: {}", e);
         }
         Some(message)
     }
 
-    /// All parts present - assemble!
     fn complete_message(
         group: &MultipartGroup<'_>,
         mut all_parts: Vec<StoredSegment>,
@@ -898,7 +851,6 @@ impl ModemManager {
         Ok(messages)
     }
 
-    /// Get new SMS messages (deprecated)
     pub async fn get_new_messages(
         &self,
         modem_id: &str,
@@ -911,7 +863,6 @@ impl ModemManager {
         Ok(messages_with_paths.into_iter().map(|m| m.message).collect())
     }
 
-    /// Delete SMS
     pub async fn delete_sms(&self, modem_id: &str, sms_path: &str) -> Result<()> {
         match self.mode {
             BackendMode::AtCommand => {
@@ -925,7 +876,7 @@ impl ModemManager {
                             .await?;
                         debug!("Deleted SMS {}:{} via AT from {}", storage, index, modem_id);
                     } else {
-                        // Backward compatibility for rows created before storage-aware paths.
+                        // Rows created before storage-aware paths carry no storage.
                         self.at_modem.delete_sms(&port, index).await?;
                         debug!("Deleted legacy SMS {} via AT from {}", index, modem_id);
                     }
@@ -990,7 +941,6 @@ impl ModemManager {
             .collect()
     }
 
-    /// Send SMS
     pub async fn send_sms(
         &self,
         modem_id: &str,
@@ -1001,7 +951,6 @@ impl ModemManager {
             .await
     }
 
-    /// Send SMS, optionally allowing a carrier service short code.
     pub async fn send_sms_with_short_code(
         &self,
         modem_id: &str,
@@ -1009,11 +958,8 @@ impl ModemManager {
         content: &str,
         allow_short_code: bool,
     ) -> Result<SmsSubmission> {
-        // Single choke point for outbound sends, so both backends get the same
-        // guarantee. The AT backend interpolates these into serial command strings
-        // where a CR is an injection (docs/SECURITY-REVIEW.md finding 3); the D-Bus
-        // backend passes them as typed arguments and is not injectable, but there is no
-        // reason to accept a malformed number on either path.
+        // The AT backend interpolates these into serial command strings, where a CR
+        // is an injection (docs/SECURITY-REVIEW.md finding 3); validate for both backends.
         AtModemManager::validate_recipient_with_short_code(recipient.as_str(), allow_short_code)?;
         AtModemManager::validate_message_body(content)?;
 
@@ -1046,7 +992,6 @@ impl ModemManager {
         }
     }
 
-    /// Normalize timestamp
     fn normalize_timestamp(raw: &str) -> String {
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
             return dt

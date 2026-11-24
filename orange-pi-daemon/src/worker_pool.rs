@@ -11,28 +11,23 @@ use crate::modem_manager::ModemManager;
 use crate::types::{Message, MessageWithPath};
 use crate::wire::{ModemReport, ModemStatus};
 
-/// Configuration for the worker pool
 #[derive(Debug, Clone)]
 pub struct WorkerPoolConfig {
-    /// Number of concurrent workers
     pub num_workers: usize,
-    /// Maximum modems per batch
     pub batch_size: usize,
-    /// Timeout for processing a single modem
     pub modem_timeout: Duration,
 }
 
 impl Default for WorkerPoolConfig {
     fn default() -> Self {
         Self {
-            num_workers: 16, // Higher concurrency for 100+ modems (I/O bound)
-            batch_size: 24,  // Larger batches to reduce loop iterations
-            modem_timeout: Duration::from_secs(12), // Faster failure detection to avoid backlog
+            num_workers: 16,
+            batch_size: 24,
+            modem_timeout: Duration::from_secs(12),
         }
     }
 }
 
-/// Statistics for worker pool operations
 #[derive(Debug, Clone, Default)]
 pub struct WorkerPoolStats {
     pub total_modems: usize,
@@ -56,14 +51,13 @@ impl WorkerPoolStats {
     }
 }
 
-/// Result from processing a single modem
 #[derive(Debug)]
 pub struct ModemResult {
     pub modem_id: String,
     pub iccid: Option<Iccid>,
     pub report: Option<ModemReport>,
     pub messages: Vec<Message>,
-    pub messages_with_paths: Vec<MessageWithPath>, // Track SMS paths for deletion
+    pub messages_with_paths: Vec<MessageWithPath>,
     pub error: Option<String>,
 }
 
@@ -89,19 +83,16 @@ impl Drop for ProcessingGuard {
     }
 }
 
-/// Worker pool for parallel modem processing
 pub struct WorkerPool {
     config: WorkerPoolConfig,
     modem_manager: Arc<ModemManager>,
     message_store: Arc<crate::message_store::MessageStore>,
     semaphore: Arc<Semaphore>,
     stats: Arc<RwLock<WorkerPoolStats>>,
-    /// Flag to prevent concurrent processing calls
     processing: Arc<AtomicBool>,
 }
 
 impl WorkerPool {
-    /// Create a new worker pool
     pub fn new(
         config: WorkerPoolConfig,
         modem_manager: Arc<ModemManager>,
@@ -124,9 +115,8 @@ impl WorkerPool {
         }
     }
 
-    /// Process a list of modem IDs in parallel
     pub async fn process_modems(&self, modem_ids: Vec<String>) -> Result<Vec<ModemResult>> {
-        // Prevent concurrent processing - if already running, skip this call
+        // A call while a cycle is running is skipped, not queued.
         if self
             .processing
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -153,7 +143,6 @@ impl WorkerPool {
         let (tx, mut rx) = mpsc::channel::<ModemResult>(total_modems);
         let mut join_set = self.spawn_workers(&modem_ids, &tx);
 
-        // Drop original sender to close channel when done
         drop(tx);
 
         let mut results = Vec::with_capacity(total_modems);
@@ -173,7 +162,6 @@ impl WorkerPool {
         Ok(results)
     }
 
-    /// Spawn one rate-limited worker task per modem, in batches
     fn spawn_workers(&self, modem_ids: &[String], tx: &mpsc::Sender<ModemResult>) -> JoinSet<()> {
         let mut join_set = JoinSet::new();
 
@@ -188,7 +176,6 @@ impl WorkerPool {
                 let stats = self.stats.clone();
 
                 join_set.spawn(async move {
-                    // Acquire semaphore permit for rate limiting
                     let _permit = match semaphore.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
@@ -215,7 +202,6 @@ impl WorkerPool {
         join_set
     }
 
-    /// Process one modem under a timeout and count the outcome in the stats
     async fn process_with_timeout(
         modem_id: String,
         modem_manager: Arc<ModemManager>,
@@ -271,7 +257,6 @@ impl WorkerPool {
         );
     }
 
-    /// Process a single modem (internal helper)
     async fn process_single_modem(
         modem_id: String,
         modem_manager: Arc<ModemManager>,
@@ -279,10 +264,9 @@ impl WorkerPool {
     ) -> Result<ModemResult> {
         debug!("Processing modem {}", modem_id);
 
-        // Get ICCID (may fail — that's ok, IMEI is the gate now)
+        // A missing ICCID is tolerated; a missing IMEI is not.
         let iccid = modem_manager.get_iccid(&modem_id).await.unwrap_or(None);
 
-        // Get device details — IMEI is the gate
         let device_details = modem_manager
             .get_device_details(&modem_id)
             .await
@@ -293,16 +277,14 @@ impl WorkerPool {
             return Ok(ModemResult::failed(modem_id, "No valid IMEI".to_string()));
         };
 
-        // Get signal quality (cached) — always, even without ICCID
         let signal_data = modem_manager
             .get_signal_quality(&modem_id)
             .await
             .unwrap_or_default();
 
-        // Get operator — always
         let operator = modem_manager.get_operator(&modem_id).await.unwrap_or(None);
 
-        // Only get phone number and messages if ICCID is available
+        // Messages are keyed by ICCID, so without one there is nothing to read.
         let (phone_number, messages, messages_with_paths) = if let Some(ref iccid_val) = iccid {
             let phone_number = modem_manager
                 .get_phone_number(&modem_id)
@@ -330,10 +312,8 @@ impl WorkerPool {
             (None, vec![], vec![])
         };
 
-        // Stable physical USB topology path (e.g. 1-1.4.2.2.2) — survives reboot/replug
         let usb_path = modem_manager.get_usb_path(&modem_id).await;
 
-        // Build ModemReport — single flat struct for the API
         let report = ModemReport {
             equipment_id,
             manufacturer,
@@ -361,17 +341,14 @@ impl WorkerPool {
         })
     }
 
-    /// Get current statistics
     pub async fn get_stats(&self) -> WorkerPoolStats {
         self.stats.read().await.clone()
     }
 
-    /// Check if using native D-Bus
     pub fn is_using_native_dbus(&self) -> bool {
         self.modem_manager.is_using_native_dbus()
     }
 
-    /// Update configuration
     pub fn update_config(&mut self, config: WorkerPoolConfig) {
         let num_workers = config.num_workers;
         let batch_size = config.batch_size;
@@ -385,7 +362,6 @@ impl WorkerPool {
         );
     }
 
-    /// Process modems with progress callback
     pub async fn process_with_progress<F>(
         &self,
         modem_ids: Vec<String>,
@@ -397,7 +373,6 @@ impl WorkerPool {
         let total = modem_ids.len();
         let mut processed = 0;
 
-        // Process in smaller chunks for progress updates
         let chunk_size = std::cmp::min(10, self.config.batch_size);
         let mut all_results = Vec::new();
 
@@ -420,9 +395,9 @@ mod tests {
     #[test]
     fn test_worker_pool_config_default() {
         let config = WorkerPoolConfig::default();
-        assert_eq!(config.num_workers, 16); // Higher concurrency for 100+ modems (I/O bound)
-        assert_eq!(config.batch_size, 24); // Larger batches to reduce loop iterations
-        assert_eq!(config.modem_timeout, Duration::from_secs(12)); // Faster failure detection to avoid backlog
+        assert_eq!(config.num_workers, 16);
+        assert_eq!(config.batch_size, 24);
+        assert_eq!(config.modem_timeout, Duration::from_secs(12));
     }
 
     #[test]

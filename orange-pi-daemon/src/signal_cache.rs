@@ -14,15 +14,12 @@ fn percent_of(part: u64, whole: u64) -> f64 {
     (part as f64 / whole as f64) * 100.0
 }
 
-/// Cache entry for signal data
 #[derive(Debug, Clone)]
 struct CacheEntry {
     signal: SignalData,
     timestamp: Instant,
 }
 
-/// Signal cache to reduce redundant signal quality checks
-/// Reduces mmcli/D-Bus calls by caching signal data for a short period
 pub struct SignalCache {
     cache: Arc<RwLock<HashMap<String, CacheEntry>>>,
     ttl: Duration,
@@ -31,7 +28,6 @@ pub struct SignalCache {
 }
 
 impl SignalCache {
-    /// Create a new signal cache with specified TTL
     pub fn new(ttl_seconds: u64) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
@@ -41,7 +37,6 @@ impl SignalCache {
         }
     }
 
-    /// Get cached signal data if still valid
     pub async fn get(&self, modem_id: &str) -> Option<SignalData> {
         let cache = self.cache.read().await;
 
@@ -73,7 +68,6 @@ impl SignalCache {
         None
     }
 
-    /// Store signal data in cache
     pub async fn set(&self, modem_id: String, signal: SignalData) {
         let mut cache = self.cache.write().await;
 
@@ -92,7 +86,6 @@ impl SignalCache {
         );
     }
 
-    /// Clear expired entries from cache
     pub async fn cleanup(&self) {
         let mut cache = self.cache.write().await;
         let now = Instant::now();
@@ -115,7 +108,6 @@ impl SignalCache {
         }
     }
 
-    /// Get cache statistics
     pub async fn get_stats(&self) -> CacheStats {
         let hits = *self.hit_count.read().await;
         let misses = *self.miss_count.read().await;
@@ -136,7 +128,6 @@ impl SignalCache {
         }
     }
 
-    /// Clear all cache entries
     pub async fn clear(&self) {
         let mut cache = self.cache.write().await;
         let count = cache.len();
@@ -144,19 +135,16 @@ impl SignalCache {
 
         debug!("🧹 Cleared signal cache: removed {} entries", count);
 
-        // Reset stats
         *self.hit_count.write().await = 0;
         *self.miss_count.write().await = 0;
     }
 
-    /// Update TTL for cache entries
     pub fn set_ttl(&mut self, ttl_seconds: u64) {
         self.ttl = Duration::from_secs(ttl_seconds);
         debug!("⏱️  Signal cache TTL updated to {} seconds", ttl_seconds);
     }
 }
 
-/// Cache statistics
 #[derive(Debug, Clone)]
 pub struct CacheStats {
     pub hits: u64,

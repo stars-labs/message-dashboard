@@ -1,14 +1,10 @@
 //! Deliver a long SMS whose remaining parts are never going to arrive.
 //!
-//! A multipart message is only assembled, stored and deleted from the SIM once
-//! every part is present. When a part is lost in the network the rest wait
-//! forever: on 2026-09-21 there were 454 such groups (664 parts, the oldest from
-//! October 2025) on 67 SIMs. They were re-read on every scan, and they occupy
-//! SIM storage — a SIM that fills up makes the carrier drop new SMS.
-//!
-//! After a day the missing parts are not coming. The parts that did arrive are
-//! then delivered as one message marked incomplete, which lets the normal
-//! store-then-delete path free the SIM slots without losing their content.
+//! A multipart message is only stored and deleted from the SIM once every part
+//! is present, so a part lost in the network leaves the rest on the SIM
+//! forever, and a full SIM makes the carrier drop new SMS. After a day the
+//! parts that did arrive are delivered as one message marked incomplete, so
+//! the normal store-then-delete path frees the slots.
 
 use chrono::{DateTime, Duration, Utc};
 
@@ -78,7 +74,6 @@ mod tests {
     #[test]
     fn a_group_is_orphaned_a_day_after_its_newest_part() {
         let now = at("2026-09-21T12:00:00Z");
-        // The real case: parts from October 2025 still on the SIM.
         assert!(is_orphaned(&["2025-10-09T01:47:57.000Z"], now));
         assert!(is_orphaned(&["2026-09-20T12:00:00.000Z"], now));
         assert!(!is_orphaned(&["2026-09-20T12:00:01.000Z"], now));

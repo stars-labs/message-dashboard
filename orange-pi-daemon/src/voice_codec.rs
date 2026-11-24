@@ -15,9 +15,9 @@
 //! }
 //! ```
 
-/// Sample rate the modem produces and consumes.
+/// Modem sample rate.
 pub const MODEM_RATE: u32 = 8_000;
-/// Sample rate the adapter produces and consumes.
+/// Adapter sample rate.
 pub const ADAPTER_RATE: u32 = 48_000;
 /// Integer ratio between the two rates.
 const RATIO: usize = 6;
@@ -25,7 +25,6 @@ const RATIO: usize = 6;
 const RATIO_I32: i32 = 6;
 const _: () = assert!(ADAPTER_RATE == MODEM_RATE * 6);
 
-/// One decoded adapter frame.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Packet {
     pub sequence_number: u32,
@@ -52,7 +51,6 @@ fn low_u32(v: u64) -> u32 {
     u32::from_le_bytes([b0, b1, b2, b3])
 }
 
-/// Clamp to the `i16` range.
 fn saturate_i16(v: i32) -> i16 {
     i16::try_from(v).unwrap_or(if v < 0 { i16::MIN } else { i16::MAX })
 }
@@ -75,7 +73,6 @@ fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
 }
 
 impl Packet {
-    /// Encode to the adapter's protobuf wire format.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.payload.len() + 16);
         if self.sequence_number != 0 {
@@ -170,8 +167,8 @@ pub fn modem_to_adapter(pcm8k_mono: &[u8], last: &mut i16) -> Vec<u8> {
         for step in 0..RATIO_I32 {
             let interpolated = prev + (cur - prev) * step / RATIO_I32;
             let v = saturate_i16(interpolated);
-            out.push(v); // left
-            out.push(v); // right
+            out.push(v);
+            out.push(v);
         }
         *last = sample;
     }

@@ -87,8 +87,6 @@ pub fn device_delta(previous: &[ModemReport], current: &[ModemReport]) -> Device
     }
 }
 
-/// Manages synchronization state between daemon and server
-/// Implements full/incremental sync pattern for efficient updates
 pub struct SyncManager {
     full_sync_completed: bool,
     consecutive_failures: u32,
@@ -110,18 +108,11 @@ impl SyncManager {
         }
     }
 
-    /// Check if a full sync is needed
-    ///
-    /// Full sync is needed when:
-    /// 1. Never done before
-    /// 2. Multiple consecutive failures require reconciliation after recovery
     pub fn needs_full_sync(&self) -> bool {
-        // Never synced before
         if !self.full_sync_completed {
             return true;
         }
 
-        // Recovery mode after failures
         if self.consecutive_failures >= 3 {
             warn!(
                 "⚠️  {} consecutive sync failures - forcing full sync for recovery",
@@ -133,7 +124,6 @@ impl SyncManager {
         false
     }
 
-    /// Get the appropriate sync mode
     pub fn get_sync_mode(&self) -> SyncMode {
         if self.needs_full_sync() {
             SyncMode::Full
@@ -142,7 +132,6 @@ impl SyncManager {
         }
     }
 
-    /// Record a successful sync
     pub fn record_success(&mut self, sync_mode: SyncMode) {
         self.consecutive_failures = 0;
 
@@ -154,7 +143,6 @@ impl SyncManager {
         }
     }
 
-    /// Record a failed sync attempt
     pub fn record_failure(&mut self, sync_mode: SyncMode, error: &dyn std::error::Error) {
         self.consecutive_failures += 1;
 
@@ -233,7 +221,6 @@ mod tests {
         sm.record_success(SyncMode::Full);
         assert!(!sm.needs_full_sync());
 
-        // Simulate failures
         for _ in 0..3 {
             sm.record_failure(SyncMode::Incremental, &std::io::Error::other("test"));
         }

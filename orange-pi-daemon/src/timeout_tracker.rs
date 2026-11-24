@@ -1,11 +1,9 @@
 //! Decide when a modem that keeps timing out should be forgotten and re-probed.
 //!
-//! A cached modem that times out is never touched by rediscovery, which only
-//! looks at USB devices with no cached port. So a wedged modem, or a cache entry
-//! left pointing at the wrong port by a re-enumeration, timed out on every scan
+//! Rediscovery only looks at USB devices with no cached port, so a wedged modem
+//! or a cache entry left on the wrong port by a re-enumeration would time out
 //! forever. After enough consecutive timeouts the modem is dropped from the
-//! cache; the next reconcile then probes its device again and resets it if it is
-//! silent.
+//! cache; the next reconcile probes its device again and resets it if silent.
 
 use std::collections::HashMap;
 
@@ -69,7 +67,6 @@ mod tests {
                 forgotten += 1;
             }
         }
-        // Forgotten at 5 and again at 10, never in between.
         assert_eq!(forgotten, 2);
     }
 

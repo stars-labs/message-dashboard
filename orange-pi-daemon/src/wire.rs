@@ -1,9 +1,7 @@
 //! Every request and response body that crosses the daemon-Worker boundary.
-//!
-//! This module is the single source of truth for the contract. `cargo test`
-//! writes TypeScript declarations for each type to
-//! `sms-dashboard/shared/daemon-wire/` (directory set in `.cargo/config.toml`),
-//! and the Worker's valibot schemas are checked against them by `tsc`.
+//! `cargo test` writes TypeScript declarations for each type to
+//! `sms-dashboard/shared/daemon-wire/`, which the Worker's valibot schemas are
+//! checked against by `tsc`.
 
 use crate::identifiers::{Iccid, Imei, SmsAddress};
 use crate::types::SmsSubmission;
@@ -156,14 +154,11 @@ pub enum ModemStatus {
     Disconnected,
 }
 
-/// Sync mode for state reconciliation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum SyncMode {
-    /// Full state sync - reconcile all devices with server
     Full,
-    /// Incremental update - only send changed data
     Incremental,
 }
 
@@ -176,8 +171,7 @@ impl SyncMode {
     }
 }
 
-/// Flat modem report for the single-struct API (migration 033+).
-/// One struct per modem, sent in `ModemReportsRequest::modem_reports`.
+/// One per modem, sent in `ModemReportsRequest::modem_reports`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ModemReport {
@@ -325,7 +319,7 @@ pub struct PendingSmsResponse {
     pub pending_messages: Vec<PendingSms>,
 }
 
-// The transport includes failures, while successful modem submissions cannot.
+// Unlike `SmsSubmission`, this includes transport failures.
 #[derive(Debug, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]

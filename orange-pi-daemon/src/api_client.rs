@@ -33,7 +33,7 @@ pub struct ApiClient {
 impl ApiClient {
     pub fn new(config: Config) -> Result<Self> {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30)) // Increased to 30s for large uploads
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .context("Failed to create HTTP client")?;
         Ok(Self { client, config })
@@ -123,9 +123,8 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Upload messages with proper batching to avoid overwhelming the API
     pub async fn upload_messages(&self, messages: &[StoredMessage]) -> Result<Vec<UploadResult>> {
-        const BATCH_SIZE: usize = 50; // Match the server's internal batch size
+        const BATCH_SIZE: usize = 50;
 
         if messages.is_empty() {
             return Ok(vec![]);
@@ -133,7 +132,6 @@ impl ApiClient {
 
         let url = format!("{}/api/control/messages", self.config.api_url);
 
-        // Process messages in batches to avoid overwhelming the API
         let total = messages.len();
         let mut results = Vec::with_capacity(messages.len());
 
@@ -145,7 +143,6 @@ impl ApiClient {
                 chunk.len()
             );
 
-            // Upload this batch
             let response = self
                 .client
                 .post(&url)
@@ -177,7 +174,6 @@ impl ApiClient {
                 .context("Invalid message upload response")?;
             results.extend(response.results);
 
-            // Small delay between batches to avoid rate limiting
             if batch_num < messages.chunks(BATCH_SIZE).len() - 1 {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
@@ -191,7 +187,6 @@ impl ApiClient {
         Ok(results)
     }
 
-    /// Get pending SMS to send
     pub async fn get_pending_sms(&self) -> Result<Vec<PendingSms>> {
         let url = format!("{}/api/control/pending-sms", self.config.api_url);
 

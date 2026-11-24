@@ -5,7 +5,6 @@
 //! where a persistent reader can see them. This module holds the parsing half so
 //! it can be tested without a modem.
 
-/// A call-related unsolicited result code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UrcEvent {
     /// An incoming call is ringing. Repeats every few seconds while ringing.
@@ -64,8 +63,7 @@ pub fn parse_urc_line(line: &str) -> Option<UrcEvent> {
 mod tests {
     use super::*;
 
-    // The strings below are exactly what an EC20 sent on the MODEM port during
-    // the 2026-09-16 inbound-call test.
+    // The strings below are exactly what an EC20 sent on the MODEM port.
     #[test]
     fn test_parses_ring() {
         assert_eq!(parse_urc_line("RING"), Some(UrcEvent::Ring));

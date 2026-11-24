@@ -5,7 +5,6 @@ import type { ModemStatus } from "./ModemStatus";
 import type { SimNumber } from "./SimNumber";
 
 /**
- * Flat modem report for the single-struct API (migration 033+).
- * One struct per modem, sent in `ModemReportsRequest::modem_reports`.
+ * One per modem, sent in `ModemReportsRequest::modem_reports`.
  */
 export type ModemReport = { detected_iccid?: Iccid, detected_operator?: string, detected_phone_number?: SimNumber, equipment_id: Imei, firmware_revision: string | null, hardware_revision: string | null, manufacturer: string | null, model: string | null, modem_index?: number, rssi?: number, signal_percent?: number, status: ModemStatus, usb_path?: string, usb_port?: number, };

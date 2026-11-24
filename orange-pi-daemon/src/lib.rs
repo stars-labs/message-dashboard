@@ -40,19 +40,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_signal_cache_basic() {
-        let cache = SignalCache::new(2); // 2 second TTL
+        let cache = SignalCache::new(2);
 
-        // First access should miss
         assert!(cache.get("modem1").await.is_none());
 
-        // Store signal data
         let signal = SignalData {
             percent: 75,
             rssi: -65,
         };
         cache.set("modem1".to_string(), signal.clone()).await;
 
-        // Second access should hit
         let cached = cache.get("modem1").await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().percent, 75);
@@ -60,7 +57,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_signal_cache_expiration() {
-        let cache = SignalCache::new(1); // 1 second TTL
+        let cache = SignalCache::new(1);
 
         let signal = SignalData {
             percent: 50,
@@ -68,13 +65,10 @@ mod tests {
         };
         cache.set("modem1".to_string(), signal).await;
 
-        // Should hit immediately
         assert!(cache.get("modem1").await.is_some());
 
-        // Wait for expiration
         sleep(Duration::from_millis(1100)).await;
 
-        // Should miss after expiration
         assert!(cache.get("modem1").await.is_none());
     }
 
@@ -82,7 +76,6 @@ mod tests {
     fn test_sync_manager_mode() {
         let sync_manager = SyncManager::new();
 
-        // First sync should always be full
         assert!(sync_manager.needs_full_sync());
         assert_eq!(sync_manager.get_sync_mode(), SyncMode::Full);
     }
@@ -91,7 +84,6 @@ mod tests {
     fn test_retry_manager_basic() {
         let retry_manager = RetryManager::new(3, 1000);
 
-        // Should allow first few retries
         assert!(retry_manager.should_retry());
     }
 
@@ -99,15 +91,14 @@ mod tests {
     fn test_retry_manager_delays() {
         let mut retry_manager = RetryManager::new(3, 1000);
 
-        // Get delays for attempts
         let delay1 = retry_manager.next_delay();
-        assert_eq!(delay1, 1000); // Base delay
+        assert_eq!(delay1, 1000);
 
         let delay2 = retry_manager.next_delay();
-        assert_eq!(delay2, 2000); // Exponential backoff
+        assert_eq!(delay2, 2000);
 
         let delay3 = retry_manager.next_delay();
-        assert_eq!(delay3, 4000); // Further backoff
+        assert_eq!(delay3, 4000);
     }
 
     #[test]
@@ -182,18 +173,15 @@ mod tests {
             Some(Iccid::try_from("89860121750097854321").unwrap())
         );
 
-        // Test serialization — modem_reports format
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["equipment_id"], "123456789012345");
         assert_eq!(json["detected_iccid"], "89860121750097854321");
-        assert!(json.get("usb_port").is_none()); // skip_serializing_if = None
+        assert!(json.get("usb_port").is_none());
         assert_eq!(json["usb_path"], "1-1.4.2.2.2");
 
-        // Round-trip back into the struct
         let parsed: ModemReport = serde_json::from_value(json).unwrap();
         assert_eq!(parsed.usb_path, Some("1-1.4.2.2.2".to_string()));
 
-        // usb_path = None must be omitted from the wire format
         let report_no_path = ModemReport {
             usb_path: None,
             ..report
@@ -231,14 +219,12 @@ mod tests {
             sim_index: Some(1),
         };
 
-        // Verify SIM is associated with a modem
         assert!(sim.current_modem_id.is_some());
         assert_eq!(
             sim.current_modem_id,
             Some(Imei::try_from("123456789000456").unwrap())
         );
 
-        // Verify phone number is present
         assert!(sim.phone_number.is_some());
         assert!(sim.phone_number.unwrap().as_str().starts_with('+'));
     }
@@ -248,12 +234,10 @@ mod tests {
         let now = chrono::Utc::now();
         let formatted = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
-        // Verify format: YYYY-MM-DDTHH:MM:SS.sssZ
         assert!(formatted.contains('T'));
         assert!(formatted.ends_with('Z'));
         assert_eq!(formatted.len(), 24);
 
-        // Ensure consistent format across all timestamp fields
         let message = Message {
             phone_iccid: Iccid::try_from("a1").unwrap(),
             phone_number: SmsAddress::from("test"),
@@ -275,14 +259,12 @@ mod tests {
     async fn test_dbus_client_creation() {
         use crate::dbus_client::DBusClient;
         let _client = DBusClient::new().await;
-        // Should create without panicking
     }
 
     #[tokio::test]
     async fn test_modem_manager_creation() {
         use crate::modem_manager::ModemManager;
         let _manager = ModemManager::new().await;
-        // Should create with D-Bus client and signal cache
     }
 
     #[test]
@@ -296,7 +278,6 @@ mod tests {
             check_interval_secs: 30,
         };
         let _client = ApiClient::new(config).unwrap();
-        // Should create without panicking
     }
 
     #[tokio::test]
@@ -316,7 +297,6 @@ mod tests {
         let modem_manager = Arc::new(ModemManager::new().await);
         let mut sender = SmsSender::new(api_client, modem_manager, "test-session".to_string());
 
-        // Test cache update
         let mut cache = std::collections::HashMap::new();
         cache.insert(
             Iccid::try_from("89860000000000000001").unwrap(),

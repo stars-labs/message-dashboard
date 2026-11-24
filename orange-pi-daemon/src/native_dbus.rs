@@ -5,19 +5,15 @@ use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use zbus::{proxy, Connection};
 
-/// Native D-Bus client for zero-overhead modem communication
-/// Eliminates subprocess overhead completely by using native D-Bus bindings
 pub struct NativeDBusClient {
     connection: Option<Connection>,
 }
 
-// D-Bus ObjectManager maps object paths to interfaces and their properties.
 type ManagedObjects = HashMap<
     zbus::zvariant::OwnedObjectPath,
     HashMap<String, HashMap<String, zbus::zvariant::OwnedValue>>,
 >;
 
-// ModemManager D-Bus proxy interfaces
 #[proxy(
     interface = "org.freedesktop.ModemManager1",
     default_service = "org.freedesktop.ModemManager1",
@@ -123,7 +119,6 @@ trait Sms {
 }
 
 impl NativeDBusClient {
-    /// Create a new native D-Bus client with retry logic
     pub async fn new() -> Self {
         const MAX_ATTEMPTS: u32 = 3;
         let mut attempts = 0;
@@ -166,12 +161,10 @@ impl NativeDBusClient {
         Self { connection: None }
     }
 
-    /// Check if native D-Bus is available
     pub fn is_available(&self) -> bool {
         self.connection.is_some()
     }
 
-    /// List all modems using native D-Bus
     pub async fn list_modems(&self) -> Result<Vec<String>> {
         let conn = self
             .connection
@@ -203,7 +196,6 @@ impl NativeDBusClient {
         Ok(modem_ids)
     }
 
-    /// Get modem state using native D-Bus
     pub async fn get_modem_state(&self, modem_id: &str) -> Result<ModemState> {
         let conn = self
             .connection
@@ -222,7 +214,6 @@ impl NativeDBusClient {
         Ok(ModemState::from_code(state_code))
     }
 
-    /// Get SIM ICCID using native D-Bus
     pub async fn get_sim_iccid(&self, modem_id: &str) -> Result<Option<Iccid>> {
         let conn = self
             .connection
@@ -261,7 +252,6 @@ impl NativeDBusClient {
         }
     }
 
-    /// Get signal quality using native D-Bus
     pub async fn get_signal_quality(&self, modem_id: &str) -> Result<(u32, bool)> {
         let conn = self
             .connection
@@ -281,7 +271,6 @@ impl NativeDBusClient {
             .context("Failed to get signal quality")
     }
 
-    /// Get device details using native D-Bus
     pub async fn get_device_details(&self, modem_id: &str) -> Result<DeviceDetails> {
         let conn = self
             .connection
@@ -310,7 +299,6 @@ impl NativeDBusClient {
         })
     }
 
-    /// Get phone number using native D-Bus
     pub async fn get_phone_number(&self, modem_id: &str) -> Result<Option<SimNumber>> {
         let conn = self
             .connection
@@ -329,7 +317,6 @@ impl NativeDBusClient {
             .await
             .context("Failed to get modem status")?;
 
-        // Try multiple keys where phone number might be stored
         for key in &["m3gpp-subscription-state", "cdma-mdn", "own-numbers"] {
             if let Some(value) = status.get(*key) {
                 if let Ok(number) = value.downcast_ref::<String>() {
@@ -343,7 +330,6 @@ impl NativeDBusClient {
         Ok(None)
     }
 
-    /// List SMS messages using native D-Bus
     pub async fn list_sms(&self, modem_id: &str) -> Result<Vec<SmsMessage>> {
         let conn = self
             .connection
@@ -364,7 +350,7 @@ impl NativeDBusClient {
             let sms_proxy = SmsProxy::builder(conn).path(&sms_path)?.build().await?;
 
             let state = sms_proxy.state().await.unwrap_or(0);
-            // Only get received messages (state == 3)
+            // MM_SMS_STATE_RECEIVED
             if state == 3 {
                 messages.push(SmsMessage {
                     path: sms_path.to_string(),
@@ -378,7 +364,6 @@ impl NativeDBusClient {
         Ok(messages)
     }
 
-    /// Delete an SMS message using native D-Bus
     pub async fn delete_sms(&self, modem_id: &str, sms_path: &str) -> Result<()> {
         let conn = self
             .connection
@@ -403,7 +388,6 @@ impl NativeDBusClient {
             .context("Failed to delete SMS message")
     }
 
-    /// Send an SMS message using native D-Bus
     pub async fn send_sms(&self, modem_id: &str, recipient: &SmsAddress, text: &str) -> Result<()> {
         let conn = self
             .connection
@@ -419,7 +403,6 @@ impl NativeDBusClient {
             .await
             .context("Failed to create Messaging proxy")?;
 
-        // Create the SMS message
         let mut props = std::collections::HashMap::new();
         props.insert("number".to_string(), recipient.as_str().into());
         props.insert("text".to_string(), text.to_string().into());
@@ -429,14 +412,12 @@ impl NativeDBusClient {
             .await
             .context("Failed to create SMS message")?;
 
-        // Get the SMS proxy to send it
         let sms_proxy = SmsProxy::builder(conn)
             .path(sms_path.clone())?
             .build()
             .await
             .context("Failed to create SMS proxy")?;
 
-        // Send the SMS
         sms_proxy.send().await.context("Failed to send SMS")?;
 
         debug!("✅ SMS sent successfully via D-Bus");
@@ -444,7 +425,6 @@ impl NativeDBusClient {
     }
 }
 
-// Data structures
 pub struct DeviceDetails {
     pub imei: Option<Imei>,
     pub manufacturer: Option<String>,

@@ -39,7 +39,6 @@ impl CallState {
     }
 }
 
-/// One voice entry from `AT+CLCC`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VoiceCall {
     pub direction: CallDirection,
@@ -132,7 +131,7 @@ mod tests {
 
     #[test]
     fn clcc_skips_the_data_bearer() {
-        // Captured on S78 while S86 was calling it, 2026-09-16.
+        // Captured from a real modem: the permanent mode=1 data bearer plus a ringing voice call.
         let response =
             "\r\n+CLCC: 1,0,0,1,0,\"\",128\r\n+CLCC: 4,1,4,0,0,\"97817169\",129\r\n\r\nOK\r\n";
         assert_eq!(

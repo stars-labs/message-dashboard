@@ -178,27 +178,24 @@ pub struct Message {
     pub direction: Direction,
 }
 
-// Internal structure for tracking messages with their SMS paths
 #[derive(Debug, Clone)]
 pub struct MessageWithPath {
     pub message: Message,
     pub modem_id: String,
-    pub sms_path: String, // D-Bus path for deletion after upload
+    pub sms_path: String,
 }
 
-// Normalized modem data (hardware) - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Modem {
-    pub equipment_id: Imei, // IMEI (Primary Key)
+    pub equipment_id: Imei,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub firmware_revision: Option<String>,
     pub hardware_revision: Option<String>,
     pub status: ModemStatus,
 
-    // Optional modem_state fields (can be included for convenience)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub signal: Option<i32>, // Signal percent
+    pub signal: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rssi: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -221,14 +218,13 @@ pub struct Modem {
     pub sim_read_status: Option<SimReadStatus>,
 }
 
-// Normalized SIM data - matches server schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sim {
-    pub iccid: Iccid, // ICCID (Primary Key)
+    pub iccid: Iccid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phone_number: Option<SimNumber>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_modem_id: Option<Imei>, // Foreign Key to Modem.equipment_id
+    pub current_modem_id: Option<Imei>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operator_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -238,7 +234,6 @@ pub struct Sim {
     pub sim_index: Option<i32>,
 }
 
-// Phone structure matching API expectations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Phone {
     pub iccid: Iccid,
@@ -251,7 +246,6 @@ pub struct Phone {
     pub firmware_revision: Option<String>,
     pub hardware_revision: Option<String>,
     pub imei: Option<Imei>,
-    // Optional fields for compatibility
     pub country: Option<String>,
     pub flag: Option<String>,
     pub carrier: Option<String>,

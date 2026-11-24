@@ -15,7 +15,6 @@ fn open_serial(port: &str) -> Result<File> {
     termios::cfsetispeed(&mut term, BaudRate::B115200)?;
     termios::cfsetospeed(&mut term, BaudRate::B115200)?;
 
-    // Raw mode: 8N1
     term.control_flags &= !(termios::ControlFlags::CSIZE | termios::ControlFlags::PARENB);
     term.control_flags |=
         termios::ControlFlags::CS8 | termios::ControlFlags::CREAD | termios::ControlFlags::CLOCAL;
@@ -44,12 +43,10 @@ fn open_serial(port: &str) -> Result<File> {
 fn send_at(port: &str, cmd: &str, timeout_ms: u64) -> Result<String> {
     let mut file = open_serial(port)?;
 
-    // Send command
     let full_cmd = format!("{cmd}\r");
     file.write_all(full_cmd.as_bytes())?;
     file.flush()?;
 
-    // Read response
     let mut response = Vec::new();
     let mut buf = [0u8; 256];
     let start = Instant::now();
@@ -101,7 +98,6 @@ fn main() -> Result<()> {
     };
 
     if let Some(cmd) = args.get(2) {
-        // Single command mode
         println!("Port: {port}");
         println!("Command: {cmd}");
         println!("---");
@@ -114,7 +110,6 @@ fn main() -> Result<()> {
             println!("  [{}]", line.trim());
         }
     } else {
-        // Test multiple commands
         println!("Testing AT commands on {port}");
         println!("================================");
 

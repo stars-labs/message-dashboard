@@ -68,7 +68,6 @@ impl Pacer {
         Some(self.buffer.drain(..HOST_FRAME).collect())
     }
 
-    /// Bytes dropped since the last call, for logging.
     pub fn take_dropped(&mut self) -> usize {
         std::mem::take(&mut self.dropped)
     }

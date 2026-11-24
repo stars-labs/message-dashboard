@@ -1,30 +1,19 @@
 //! Restart the daemon when the collection loop stops making progress.
 //!
-//! On 2026-09-18 the kernel disabled a USB root port ("disabled by hub (EMI?)")
-//! and re-enumerated every modem on that bus. The daemon neither recovered nor
-//! died: it stopped reading SMS and stopped sending heartbeats, yet the process
-//! stayed alive, so `Restart=always` never fired. Collection was down for two
-//! hours and thirty-seven minutes until someone restarted it by hand.
-//!
-//! A hung process is worse than a dead one. This turns "silent until a human
-//! notices" into "restarted within a few minutes", which is the behaviour the
-//! unit file already expects.
+//! A hung process never triggers `Restart=always`, so a stalled collection loop
+//! must make the daemon exit itself.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// How long the reader may go without a completed cycle before this is a stall.
-/// A healthy cycle takes 6–18 s across 93 modems; a slow one under load is
-/// still far below this.
+/// A healthy cycle takes 6–18 s across 93 modems, far below this.
 pub const STALL_AFTER: Duration = Duration::from_secs(300);
 
 /// Startup grace. `preStart` already waits for USB to settle, but the first
 /// cycle still has to enumerate every modem.
 pub const STARTUP_GRACE: Duration = Duration::from_secs(600);
 
-/// Whether the daemon should exit and let systemd restart it.
-///
 /// `last_read_age` is `None` before the first successful cycle, which is only a
 /// stall once the startup grace has passed — otherwise the watchdog would kill
 /// the daemon while it is still enumerating.
@@ -35,7 +24,6 @@ pub fn should_restart(uptime: Duration, last_read_age: Option<Duration>) -> bool
     }
 }
 
-/// What to write to the journal before exiting, so the restart is not a mystery.
 pub fn stall_reason(uptime: Duration, last_read_age: Option<Duration>) -> String {
     match last_read_age {
         Some(age) => format!(
@@ -50,9 +38,8 @@ pub fn stall_reason(uptime: Duration, last_read_age: Option<Duration>) -> String
     }
 }
 
-/// The moment the modem reader last completed a cycle, as unix seconds. Zero
-/// means "never". An atomic rather than the async health tracker, so the
-/// watchdog can read it without the runtime's help.
+/// Unix seconds of the last completed read cycle; zero means never. Atomic so
+/// the watchdog needs nothing from the async runtime.
 #[derive(Clone, Default)]
 pub struct Heartbeat(Arc<AtomicU64>);
 
@@ -75,12 +62,8 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Run the watchdog on its own OS thread.
-///
-/// The first version was a tokio task, and on 2026-09-20 it never fired: the
-/// stall it existed to catch was every runtime worker spinning, which starved
-/// the watchdog along with everything else. A supervisor must not depend on
-/// the thing it supervises, so this one needs nothing from the runtime.
+/// Runs on its own OS thread: a stall can be every tokio worker spinning, which
+/// would starve a tokio-based watchdog too.
 pub fn spawn(heartbeat: Heartbeat) -> std::io::Result<()> {
     let started = Instant::now();
     std::thread::Builder::new()
@@ -89,8 +72,7 @@ pub fn spawn(heartbeat: Heartbeat) -> std::io::Result<()> {
             std::thread::sleep(Duration::from_secs(30));
             let (uptime, age) = (started.elapsed(), heartbeat.age());
             if should_restart(uptime, age) {
-                // eprintln, not tracing: stderr goes straight to the journal and
-                // needs no runtime either.
+                // eprintln, not tracing: needs no runtime.
                 eprintln!(
                     "stall watchdog: {}. Exiting so systemd restarts the daemon.",
                     stall_reason(uptime, age)
@@ -114,7 +96,6 @@ mod tests {
 
     #[test]
     fn a_stalled_reader_restarts() {
-        // The 2026-09-18 outage: alive, quiet, and useless for 2h37m.
         assert!(should_restart(MINUTE * 60, Some(MINUTE * 157)));
         assert!(should_restart(MINUTE * 60, Some(STALL_AFTER)));
         assert!(!should_restart(

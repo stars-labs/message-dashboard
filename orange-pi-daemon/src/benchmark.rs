@@ -9,25 +9,19 @@ fn elapsed_millis(elapsed: Duration) -> f64 {
 use tokio::process::Command;
 use tracing::{info, warn};
 
-/// Benchmark module for comparing D-Bus performance
 pub struct PerformanceBenchmark;
 
 impl PerformanceBenchmark {
-    /// Run a comparative benchmark of different D-Bus methods
     pub async fn run_benchmark() -> Result<()> {
         info!("🏁 Starting Performance Benchmark");
         info!("================================");
 
-        // Test 1: Native D-Bus (if available)
         let native_result = Self::benchmark_native_dbus().await;
 
-        // Test 2: Busctl subprocess
         let busctl_result = Self::benchmark_busctl().await;
 
-        // Test 3: mmcli subprocess (baseline)
         let mmcli_result = Self::benchmark_mmcli().await;
 
-        // Print results
         info!("\n📊 BENCHMARK RESULTS");
         info!("====================");
 
@@ -61,11 +55,9 @@ impl PerformanceBenchmark {
         Ok(())
     }
 
-    /// Benchmark native D-Bus performance
     async fn benchmark_native_dbus() -> Result<f64> {
         let dbus_client = DBusClient::new().await;
 
-        // Warm up
         let _ = dbus_client.list_modems().await;
 
         let iterations = 10;
@@ -87,16 +79,13 @@ impl PerformanceBenchmark {
         Ok(avg_ms)
     }
 
-    /// Benchmark busctl subprocess performance
     async fn benchmark_busctl() -> Result<f64> {
-        // Check if busctl is available
         let check = Command::new("which").arg("busctl").output().await?;
 
         if !check.status.success() {
             return Err(anyhow::anyhow!("busctl not available"));
         }
 
-        // Warm up
         let _ = Command::new("busctl")
             .arg("call")
             .arg("org.freedesktop.ModemManager1")
@@ -130,16 +119,13 @@ impl PerformanceBenchmark {
         Ok(avg_ms)
     }
 
-    /// Benchmark mmcli subprocess performance (baseline)
     async fn benchmark_mmcli() -> Result<f64> {
-        // Check if mmcli is available
         let check = Command::new("which").arg("mmcli").output().await?;
 
         if !check.status.success() {
             return Err(anyhow::anyhow!("mmcli not available"));
         }
 
-        // Warm up
         let _ = Command::new("mmcli").arg("-L").output().await;
 
         let iterations = 10;
@@ -159,7 +145,6 @@ impl PerformanceBenchmark {
         Ok(avg_ms)
     }
 
-    /// Calculate operations per second for a given method
     pub async fn measure_throughput() -> Result<()> {
         info!("📈 Measuring Throughput (operations/second)");
         info!("===========================================");
@@ -184,7 +169,6 @@ impl PerformanceBenchmark {
         info!("✅ Completed {} operations in {:.2}s", operations, elapsed);
         info!("📊 Throughput: {:.1} operations/second", ops_per_sec);
 
-        // Estimate for 92 modems
         let time_for_92_modems = 92.0 / ops_per_sec;
         info!("⏱️  Time to process 92 modems: {:.2}s", time_for_92_modems);
 

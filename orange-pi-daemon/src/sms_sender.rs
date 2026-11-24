@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 pub struct SmsSender {
     api_client: crate::api_client::ApiClient,
     modem_manager: Arc<crate::modem_manager::ModemManager>,
-    modem_cache: HashMap<Iccid, String>, // ICCID -> modem_id mapping
+    modem_cache: HashMap<Iccid, String>,
     session_id: String,
 }
 
@@ -27,12 +27,10 @@ impl SmsSender {
         }
     }
 
-    /// Update the modem cache with current ICCID mappings
     pub fn update_modem_cache(&mut self, cache: HashMap<Iccid, String>) {
         self.modem_cache = cache;
     }
 
-    /// Fetch pending SMS messages from the API
     pub async fn get_pending_sms(&self) -> Result<Vec<PendingSms>> {
         let url = format!("{}/api/control/pending-sms", self.api_client.config.api_url);
 
@@ -66,11 +64,9 @@ impl SmsSender {
         Ok(api_response.pending_messages)
     }
 
-    /// Find modem ID for a given ICCID using cache or D-Bus
     pub async fn find_modem_for_iccid(&self, target_iccid: &Iccid) -> Option<String> {
         debug!("🔍 Searching for modem with ICCID: {}", target_iccid);
 
-        // First check our cache
         if let Some(modem_id) = self.modem_cache.get(target_iccid) {
             debug!(
                 "✅ Found modem {} in cache for ICCID {}",
@@ -79,13 +75,11 @@ impl SmsSender {
             return Some(modem_id.clone());
         }
 
-        // If not in cache, search through all modems via D-Bus
         info!(
             "📱 ICCID {} not in cache, searching via D-Bus...",
             target_iccid
         );
 
-        // List all modems using D-Bus
         let modem_ids = match self.modem_manager.list_modems().await {
             Ok(ids) => ids,
             Err(e) => {
@@ -96,7 +90,6 @@ impl SmsSender {
 
         debug!("📱 Found {} modems to check", modem_ids.len());
 
-        // Check each modem for matching ICCID
         for modem_id in modem_ids {
             match self.modem_manager.get_iccid(&modem_id).await {
                 Ok(Some(iccid)) => {
@@ -123,9 +116,7 @@ impl SmsSender {
         None
     }
 
-    /// Send an SMS message using `ModemManager` (AT commands or D-Bus)
     pub async fn send_sms(&self, sms: &PendingSms) -> Result<SmsSubmission> {
-        // Find the modem for this ICCID
         let modem_id = match Iccid::try_from(sms.phone_iccid.as_str()) {
             Ok(iccid) => self.find_modem_for_iccid(&iccid).await,
             Err(_) => None,
@@ -143,7 +134,6 @@ impl SmsSender {
             modem_id, sms.recipient
         );
 
-        // Send SMS using ModemManager (supports both AT commands and D-Bus)
         match self
             .modem_manager
             .send_sms_with_short_code(
@@ -177,7 +167,6 @@ impl SmsSender {
         }
     }
 
-    /// Report SMS result back to API
     pub async fn report_sms_result(
         &self,
         message_id: &str,
@@ -223,7 +212,6 @@ impl SmsSender {
         Ok(())
     }
 
-    /// Process all pending SMS messages
     pub async fn process_pending_sms(&self) -> Result<()> {
         let pending_messages = self.get_pending_sms().await?;
 
@@ -243,7 +231,6 @@ impl SmsSender {
                 }
                 Err(e) => {
                     error!("❌ Failed to send SMS to {}: {}", sms.recipient, e);
-                    // Continue with next message even if this one failed
                 }
             }
         }

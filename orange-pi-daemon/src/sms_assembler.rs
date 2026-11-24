@@ -1,4 +1,4 @@
-//! SMS assembler - buffers multipart SMS messages and assembles them when complete
+//! Buffers multipart SMS parts until all arrive.
 
 use crate::at_modem::AtSms;
 use crate::identifiers::{Iccid, SmsAddress};
@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
-/// Key to identify messages that belong together
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 struct MessageGroupKey {
     iccid: Iccid,
@@ -15,30 +14,27 @@ struct MessageGroupKey {
     total_parts: u8,
 }
 
-/// Buffered message part
 #[derive(Debug, Clone)]
 struct MessagePart {
     part_number: u8,
     content: String,
     timestamp: String,
-    index: u32, // SIM storage index for deletion
+    index: u32,
     received_at: Instant,
 }
 
-/// Assembled complete message
 #[derive(Debug, Clone)]
 pub struct AssembledMessage {
-    pub content: String, // Combined text from all parts
+    pub content: String,
     pub sender: SmsAddress,
-    pub timestamp: String,     // Use first part's timestamp
-    pub sms_indices: Vec<u32>, // All SIM indices for deletion
+    /// First part's timestamp.
+    pub timestamp: String,
+    /// SIM indices of every part, for deletion.
+    pub sms_indices: Vec<u32>,
 }
 
-/// SMS assembler that buffers multipart messages until all parts arrive
 pub struct SmsAssembler {
-    /// In-memory buffer: groups -> parts
     buffer: HashMap<MessageGroupKey, Vec<MessagePart>>,
-    /// Timeout for incomplete messages (5 minutes)
     timeout: Duration,
 }
 
@@ -49,20 +45,16 @@ impl Default for SmsAssembler {
 }
 
 impl SmsAssembler {
-    /// Create a new SMS assembler with 5-minute timeout
     pub fn new() -> Self {
         SmsAssembler {
             buffer: HashMap::new(),
-            timeout: Duration::from_secs(300), // 5 minutes
+            timeout: Duration::from_secs(300),
         }
     }
 
-    /// Add a message part to the buffer
-    /// Returns Some(AssembledMessage) if all parts are now complete, or if it's a single-part message
+    /// Returns the message when all parts are present, or immediately for a single-part message.
     pub fn add_part(&mut self, sms: AtSms, iccid: &Iccid) -> Option<AssembledMessage> {
-        // If no concat info, return as single message immediately
         let Some(concat_info) = &sms.concat_info else {
-            // Single-part message - return immediately
             return Some(AssembledMessage {
                 content: sms.text,
                 sender: sms.sender,
@@ -91,10 +83,8 @@ impl SmsAssembler {
             part.part_number, concat_info.total_parts, concat_info.ref_id, sms.sender, iccid
         );
 
-        // Add to buffer
         let parts = self.buffer.entry(key.clone()).or_default();
 
-        // Check for duplicate part numbers
         if parts.iter().any(|p| p.part_number == part.part_number) {
             warn!(
                 "Duplicate part {} for ref_id={} - skipping",
@@ -105,9 +95,7 @@ impl SmsAssembler {
 
         parts.push(part);
 
-        // Check if complete
         if parts.len() == usize::from(concat_info.total_parts) {
-            // All parts received - assemble!
             debug!(
                 "All {} parts received for ref_id={} - assembling",
                 parts.len(),
@@ -125,22 +113,18 @@ impl SmsAssembler {
         None
     }
 
-    /// Assemble complete message and remove from buffer
     fn assemble_and_remove(&mut self, key: &MessageGroupKey) -> Option<AssembledMessage> {
         let parts = self.buffer.remove(key)?;
 
-        // Sort by part number
         let mut sorted_parts = parts;
         sorted_parts.sort_by_key(|p| p.part_number);
 
-        // Combine content
         let content = sorted_parts
             .iter()
             .map(|p| p.content.as_str())
             .collect::<Vec<_>>()
             .join("");
 
-        // Use first part's timestamp as canonical
         let timestamp = sorted_parts.first()?.timestamp.clone();
         let sender = key.sender.clone();
         let sms_indices: Vec<u32> = sorted_parts.iter().map(|p| p.index).collect();
@@ -160,8 +144,7 @@ impl SmsAssembler {
         })
     }
 
-    /// Remove expired incomplete messages (>5 minutes old)
-    /// Returns expired parts as individual messages (fallback behavior)
+    /// Drops groups older than the timeout and returns their parts as individual messages.
     pub fn cleanup_expired(&mut self) -> Vec<AssembledMessage> {
         let now = Instant::now();
         let mut expired = Vec::new();
@@ -171,7 +154,6 @@ impl SmsAssembler {
                 return false;
             };
             if now.duration_since(oldest) > self.timeout {
-                // Timeout - convert parts to individual messages
                 warn!(
                     "Multipart message timeout for ref_id={}, sender={} ({}/{} parts received) - uploading parts individually",
                     key.ref_id, key.sender, parts.len(), key.total_parts
@@ -184,9 +166,9 @@ impl SmsAssembler {
                         sms_indices: vec![part.index],
                     });
                 }
-                false  // Remove from buffer
+                false
             } else {
-                true  // Keep
+                true
             }
         });
 
@@ -197,12 +179,10 @@ impl SmsAssembler {
         expired
     }
 
-    /// Get count of buffered message groups
     pub fn pending_count(&self) -> usize {
         self.buffer.len()
     }
 
-    /// Get count of buffered parts
     pub fn pending_parts_count(&self) -> usize {
         self.buffer.values().map(std::vec::Vec::len).sum()
     }
@@ -255,12 +235,10 @@ mod tests {
         let mut assembler = SmsAssembler::new();
         let iccid = Iccid::try_from("89860000000000000007").unwrap();
 
-        // Part 1
         let sms1 = make_test_sms(1, 1, 2, 42, "Hello ");
         let result1 = assembler.add_part(sms1, &iccid);
-        assert!(result1.is_none()); // Not complete yet
+        assert!(result1.is_none());
 
-        // Part 2
         let sms2 = make_test_sms(2, 2, 2, 42, "World");
         let result2 = assembler.add_part(sms2, &iccid);
         assert!(result2.is_some());
@@ -275,12 +253,10 @@ mod tests {
         let mut assembler = SmsAssembler::new();
         let iccid = Iccid::try_from("89860000000000000007").unwrap();
 
-        // Part 2 arrives first
         let sms2 = make_test_sms(2, 2, 2, 42, "World");
         let result2 = assembler.add_part(sms2, &iccid);
-        assert!(result2.is_none()); // Not complete yet
+        assert!(result2.is_none());
 
-        // Part 1 arrives second
         let sms1 = make_test_sms(1, 1, 2, 42, "Hello ");
         let result1 = assembler.add_part(sms1, &iccid);
         assert!(result1.is_some());
@@ -295,17 +271,14 @@ mod tests {
         let mut assembler = SmsAssembler::new();
         let iccid = Iccid::try_from("89860000000000000007").unwrap();
 
-        // Part 1
         let sms1 = make_test_sms(1, 1, 2, 42, "Hello");
         let result1 = assembler.add_part(sms1, &iccid);
         assert!(result1.is_none());
 
-        // Part 1 again (duplicate)
         let sms1_dup = make_test_sms(1, 1, 2, 42, "Hello");
         let result_dup = assembler.add_part(sms1_dup, &iccid);
         assert!(result_dup.is_none());
 
-        // Still waiting for part 2
         assert_eq!(assembler.pending_parts_count(), 1);
     }
 }

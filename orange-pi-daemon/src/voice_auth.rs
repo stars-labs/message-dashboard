@@ -16,7 +16,6 @@ use crate::identifiers::{Iccid, PhoneNumber};
 use ring::hmac;
 use std::net::IpAddr;
 
-/// Which adapter a connection belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Leg {
     /// Local (ingest) adapter: the daemon sends modem audio into the SFU.
@@ -34,12 +33,9 @@ impl Leg {
     }
 }
 
-/// What the modem should do when the first leg of a call arrives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallAction {
-    /// Place an outbound call to this E.164 number.
     Dial(PhoneNumber),
-    /// Answer the call ringing on the SIM.
     Answer,
 }
 
@@ -68,7 +64,6 @@ impl VoiceRequest {
         }
     }
 
-    /// The exact string the Worker signs.
     fn signing_input(&self) -> String {
         format!(
             "{}\n{}\n{}\n{}\n{}\n{}",
@@ -170,8 +165,7 @@ pub fn verify(api_key: &str, request: &VoiceRequest, now_unix: u64) -> bool {
     hmac::verify(&key, request.signing_input().as_bytes(), &tag).is_ok()
 }
 
-/// Cloudflare's published ranges (<https://www.cloudflare.com/ips/>, fetched
-/// 2026-09-17). The SFU adapter was observed connecting from `172.70.204.71`.
+/// Cloudflare's published ranges (<https://www.cloudflare.com/ips/>).
 const CLOUDFLARE_V4: &[(u32, u8)] = &[
     (0xADF5_3000, 20), // 173.245.48.0/20
     (0x6715_F400, 22), // 103.21.244.0/22

@@ -1,14 +1,4 @@
-//! Modem health diagnostic tool
-//!
 //! Usage: cargo run --bin `modem_health` <`modem_id`>
-//! Example: cargo run --bin `modem_health` 0  # Check /dev/ttyUSB2
-//!
-//! This tool performs a comprehensive health check on a modem including:
-//! - Signal quality
-//! - Network registration status
-//! - IMS status
-//! - SMS configuration
-//! - SIM card info
 
 use anyhow::Result;
 use orange_pi_daemon_rust::at_modem::{AtModemManager, ModemHealth};

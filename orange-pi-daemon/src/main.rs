@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-// Import from the library crate
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
 use orange_pi_daemon_rust::health::{HealthTask, HealthTracker};
@@ -26,17 +25,6 @@ use orange_pi_daemon_rust::worker_pool::{ModemResult, WorkerPool, WorkerPoolConf
 
 type SharedHealth = Arc<RwLock<HealthTracker>>;
 type SharedDevices = Arc<RwLock<HashMap<String, ModemReport>>>;
-
-// V7.3.0 - EMERGENCY FIX FOR MODEMMANAGER DELETION FAILURE
-// ModemManager refuses ALL SMS deletion requests, causing exponential message growth
-// Workaround: Automatic cleanup every 5 minutes removes old pending messages
-// Tasks:
-// 1. Modem Reader: Reads SMS from modems every 1 second (6 workers)
-// 2. Database Uploader: Dynamic batch size (10-100) based on message length, 50ms rate limiting
-// 3. Device Status Sync: Syncs device status every 30 seconds
-// 4. Statistics Logger: Logs database stats every 60 seconds
-// 5. Auto Cleanup: Removes old pending messages every 5 minutes (workaround for deletion failure)
-// 6. SMS Sender: Polls Cloudflare for pending outbound SMS and sends them via modems
 
 fn print_help(program: &str) {
     println!(
@@ -77,7 +65,6 @@ async fn build_modem_cache(modem_manager: &ModemManager) -> Result<HashMap<Strin
                 modems.len()
             );
             for modem_id in modems {
-                // Try IMEI first — this is the gate
                 let imei = match modem_manager.get_device_details(&modem_id).await {
                     Ok(Some((imei, ..))) => Some(imei),
                     Ok(None) => None,
@@ -92,7 +79,6 @@ async fn build_modem_cache(modem_manager: &ModemManager) -> Result<HashMap<Strin
                     continue;
                 };
 
-                // Try ICCID — optional, modem is still valid without it
                 let iccid = match modem_manager.get_iccid(&modem_id).await {
                     Ok(Some(iccid)) => Some(iccid),
                     Ok(None) => None,
@@ -140,7 +126,6 @@ async fn store_and_delete(
     msg_with_path: &MessageWithPath,
     counts: &mut ReaderCounts,
 ) {
-    // Save to SQLite immediately
     match store.store_message(
         &msg_with_path.message,
         &msg_with_path.modem_id,
@@ -149,7 +134,6 @@ async fn store_and_delete(
         Ok(true) => {
             counts.stored += 1;
 
-            // DELETE from SIM immediately (ALL messages - FIX for duplication bug)
             match manager
                 .delete_sms(&msg_with_path.modem_id, &msg_with_path.sms_path)
                 .await
@@ -174,14 +158,9 @@ async fn store_and_delete(
             }
         }
         Ok(false) => {
-            // Already in the local store, so the SIM copy is
-            // redundant — and it must still be deleted. Skipping
-            // it here stranded a message on the SIM for good
-            // whenever a reset landed between "stored" and
-            // "deleted": it was then re-read and re-assembled on
-            // every scan (65 messages, 8 GB of SD writes an hour
-            // by 2026-09-18), and a SIM that fills up makes the
-            // carrier drop new SMS.
+            // The SIM copy must still be deleted: a reset between "stored" and
+            // "deleted" would otherwise leave it to be re-read on every scan,
+            // and a full SIM makes the carrier drop new SMS.
             match manager
                 .delete_sms(&msg_with_path.modem_id, &msg_with_path.sms_path)
                 .await
@@ -216,10 +195,8 @@ async fn store_read_results(
     let mut reports = Vec::new();
     let mut counts = ReaderCounts::default();
     for result in results {
-        // A modem that keeps timing out is forgotten so the next
-        // reconcile probes its USB device again. Rediscovery never
-        // touches a cached modem, so without this a wedged or
-        // wrongly cached one timed out on every scan for good.
+        // Rediscovery never touches a cached modem, so a wedged one must be
+        // forgotten for the next reconcile to probe its USB device again.
         let timed_out = result.error.as_deref() == Some("Timeout");
         if timeouts.record(&result.modem_id, timed_out) {
             manager.forget_modem(&result.modem_id).await;
@@ -260,18 +237,14 @@ struct ModemReader {
     heartbeat: Heartbeat,
 }
 
-/// TASK 1: MODEM READER (Fast Loop - every 1 second)
-/// Reads SMS from modems and saves to database, then deletes from SIM immediately
 fn spawn_modem_reader(reader: ModemReader) {
     tokio::spawn(async move {
         let mut timeouts = TimeoutTracker::default();
         loop {
             let start = Instant::now();
 
-            // Snapshot the current live modem set (Task 8 may have reconciled it).
             let current_ids = reader.modem_set.read().await.clone();
 
-            // Read from all modems in parallel
             match reader.pool.process_modems(current_ids.clone()).await {
                 Ok(results) => {
                     let reports = store_read_results(
@@ -300,7 +273,6 @@ fn spawn_modem_reader(reader: ModemReader) {
                 }
             }
 
-            // Sleep 1 second before next modem check
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
@@ -344,9 +316,7 @@ struct Uploader {
     store: Arc<MessageStore>,
     client: Arc<ApiClient>,
     health: SharedHealth,
-    // Dynamic batch sizing: start small, grow if messages are short
     batch_size: usize,
-    // Exponential backoff for API failures (prevents hammering overloaded Worker)
     consecutive_failures: u32,
 }
 
@@ -364,7 +334,6 @@ impl Uploader {
     }
 
     async fn run_cycle(&mut self) {
-        // Apply exponential backoff if we've had failures
         if self.consecutive_failures > 0 {
             let backoff_secs =
                 (2u64.pow(self.consecutive_failures.min(6))).min(Self::MAX_BACKOFF_SECS);
@@ -375,11 +344,9 @@ impl Uploader {
             tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
         }
 
-        // Get pending messages from database with dynamic batch
         match self.store.claim_messages(self.batch_size, 90) {
             Ok(pending) if !pending.is_empty() => self.upload_batch(pending).await,
             Ok(_) => {
-                // No pending messages, wait before checking again
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(e) => {
@@ -390,21 +357,17 @@ impl Uploader {
     }
 
     async fn upload_batch(&mut self, pending: Vec<StoredMessage>) {
-        // Calculate approximate payload size
         let payload_size: usize = pending
             .iter()
             .map(|m| m.message.content.len() + m.message.phone_number.as_str().len() + 100) // +100 for JSON overhead
             .sum();
 
-        // Adjust batch size for next iteration based on current payload
         if payload_size < 100_000
             && pending.len() == self.batch_size
             && self.consecutive_failures == 0
         {
-            // Small payload and no failures, can increase batch size
             self.batch_size = (self.batch_size * 2).min(100);
         } else if payload_size > 500_000 || self.consecutive_failures > 2 {
-            // Large payload or API struggling, decrease batch size
             self.batch_size = (self.batch_size / 2).max(10);
         }
 
@@ -414,7 +377,6 @@ impl Uploader {
             payload_size / 1024
         );
 
-        // Upload to Cloudflare
         match self.client.upload_messages(&pending).await {
             Ok(results) => self.finish_upload(&pending, &results).await,
             Err(e) => {
@@ -426,9 +388,7 @@ impl Uploader {
                     error = %e,
                     "Uploader failed to send messages"
                 );
-                // Mark as failed for retry
                 let _ = self.store.return_to_pending(&pending, &e.to_string());
-                // Increment failure counter for backoff
                 self.consecutive_failures = self.consecutive_failures.saturating_add(1);
             }
         }
@@ -437,8 +397,7 @@ impl Uploader {
     async fn finish_upload(&mut self, pending: &[StoredMessage], results: &[UploadResult]) {
         let classification = classify_upload_results(pending, results);
         for id in &classification.unknown_ids {
-            // Worker returned an ID we didn't send — infrastructure bug,
-            // treat the whole batch as transient failure.
+            // An ID we never sent is a Worker bug; retry the whole batch.
             warn!("Worker returned unknown id {} in upload response", id);
             let _ = self
                 .store
@@ -452,8 +411,6 @@ impl Uploader {
             ..
         } = classification;
 
-        // Finalize each group independently so one bad message
-        // cannot block the rest of the batch.
         if let Err(e) = self.store.acknowledge_uploaded(&acknowledged) {
             error!("Failed to persist upload acknowledgement: {}", e);
             return;
@@ -476,19 +433,15 @@ impl Uploader {
             dead_letter.len(),
             retryable.len()
         );
-        // Reset backoff on success
         self.consecutive_failures = 0;
         self.health
             .write()
             .await
             .record_success(HealthTask::MessageUploader);
-        // Small delay to avoid rate limits
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-/// TASK 2: DATABASE UPLOADER (Dynamic Batch Size)
-/// Uploads pending messages with smart batching based on payload size
 fn spawn_uploader(store: Arc<MessageStore>, client: Arc<ApiClient>, health: SharedHealth) {
     tokio::spawn(async move {
         info!("☁️  Dynamic batch uploader started - SMART SIZING with BACKOFF!");
@@ -499,9 +452,8 @@ fn spawn_uploader(store: Arc<MessageStore>, client: Arc<ApiClient>, health: Shar
     });
 }
 
-/// TASK 3: DEVICE STATUS SYNC (Slow Loop - every 30 seconds)
-/// Reads latest device data from shared buffer (populated by Task 1) and syncs to API.
-/// This avoids a second `process_modems()` call that would fight over serial ports.
+/// Syncs the reader's latest reports instead of calling `process_modems()` again,
+/// which would fight the reader over serial ports.
 fn spawn_device_sync(
     client: Arc<ApiClient>,
     devices: SharedDevices,
@@ -516,7 +468,6 @@ fn spawn_device_sync(
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
 
-            // Read latest modem reports from shared buffer (populated by Task 1)
             let all_reports = {
                 let devices = devices.read().await;
                 let mut reports: Vec<ModemReport> = devices.values().cloned().collect();
@@ -530,7 +481,6 @@ fn spawn_device_sync(
                 continue;
             }
 
-            // Determine sync mode
             let mut sync_manager = sync_manager_arc.lock().await;
             let sync_mode = if sync_manager.needs_full_sync() {
                 SyncMode::Full
@@ -589,8 +539,6 @@ fn spawn_device_sync(
     });
 }
 
-/// TASK 4: STATISTICS LOGGER (every 60 seconds)
-/// Logs database statistics for monitoring
 fn spawn_statistics_logger(store: Arc<MessageStore>) {
     tokio::spawn(async move {
         loop {
@@ -613,7 +561,6 @@ fn spawn_statistics_logger(store: Arc<MessageStore>) {
                 }
             }
 
-            // Check for SIM cards with many messages
             if let Ok(full_sims) = store.check_sim_storage() {
                 if !full_sims.is_empty() {
                     warn!(
@@ -626,7 +573,6 @@ fn spawn_statistics_logger(store: Arc<MessageStore>) {
     });
 }
 
-/// TASK 5: ACKNOWLEDGED-ROW RETENTION (every 5 minutes)
 fn spawn_retention_cleanup(store: Arc<MessageStore>) {
     tokio::spawn(async move {
         loop {
@@ -645,20 +591,16 @@ fn spawn_retention_cleanup(store: Arc<MessageStore>) {
     });
 }
 
-/// TASK 5b: MULTIPART SEGMENTS CLEANUP (every 5 minutes)
-/// Clean up incomplete multipart SMS segments older than 5 minutes
 fn spawn_segment_cleanup(store: Arc<MessageStore>) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(300)).await; // Every 5 minutes
 
-            // The WAL had grown to 629 MB beside a 14 MB database; a passive
-            // auto-checkpoint never caught up with the write churn.
+            // Passive auto-checkpoint does not keep up with the write churn.
             if let Err(e) = store.checkpoint_wal() {
                 warn!("🧹 WAL checkpoint failed: {}", e);
             }
 
-            // Clean up segments older than 5 minutes (300 seconds)
             match store.cleanup_old_segments(300) {
                 Ok(deleted) if deleted > 0 => {
                     warn!(
@@ -677,8 +619,6 @@ fn spawn_segment_cleanup(store: Arc<MessageStore>) {
     });
 }
 
-/// TASK 6: SMS SENDER (every 10 seconds)
-/// Polls Cloudflare for pending outbound SMS and sends them via AT commands
 fn spawn_sms_sender(
     api_client: ApiClient,
     modem_manager: Arc<ModemManager>,
@@ -705,15 +645,13 @@ fn spawn_sms_sender(
                 }
             }
 
-            // Poll every 10 seconds for pending SMS
             tokio::time::sleep(Duration::from_secs(10)).await;
         }
     });
 }
 
-/// TASK 7: INDEPENDENT HEALTH HEARTBEAT (every 60 seconds)
-/// This is deliberately separate from outbound polling and device sync so one
-/// healthy task cannot hide another stalled task.
+/// Separate from outbound polling and device sync so one healthy task cannot
+/// hide another stalled task.
 fn spawn_health_heartbeat(client: Arc<ApiClient>, health: SharedHealth, store: Arc<MessageStore>) {
     tokio::spawn(async move {
         info!("💓 Independent health heartbeat started - reporting every 60 seconds");
@@ -743,7 +681,6 @@ fn spawn_health_heartbeat(client: Arc<ApiClient>, health: SharedHealth, store: A
     });
 }
 
-/// TASK 8: DYNAMIC MODEM RE-DISCOVERY (every 60 seconds)
 /// Reconciles physical USB removal and picks up modems that enumerate after startup.
 /// Newly enumerated but silent devices receive one USB reset attempt.
 fn spawn_rediscovery(manager: Arc<ModemManager>, modem_set: Arc<RwLock<Vec<String>>>) {
@@ -772,8 +709,7 @@ fn spawn_rediscovery(manager: Arc<ModemManager>, modem_set: Arc<RwLock<Vec<Strin
     });
 }
 
-/// TASK 9: VOICE BRIDGE (only when `VOICE_BRIDGE_DOMAIN` is set)
-/// wss:// listener for the Cloudflare Realtime adapters plus one URC reader per
+/// Runs only when `VOICE_BRIDGE_DOMAIN` is set: a wss:// listener for the Cloudflare Realtime adapters plus one URC reader per
 /// voice-capable modem for incoming calls. See docs/voice-call-plan.md.
 fn spawn_voice_bridge(
     api_key: String,
@@ -794,7 +730,6 @@ fn spawn_voice_bridge(
     }
 }
 
-/// API URL and key from the environment, with development defaults
 fn load_api_settings() -> (String, String) {
     let api_url =
         std::env::var("SMS_API_URL").unwrap_or_else(|_| "http://localhost:8787".to_string());
@@ -805,7 +740,6 @@ fn load_api_settings() -> (String, String) {
     (api_url, api_key)
 }
 
-/// Fail startup when the modem backend cannot list modems
 async fn check_modem_manager(modem_manager: &ModemManager) -> Result<()> {
     if let Err(e) = modem_manager.list_modems().await {
         error!("❌ ModemManager not accessible: {}", e);
@@ -815,7 +749,6 @@ async fn check_modem_manager(modem_manager: &ModemManager) -> Result<()> {
     Ok(())
 }
 
-/// `--db-path`, else `MESSAGE_DB_PATH`, else the production default
 fn resolve_db_path(args: &[String]) -> String {
     args.windows(2)
         .find_map(|w| match w {
@@ -826,15 +759,9 @@ fn resolve_db_path(args: &[String]) -> String {
         .unwrap_or_else(|| "/var/lib/sms-daemon/messages.db".to_string())
 }
 
-/// Initialize message store (SQLite database)
 fn open_message_store(db_path: &str) -> Result<Arc<MessageStore>> {
     let message_store = Arc::new(MessageStore::new(db_path)?);
 
-    // Note: Multipart SMS assembly is handled inline in modem_manager.rs
-    // No separate assembler instance needed - PDU parser extracts concat info
-    // and messages are assembled during the read operation
-
-    // Mark old uploaded messages as deleted (they have stale paths)
     let marked_deleted = message_store.mark_old_uploaded_as_deleted()?;
     if marked_deleted > 0 {
         info!(
@@ -845,7 +772,6 @@ fn open_message_store(db_path: &str) -> Result<Arc<MessageStore>> {
     Ok(message_store)
 }
 
-/// Initialize worker pool for parallel modem processing
 fn init_worker_pool(
     modem_manager: &Arc<ModemManager>,
     message_store: &Arc<MessageStore>,
@@ -867,10 +793,8 @@ fn init_worker_pool(
 async fn main() -> Result<()> {
     logging::init()?;
 
-    // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
 
-    // Check for --help
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help(args.first().map_or("orange-pi-daemon", String::as_str));
         return Ok(());
@@ -878,7 +802,6 @@ async fn main() -> Result<()> {
 
     let db_path = resolve_db_path(&args);
 
-    // Check for benchmark mode
     if args.iter().any(|a| a == "benchmark") {
         info!("🏁 Running performance benchmark...");
         return PerformanceBenchmark::run_benchmark().await;
@@ -897,7 +820,6 @@ async fn main() -> Result<()> {
 
     let message_store = open_message_store(&db_path)?;
 
-    // Initialize components
     let modem_manager = Arc::new(ModemManager::new().await);
     let config = Config {
         api_url: api_url.clone(),
@@ -920,11 +842,8 @@ async fn main() -> Result<()> {
 
     let modem_ids: Vec<String> = valid_modems.keys().cloned().collect();
 
-    // Live modem set, shared and mutable: the reader loop reads it each tick and the
-    // re-discovery task (Task 8) reconciles additions and physical removals.
     let modem_set: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(modem_ids));
 
-    // Notify systemd that we're ready
     let _ = sd_notify::notify(true, &[sd_notify::NotifyState::Ready]);
     info!("🔔 Notified systemd - daemon is ready");
 
@@ -933,8 +852,6 @@ async fn main() -> Result<()> {
         valid_modems.len()
     );
 
-    // Shared buffer: Task 1 (modem reader) writes latest ModemReport results here,
-    // Task 3 (device sync) reads from it. This avoids two pools fighting over serial ports.
     let latest_devices: SharedDevices = Arc::new(RwLock::new(HashMap::new()));
     let health_tracker: SharedHealth = Arc::new(RwLock::new(HealthTracker::new(
         session_id.clone(),
@@ -984,19 +901,14 @@ async fn main() -> Result<()> {
         latest_devices,
     );
 
-    // STALL WATCHDOG — an OS thread, deliberately not a tokio task.
-    // A hung daemon is worse than a dead one. On 2026-09-18 and again on
-    // 2026-09-20 every runtime worker ended up spinning, so collection and
-    // heartbeats stopped while the process stayed alive and Restart=always never
-    // fired. The first watchdog was a task on that same runtime and was starved
-    // with everything else; this one needs nothing from it.
+    // An OS thread, not a tokio task: a hung runtime keeps the process alive so
+    // Restart=always never fires, and a task on that runtime would be starved too.
     stall_watchdog::spawn(reader_heartbeat).context("failed to start the stall watchdog thread")?;
     info!(
         "🐕 Stall watchdog thread started - restarting if no read cycle completes for {}s",
         STALL_AFTER.as_secs()
     );
 
-    // Main thread just monitors health
     info!("✨ All tasks spawned - system running in dual-loop mode");
     loop {
         tokio::time::sleep(Duration::from_secs(300)).await;

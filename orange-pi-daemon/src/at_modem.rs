@@ -1,10 +1,5 @@
-//! Direct AT command modem interface - bypasses `ModemManager` for better performance
-//!
-//! For Quectel EC20 modems, each modem exposes 4 ttyUSB ports:
-//! - ttyUSB0: DM port
-//! - ttyUSB1: GPS NMEA
-//! - ttyUSB2: AT commands (this is what we use)
-//! - ttyUSB3: PPP/Modem
+//! Direct AT access to Quectel EC20 modems, bypassing `ModemManager`.
+//! Default composition per modem: DIAG, NMEA, AT, MODEM (ttyUSB0..3).
 
 use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use crate::types::{SmsStorage, SmsSubmission};
@@ -21,15 +16,13 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
-// USBDEVFS_RESET = _IO('U', 20): re-enumerates a USB device via its usbfs node.
-// Equivalent to what `usbreset` does — recovers a wedged modem at the USB level.
+// USBDEVFS_RESET = _IO('U', 20)
 nix::ioctl_none!(usbdevfs_reset, b'U', 20);
 
 const SMS_PROMPT_TIMEOUT: Duration = Duration::from_secs(10);
 const SMS_PROMPT_TIMEOUT_ERROR: &str = "Timeout waiting for > prompt";
 const SMS_PROMPT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
-/// SMS message from AT command interface
 #[derive(Debug, Clone)]
 pub struct AtSms {
     /// CPMS mem1 storage containing this message; unset until the scan that found it records it.
@@ -40,19 +33,17 @@ pub struct AtSms {
     pub sender: SmsAddress,
     pub timestamp: String,
     pub text: String,
-    /// Concatenation info for multipart messages (from UDH)
     pub concat_info: Option<ConcatInfo>,
 }
 
-/// Concatenation info from PDU User Data Header (UDH)
 #[derive(Debug, Clone)]
 pub struct ConcatInfo {
-    pub ref_id: u8,      // Reference ID (groups parts together)
-    pub total_parts: u8, // Total number of parts
-    pub part_number: u8, // This part's number (1-indexed)
+    pub ref_id: u8,
+    pub total_parts: u8,
+    /// 1-indexed
+    pub part_number: u8,
 }
 
-/// Modem device info from AT commands
 #[derive(Debug, Clone, Default)]
 pub struct AtModemInfo {
     pub port: String,
@@ -66,14 +57,13 @@ pub struct AtModemInfo {
     pub operator: Option<String>,
 }
 
-/// Network registration status
 #[derive(Debug, Clone, Default)]
 pub struct NetworkRegStatus {
-    pub creg: (u32, u32), // (n, stat) - stat: 0=not reg, 1=reg home, 2=searching, 3=denied, 4=unknown, 5=roaming
-    pub cgreg: (u32, u32), // (n, stat) - GPRS registration
+    /// (n, stat); stat: 0=not reg, 1=reg home, 2=searching, 3=denied, 4=unknown, 5=roaming
+    pub creg: (u32, u32),
+    pub cgreg: (u32, u32),
 }
 
-/// IMS status
 #[derive(Debug, Clone, Default)]
 pub struct ImsStatus {
     pub enabled: bool,
@@ -99,14 +89,12 @@ impl std::fmt::Display for SmsMode {
     }
 }
 
-/// SMS configuration
 #[derive(Debug, Clone, Default)]
 pub struct SmsConfig {
     pub mode: SmsMode,
     pub storage: String,
 }
 
-/// Full modem health check result
 #[derive(Debug, Clone, Default)]
 pub struct ModemHealth {
     pub port: String,
@@ -129,14 +117,11 @@ pub struct VoicePorts {
     pub modem: String,
 }
 
-/// Direct AT command modem manager
 pub struct AtModemManager {
-    /// Map of port path -> modem info cache
     modems: Arc<RwLock<HashMap<String, AtModemInfo>>>,
     /// One lock per AT port. A complete SMS submission holds this lock so the reader
     /// cannot flush or consume the modem prompt between configuration and CMGS.
     port_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
-    /// Timeout for AT commands
     timeout: Duration,
 }
 
@@ -189,15 +174,9 @@ impl AtModemManager {
             .clone()
     }
 
-    /// Discover all Quectel EC20 AT command ports
-    /// EC20 uses ttyUSB2 for AT commands (every 4th port starting at 2)
     /// Group every /dev/ttyUSB* port by the physical USB device (modem) that owns it.
-    ///
-    /// Each ttyUSB hangs off a USB interface dir like `.../1-1.3.2.2.3:1.0`; the USB
-    /// device is the parent (`1-1.3.2.2.3`). Returns device-path -> sorted port list.
-    /// This makes discovery independent of how many interfaces a modem exposes — works
-    /// for the default 4-port composition (AT at offset 2) and slimmed compositions
-    /// (e.g. AT at offset 0) alike.
+    /// Returns USB device name -> sorted port list, independent of how many interfaces
+    /// the modem exposes.
     pub fn ttyusb_by_usb_device() -> Result<BTreeMap<String, Vec<String>>> {
         let mut groups: BTreeMap<String, Vec<u32>> = BTreeMap::new();
         let entries = fs::read_dir("/sys/class/tty")
@@ -211,10 +190,8 @@ impl AtModemManager {
             let Ok(num) = name.trim_start_matches("ttyUSB").parse::<u32>() else {
                 continue;
             };
-            // The `device` link canonicalizes to the tty dir itself, nested under the
-            // USB interface dir (e.g. .../3-1.2.2:1.2/ttyUSB2). The physical modem is the
-            // ancestor USB *device* dir — the first one that carries an idVendor file
-            // (interfaces and the tty dir do not). Walk up to it and group by its name.
+            // The modem is the first ancestor USB *device* dir carrying an idVendor file
+            // (interface and tty dirs do not).
             let link = format!("/sys/class/tty/{name}/device");
             let Ok(canon) = fs::canonicalize(&link) else {
                 continue;
@@ -248,13 +225,10 @@ impl AtModemManager {
             .collect())
     }
 
-    /// Resolve a `/dev/ttyUSBN` AT port to its stable USB topology path (e.g. `1-1.4.2.2.2`).
+    /// Resolve a `/dev/ttyUSBN` AT port to its USB topology path (e.g. `1-1.4.2.2.2`).
     ///
-    /// The topology path encodes the physical socket (root port → hub port → … → port) and
-    /// is stable across reboot/replug/daemon-restart — unlike the ttyUSB number or modem
-    /// index, which the kernel reshuffles on every enumeration. Same walk as
-    /// `ttyusb_by_usb_device`: from `/sys/class/tty/<name>/device`, ascend to the first
-    /// ancestor carrying an `idVendor` file (the USB *device* dir) and return its name.
+    /// The path encodes the physical socket and is stable across reboot and replug,
+    /// unlike the ttyUSB number, which the kernel reshuffles on every enumeration.
     pub fn usb_topology_for_port(port: &str) -> Option<String> {
         let name = port.trim_start_matches("/dev/");
         let link = format!("/sys/class/tty/{name}/device");
@@ -273,27 +247,23 @@ impl AtModemManager {
 
     /// Order a modem's ttyUSB ports so the real AT command port is tried first.
     ///
-    /// EC20 compositions place the AT port at a known slot: the default 4-port layout
-    /// is DIAG/NMEA/AT/MODEM → AT is the 3rd port (index 2); the slimmed AT+MODEM
-    /// layout has AT first (index 0). Several ports answer a bare "AT" (notably the
-    /// MODEM/PPP port), so we must try the AT slot first rather than the lowest port —
-    /// otherwise we may cache the PPP port and time out on real reads.
+    /// The default 4-port layout DIAG/NMEA/AT/MODEM has AT at index 2; the slimmed
+    /// AT+MODEM layout has it at index 0. The MODEM/PPP port also answers a bare "AT",
+    /// so the lowest port cannot be tried first or it would be cached as the AT port.
     pub fn at_probe_order(ports: &[String]) -> Vec<String> {
         let mut order: Vec<String> = Vec::with_capacity(ports.len());
         if let Some(at_slot) = ports.get(2) {
-            order.push(at_slot.clone()); // default 4-port: AT is index 2
+            order.push(at_slot.clone());
         }
         for (i, p) in ports.iter().enumerate() {
             if i != 2 {
-                order.push(p.clone()); // index 0 first for slimmed, then the rest
+                order.push(p.clone());
             }
         }
         order
     }
 
-    /// Discover all modems by probing one AT port per physical USB device.
-    /// The AT slot is tried first (see `at_probe_order`); we keep the first port that
-    /// answers AT, so this works for both default 4-port and slimmed 2-port modems.
+    /// Probes ports in `at_probe_order` and keeps the first that answers AT, one per USB device.
     pub async fn discover_modems(&self) -> Result<Vec<String>> {
         let groups = Self::ttyusb_by_usb_device()?;
         let device_count = groups.len();
@@ -333,7 +303,6 @@ impl AtModemManager {
         Ok(ports)
     }
 
-    /// Probe port with detailed error
     async fn probe_port_with_error(&self, port: &str) -> Result<bool> {
         match self
             .send_at_command(port, "AT", Duration::from_millis(1000))
@@ -344,7 +313,6 @@ impl AtModemManager {
         }
     }
 
-    /// Quick probe to check if port responds to AT command
     pub async fn probe_port(&self, port: &str) -> bool {
         match self
             .send_at_command(port, "AT", Duration::from_millis(500))
@@ -355,12 +323,11 @@ impl AtModemManager {
         }
     }
 
-    /// Actively USB-reset the modem backing `port`, then wait for it to re-enumerate
-    /// and confirm it answers AT again. Recovers a wedged modem whose ttyUSB exists
-    /// but stopped responding. Returns Ok(true) if the modem answers AT after reset.
+    /// USB-resets the modem backing `port` and waits for it to answer AT again;
+    /// Ok(true) if it did within 10s.
     ///
-    /// Requires write access to the modem's usbfs node (/dev/bus/usb/BBB/DDD); on the
-    /// Orange Pi this is granted to the `dialout` group via a udev rule.
+    /// Requires write access to the usbfs node (/dev/bus/usb/BBB/DDD); on the
+    /// Orange Pi the `dialout` group gets it via a udev rule.
     pub async fn reset_usb_port(&self, port: &str) -> Result<bool> {
         let node = Self::usbfs_node_for_port(port)?;
         info!("🔌 USB-resetting {} via {}", port, node.display());
@@ -368,8 +335,7 @@ impl AtModemManager {
         let node_for_blocking = node.clone();
         tokio::task::spawn_blocking(move || Self::reset_usb_sync(&node_for_blocking)).await??;
 
-        // The device disappears and re-enumerates; the kernel rebuilds the same
-        // ttyUSB node within a few seconds. Poll AT until it answers or we give up.
+        // The device re-enumerates and the kernel rebuilds the same ttyUSB node.
         for attempt in 0..10 {
             tokio::time::sleep(Duration::from_secs(1)).await;
             if Path::new(port).exists() && self.probe_port(port).await {
@@ -381,7 +347,6 @@ impl AtModemManager {
         Ok(false)
     }
 
-    /// Issue the `USBDEVFS_RESET` ioctl on a usbfs node (blocking).
     #[allow(
         unsafe_code,
         reason = "USBDEVFS_RESET is an ioctl with no safe wrapper in nix or std"
@@ -400,8 +365,6 @@ impl AtModemManager {
         Ok(())
     }
 
-    /// Resolve a /dev/ttyUSBN port to its usbfs device node (/dev/bus/usb/BBB/DDD)
-    /// by walking up the sysfs device tree to the USB device that owns the interface.
     fn usbfs_node_for_port(port: &str) -> Result<PathBuf> {
         let dev_name = port
             .strip_prefix("/dev/")
@@ -410,8 +373,7 @@ impl AtModemManager {
         let mut dir = fs::canonicalize(&device_link)
             .map_err(|e| anyhow!("Cannot resolve sysfs device for {port}: {e}"))?;
 
-        // The tty hangs off a USB *interface* (e.g. 3-1.3.2.6:1.2). Walk up until we
-        // reach the USB *device* dir, which carries busnum/devnum.
+        // The USB *device* dir, not the interface dir, carries busnum/devnum.
         loop {
             if dir.join("busnum").is_file() && dir.join("devnum").is_file() {
                 let busnum = Self::read_sysfs_u8(&dir.join("busnum"))?;
@@ -427,7 +389,6 @@ impl AtModemManager {
         }
     }
 
-    /// Format the usbfs node path for a given bus/device number.
     fn usbfs_node_path(busnum: u8, devnum: u8) -> String {
         format!("/dev/bus/usb/{busnum:03}/{devnum:03}")
     }
@@ -448,7 +409,7 @@ impl AtModemManager {
     /// reset cannot leave it unset; SMS collection is unaffected because the daemon
     /// polls `AT+CMGL` and never consumes URCs.
     pub async fn init_urc_port(&self, port: &str) -> Result<()> {
-        // Caller ID is optional. Route RING even when the modem refuses CLIP.
+        // Route RING even when the modem refuses CLIP.
         match self
             .send_at_command(port, "AT+CLIP=1", Duration::from_millis(1000))
             .await
@@ -480,8 +441,6 @@ impl AtModemManager {
         Ok(())
     }
 
-    /// The NMEA (voice PCM) and MODEM (URC) ports of the physical modem that owns
-    /// `at_port`.
     pub fn voice_ports_for_at_port(at_port: &str) -> Result<Option<VoicePorts>> {
         Ok(Self::pick_voice_ports(
             &Self::ttyusb_by_usb_device()?,
@@ -489,12 +448,8 @@ impl AtModemManager {
         ))
     }
 
-    /// Pure half of `voice_ports_for_at_port`, so it can be tested without sysfs.
-    ///
-    /// Ports are grouped per USB device and sorted by index, so the default
-    /// composition maps to DIAG, NMEA, AT, MODEM. A slimmed modem has lost the
-    /// NMEA interface, so the indices no longer line up and it cannot carry
-    /// voice; it yields `None`, as does an unknown AT port.
+    /// A slimmed modem has no NMEA interface, so it cannot carry voice and yields
+    /// `None`, as does an unknown AT port.
     pub fn pick_voice_ports(
         groups: &BTreeMap<String, Vec<String>>,
         at_port: &str,
@@ -514,8 +469,7 @@ impl AtModemManager {
         })
     }
 
-    /// An AT command issued by the voice bridge (ATD, ATA, ATH, AT+CLCC,
-    /// AT+QPCMV). Takes the same per-port lock as SMS work.
+    /// Takes the same per-port lock as SMS work.
     pub async fn voice_command(
         &self,
         port: &str,
@@ -525,9 +479,7 @@ impl AtModemManager {
         self.send_at_command(port, command, timeout).await
     }
 
-    /// Initialize IMS settings on modem
     pub async fn init_ims(&self, port: &str) -> Result<()> {
-        // Enable IMS (IP Multimedia Subsystem)
         match self
             .send_at_command(port, "AT+QCFG=\"ims\",1", Duration::from_millis(1000))
             .await
@@ -547,7 +499,6 @@ impl AtModemManager {
         Ok(())
     }
 
-    /// Send AT command and get response
     async fn send_at_command(
         &self,
         port: &str,
@@ -567,11 +518,9 @@ impl AtModemManager {
         let port_path = port.to_string();
         let cmd = command.to_string();
 
-        // Run blocking serial I/O in spawn_blocking, but cap it at the async layer with
-        // a hard deadline. A wedged modem can block a tty ioctl (tcgetattr/tcflush) —
-        // O_NONBLOCK only covers read/write, not ioctls — which would otherwise hang the
-        // task forever. If the deadline fires we abandon the (leaked) blocking thread and
-        // report failure, so discovery/reads skip the bad port instead of stalling.
+        // A wedged modem can block a tty ioctl (tcgetattr/tcflush); O_NONBLOCK covers only
+        // read/write. The async deadline abandons the leaked blocking thread so callers
+        // skip the bad port instead of hanging.
         let handle =
             tokio::task::spawn_blocking(move || Self::send_at_sync(&port_path, &cmd, timeout));
         match tokio::time::timeout(timeout + Duration::from_secs(2), handle).await {
@@ -614,15 +563,10 @@ impl AtModemManager {
         }
     }
 
-    /// Open serial port with proper settings
-    /// Open a serial port with the hardening described below. Exposed to the crate
-    /// so the URC reader can hold the MODEM port open without duplicating this.
     pub(crate) fn open_serial(port: &str) -> Result<File> {
-        // Open and KEEP the port non-blocking. A blocking serial open() waits for
-        // carrier (DCD); a wedged modem never asserts it, hanging the thread forever.
-        // Keeping O_NONBLOCK set also makes read()/write() return WouldBlock instead
-        // of blocking, so a wedged port can never stall us — send_at_sync polls both
-        // with a hard timeout. O_NOCTTY keeps the tty from becoming our controlling tty.
+        // Keep O_NONBLOCK set: a blocking open() waits for carrier (DCD), which a wedged
+        // modem never asserts, and it makes read()/write() return WouldBlock instead of
+        // stalling. O_NOCTTY stops the tty becoming our controlling tty.
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -630,61 +574,50 @@ impl AtModemManager {
             .open(port)
             .map_err(|e| anyhow!("Failed to open {port}: {e}"))?;
 
-        // Configure termios using the file reference
         let mut term = termios::tcgetattr(&file).map_err(|e| anyhow!("tcgetattr failed: {e}"))?;
 
-        // Set baud rate 115200
         termios::cfsetispeed(&mut term, BaudRate::B115200)
             .map_err(|e| anyhow!("cfsetispeed failed: {e}"))?;
         termios::cfsetospeed(&mut term, BaudRate::B115200)
             .map_err(|e| anyhow!("cfsetospeed failed: {e}"))?;
 
-        // Raw mode: 8N1, no flow control
         term.control_flags &= !(termios::ControlFlags::CSIZE | termios::ControlFlags::PARENB);
         term.control_flags |= termios::ControlFlags::CS8
             | termios::ControlFlags::CREAD
             | termios::ControlFlags::CLOCAL;
         term.control_flags &= !termios::ControlFlags::CRTSCTS;
 
-        // Disable special character processing
         term.local_flags &= !(termios::LocalFlags::ICANON
             | termios::LocalFlags::ECHO
             | termios::LocalFlags::ECHOE
             | termios::LocalFlags::ISIG);
 
-        // Disable input processing
         term.input_flags &= !(termios::InputFlags::IXON
             | termios::InputFlags::IXOFF
             | termios::InputFlags::IXANY
             | termios::InputFlags::ICRNL
             | termios::InputFlags::INLCR);
 
-        // Disable output processing
         term.output_flags &= !termios::OutputFlags::OPOST;
 
-        // Set read timeout: VMIN=0, VTIME=1 (0.1s timeout per read)
+        // VMIN=0, VTIME=1: 0.1s per read
         set_control_char(&mut term, termios::SpecialCharacterIndices::VMIN, 0)?;
         set_control_char(&mut term, termios::SpecialCharacterIndices::VTIME, 1)?;
 
         termios::tcsetattr(&file, SetArg::TCSANOW, &term)
             .map_err(|e| anyhow!("tcsetattr failed: {e}"))?;
 
-        // Flush buffers
         termios::tcflush(&file, termios::FlushArg::TCIOFLUSH)
             .map_err(|_| anyhow!("tcflush failed"))?;
 
         Ok(file)
     }
 
-    /// Synchronous AT command send (runs in blocking thread).
-    /// The fd is non-blocking, so writes/reads return `WouldBlock` rather than hanging on
-    /// a wedged modem; we poll both with the same hard timeout.
+    /// Blocking; the fd is non-blocking, so writes and reads are polled against `timeout`.
     fn send_at_sync(port: &str, command: &str, timeout: Duration) -> Result<String> {
         let mut file = Self::open_serial(port)?;
         let start = Instant::now();
 
-        // Send command with CR. Non-blocking write may report WouldBlock; retry until
-        // the buffer accepts it or we hit the timeout.
         let cmd = format!("{command}\r");
         let mut written = 0;
         while let Some(unwritten) = cmd
@@ -706,7 +639,6 @@ impl AtModemManager {
         }
         let _ = file.flush();
 
-        // Read response with timeout
         let mut response = Vec::new();
         let mut buf = [0u8; 256];
 
@@ -722,7 +654,6 @@ impl AtModemManager {
                 Ok(n) => {
                     response.extend_from_slice(read_chunk(&buf, n)?);
 
-                    // Check if we got a complete response
                     let text = String::from_utf8_lossy(&response);
                     if text.contains("OK\r")
                         || text.contains("ERROR\r")
@@ -742,9 +673,8 @@ impl AtModemManager {
         Ok(response_str)
     }
 
-    /// Get ICCID from SIM card
     pub async fn get_iccid(&self, port: &str) -> Result<Option<Iccid>> {
-        // Try different ICCID commands (varies by modem)
+        // The command that reports the ICCID varies by modem.
         for cmd in &["AT+QCCID", "AT+CCID", "AT+ICCID"] {
             if let Ok(response) = self.send_at_command(port, cmd, self.timeout).await {
                 if let Some(iccid) = Self::parse_iccid(&response) {
@@ -778,12 +708,11 @@ impl AtModemManager {
         None
     }
 
-    /// Strip trailing 'F' padding from ICCID (BCD filler per ITU-T E.118)
+    /// Strips trailing 'F' BCD filler (ITU-T E.118).
     fn normalize_iccid(iccid: &str) -> Option<Iccid> {
         Iccid::try_from(iccid.trim_end_matches('F')).ok()
     }
 
-    /// Get IMEI
     pub async fn get_imei(&self, port: &str) -> Result<Option<Imei>> {
         let response = self.send_at_command(port, "AT+CGSN", self.timeout).await?;
         Ok(Self::parse_imei(&response))
@@ -795,7 +724,6 @@ impl AtModemManager {
             .find_map(|line| Imei::try_from(line.trim()).ok())
     }
 
-    /// Get manufacturer
     pub async fn get_manufacturer(&self, port: &str) -> Result<Option<String>> {
         let response = self.send_at_command(port, "AT+CGMI", self.timeout).await?;
 
@@ -809,7 +737,6 @@ impl AtModemManager {
         Ok(None)
     }
 
-    /// Get model
     pub async fn get_model(&self, port: &str) -> Result<Option<String>> {
         let response = self.send_at_command(port, "AT+CGMM", self.timeout).await?;
 
@@ -823,7 +750,6 @@ impl AtModemManager {
         Ok(None)
     }
 
-    /// Get firmware revision
     pub async fn get_revision(&self, port: &str) -> Result<Option<String>> {
         let response = self.send_at_command(port, "AT+CGMR", self.timeout).await?;
 
@@ -837,11 +763,10 @@ impl AtModemManager {
         Ok(None)
     }
 
-    /// Get signal quality (returns 0-100 percent)
+    /// Percent (0-100), scaled from the `+CSQ: <rssi>,<ber>` rssi of 0-31.
     pub async fn get_signal(&self, port: &str) -> Result<u32> {
         let response = self.send_at_command(port, "AT+CSQ", self.timeout).await?;
 
-        // Parse "+CSQ: 20,99" -> rssi=20 (0-31 scale)
         for line in response.lines() {
             if line.contains("+CSQ:") {
                 if let Some((_, rest)) = line.split_once(':') {
@@ -859,13 +784,12 @@ impl AtModemManager {
         Ok(0)
     }
 
-    /// Get phone number from SIM
     pub async fn get_phone_number(&self, port: &str) -> Result<Option<SimNumber>> {
         let response = self.send_at_command(port, "AT+CNUM", self.timeout).await?;
         Ok(Self::parse_cnum(&response))
     }
 
-    // Parse "+CNUM: "","+1234567890",129"
+    // +CNUM: "","+1234567890",129
     fn parse_cnum(response: &str) -> Option<SimNumber> {
         for line in response.lines() {
             if line.contains("+CNUM:") {
@@ -880,11 +804,10 @@ impl AtModemManager {
         None
     }
 
-    /// Get operator name
     pub async fn get_operator(&self, port: &str) -> Result<Option<String>> {
         let response = self.send_at_command(port, "AT+COPS?", self.timeout).await?;
 
-        // Parse "+COPS: 0,0,"China Mobile",7"
+        // +COPS: 0,0,"China Mobile",7
         for line in response.lines() {
             if line.contains("+COPS:") {
                 let parts: Vec<&str> = line.split('"').collect();
@@ -898,7 +821,6 @@ impl AtModemManager {
         Ok(None)
     }
 
-    /// Diagnostic: Get network registration status
     pub async fn get_network_registration(&self, port: &str) -> Result<NetworkRegStatus> {
         let circuit_reply = self.send_at_command(port, "AT+CREG?", self.timeout).await?;
         let packet_reply = self
@@ -943,7 +865,6 @@ impl AtModemManager {
         (0, 0)
     }
 
-    /// Diagnostic: Get IMS status
     pub async fn get_ims_status(&self, port: &str) -> Result<ImsStatus> {
         let response = self
             .send_at_command(port, "AT+QCFG=\"ims\"", self.timeout)
@@ -977,7 +898,6 @@ impl AtModemManager {
         })
     }
 
-    /// Diagnostic: Get SMS service center
     pub async fn get_sms_center(&self, port: &str) -> Result<Option<String>> {
         let response = self.send_at_command(port, "AT+CSCA?", self.timeout).await?;
 
@@ -994,7 +914,6 @@ impl AtModemManager {
         Ok(None)
     }
 
-    /// Diagnostic: Get SMS mode and storage
     pub async fn get_sms_config(&self, port: &str) -> Result<SmsConfig> {
         let mode_response = self.send_at_command(port, "AT+CMGF?", self.timeout).await?;
         let mut mode = SmsMode::Unknown;
@@ -1021,7 +940,6 @@ impl AtModemManager {
         Ok(SmsConfig { mode, storage })
     }
 
-    /// Diagnostic: Full health check for a modem
     pub async fn health_check(&self, port: &str) -> Result<ModemHealth> {
         let mut health = ModemHealth {
             port: port.to_string(),
@@ -1040,8 +958,8 @@ impl AtModemManager {
         Ok(health)
     }
 
-    /// List all SMS messages, scanning modem and SIM storage independently.
-    /// Quectel EC20 treats `MT` as an alias for `ME`, not as `ME` + `SM`.
+    /// Scans each read storage independently: the EC20 treats `MT` as an alias for `ME`,
+    /// not as `ME` + `SM`.
     pub async fn list_sms(&self, port: &str) -> Result<Vec<AtSms>> {
         let stores = self.sms_read_stores(port).await;
         let mut messages = Vec::new();
@@ -1093,7 +1011,6 @@ impl AtModemManager {
         Ok(messages)
     }
 
-    /// List messages from the already-selected CPMS mem1 storage.
     async fn list_sms_from_selected_storage(&self, port: &str) -> Result<Vec<AtSms>> {
         match self.list_sms_pdu_mode(port).await {
             Ok(messages) if !messages.is_empty() => {
@@ -1122,8 +1039,7 @@ impl AtModemManager {
         }
     }
 
-    /// Discover stores to scan. EC20 is scanned as ME then SM; MT is only a fallback
-    /// for modem families that advertise neither concrete storage.
+    /// EC20 is scanned as ME then SM; MT only when neither is advertised.
     async fn sms_read_stores(&self, port: &str) -> Vec<SmsStorage> {
         match self.send_at_command(port, "AT+CPMS=?", self.timeout).await {
             Ok(response) => {
@@ -1200,14 +1116,11 @@ impl AtModemManager {
         stores
     }
 
-    /// Text-mode listing used as the primary decode path (preserves existing behavior).
     async fn list_sms_text_mode(&self, port: &str) -> Result<Vec<AtSms>> {
-        // Set text mode
         self.send_at_command(port, "AT+CMGF=1", self.timeout)
             .await?;
 
-        // Try to set character set to UCS2 for proper Chinese/Unicode handling
-        // If this fails, the modem will use its default charset (often GSM or IRA)
+        // UCS2 is needed for Chinese text; on failure the modem keeps its default charset.
         match self
             .send_at_command(port, "AT+CSCS=\"UCS2\"", self.timeout)
             .await
@@ -1223,7 +1136,6 @@ impl AtModemManager {
             }
         }
 
-        // List all messages (longer timeout for many messages)
         let response = self
             .send_at_command(port, "AT+CMGL=\"ALL\"", Duration::from_secs(10))
             .await?;
@@ -1232,13 +1144,12 @@ impl AtModemManager {
         let mut lines = response.lines().map(str::trim);
 
         while let Some(line) = lines.next() {
-            // Parse "+CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
+            // +CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
             if line.contains("+CMGL:") {
                 if let Some(sms) = Self::parse_cmgl_header(line) {
                     if let Some(raw_text) = lines.next() {
                         if !raw_text.is_empty() && raw_text != "OK" && !raw_text.contains("+CMGL:")
                         {
-                            // Decode UCS2 hex if it looks like hex-encoded text
                             let text = Self::decode_sms_content(raw_text);
                             messages.push(AtSms {
                                 storage: None,
@@ -1247,7 +1158,7 @@ impl AtModemManager {
                                 sender: sms.1,
                                 timestamp: sms.2,
                                 text,
-                                concat_info: None, // Text mode doesn't provide concatenation info
+                                concat_info: None,
                             });
                         }
                     }
@@ -1258,13 +1169,11 @@ impl AtModemManager {
         Ok(messages)
     }
 
-    /// List SMS messages in PDU mode to extract concatenation info
+    /// PDU mode, unlike text mode, exposes the UDH concatenation info.
     async fn list_sms_pdu_mode(&self, port: &str) -> Result<Vec<AtSms>> {
-        // Set PDU mode
         self.send_at_command(port, "AT+CMGF=0", self.timeout)
             .await?;
 
-        // List all messages in PDU format (longer timeout for many messages)
         let response = self
             .send_at_command(port, "AT+CMGL=4", Duration::from_secs(10))
             .await?;
@@ -1273,12 +1182,11 @@ impl AtModemManager {
         let mut lines = response.lines().map(str::trim);
 
         while let Some(line) = lines.next() {
-            // Parse "+CMGL: 0,1,,23" (index, status, alpha, length)
+            // +CMGL: <index>,<stat>,<alpha>,<length>, e.g. 0,1,,23
             if line.contains("+CMGL:") {
                 if let Some(index) = Self::parse_cmgl_pdu_header(line) {
                     if let Some(pdu_hex) = lines.next() {
                         if !pdu_hex.is_empty() && pdu_hex != "OK" && !pdu_hex.contains("+CMGL:") {
-                            // Parse the PDU and extract message
                             if let Ok(sms) = Self::parse_pdu_sms(index, pdu_hex) {
                                 messages.push(sms);
                             }
@@ -1291,19 +1199,14 @@ impl AtModemManager {
         Ok(messages)
     }
 
-    /// Parse PDU CMGL header to extract message index
     fn parse_cmgl_pdu_header(line: &str) -> Option<u32> {
-        // +CMGL: 0,1,,23
         let first_field = line.split(',').next()?;
 
-        // Extract index from "+CMGL: 0"
         let index_part = first_field.split(':').next_back()?.trim();
         index_part.parse::<u32>().ok()
     }
 
-    /// Parse a PDU SMS message
     fn parse_pdu_sms(index: u32, pdu_hex: &str) -> Result<AtSms> {
-        // Decode hex string to bytes
         let pdu_bytes: Vec<u8> = (0..pdu_hex.len())
             .step_by(2)
             .filter_map(|i| {
@@ -1318,17 +1221,16 @@ impl AtModemManager {
 
         let mut pos = 0;
 
-        // SMSC length (skip SMSC address)
+        // Skip the SMSC address
         let smsc_len = usize::from(*pdu_bytes.first().ok_or_else(|| anyhow!("PDU too short"))?);
         pos += 1 + smsc_len;
 
-        // PDU type
         let pdu_type = *pdu_bytes
             .get(pos)
             .ok_or_else(|| anyhow!("PDU truncated after SMSC"))?;
         pos += 1;
 
-        // Sender address length (in digits)
+        // In semi-octets (digits)
         let sender_len = usize::from(
             *pdu_bytes
                 .get(pos)
@@ -1336,25 +1238,20 @@ impl AtModemManager {
         );
         pos += 1;
 
-        // Sender type of address
         let sender_toa = *pdu_bytes
             .get(pos)
             .ok_or_else(|| anyhow!("PDU truncated at sender type"))?;
         pos += 1;
 
-        // Type-of-number (bits 6-4): 0x05 = alphanumeric (GSM 7-bit encoded)
+        // Type-of-number (bits 6-4): 0x05 = alphanumeric (GSM 7-bit packed)
         let sender_number_type = (sender_toa >> 4) & 0x07;
 
-        // Sender address bytes: for BCD it's (digits+1)/2, for alphanumeric sender_len
-        // is the number of useful semi-octets (which maps to the same byte count formula)
         let sender_bytes = sender_len.div_ceil(2);
         let sender_address = pdu_bytes
             .get(pos..pos + sender_bytes)
             .ok_or_else(|| anyhow!("PDU truncated at sender address"))?;
         let sender = if sender_number_type == 0x05 {
-            // Alphanumeric sender: bytes are GSM 7-bit packed
-            // sender_len is in "digits" but for alphanumeric it means usable semi-octets,
-            // the number of septets (chars) = sender_len * 4 / 7
+            // For alphanumeric senders sender_len counts semi-octets: septets = len * 4 / 7
             let num_septets = (sender_len * 4) / 7;
             Self::decode_pdu_7bit(sender_address, num_septets, 0)
         } else {
@@ -1362,26 +1259,23 @@ impl AtModemManager {
         };
         pos += sender_bytes;
 
-        // PID (Protocol Identifier)
+        // PID
         if pdu_bytes.get(pos).is_none() {
             return Err(anyhow!("PDU truncated at PID"));
         }
         pos += 1;
 
-        // DCS (Data Coding Scheme)
         let dcs = *pdu_bytes
             .get(pos)
             .ok_or_else(|| anyhow!("PDU truncated at DCS"))?;
         pos += 1;
 
-        // Timestamp (7 bytes in semi-octets)
         let timestamp_bytes = pdu_bytes
             .get(pos..pos + 7)
             .ok_or_else(|| anyhow!("PDU truncated at timestamp"))?;
         let timestamp = Self::decode_pdu_timestamp(timestamp_bytes);
         pos += 7;
 
-        // User Data Length
         let user_data_len = usize::from(
             *pdu_bytes
                 .get(pos)
@@ -1389,7 +1283,6 @@ impl AtModemManager {
         );
         pos += 1;
 
-        // Check for UDH (User Data Header)
         let has_udh = (pdu_type & 0x40) != 0;
         let mut concat_info = None;
         let mut text_start = pos;
@@ -1401,7 +1294,6 @@ impl AtModemManager {
             );
             pos += 1;
 
-            // Extract concatenation info from UDH
             let udh = pdu_bytes
                 .get(pos..pos + udhl)
                 .ok_or_else(|| anyhow!("PDU truncated at UDH"))?;
@@ -1413,26 +1305,17 @@ impl AtModemManager {
             0
         };
 
-        // Decode message text based on DCS (Data Coding Scheme)
-        // GSM 03.38 DCS values:
-        // 0x00 = 7-bit GSM default alphabet
-        // 0x04 = 8-bit data
-        // 0x08 = UCS-2 (UTF-16BE) - common for Chinese
-        // 0x0C = 8-bit + reserved
+        // GSM 03.38 DCS: 0x00 = 7-bit default alphabet, 0x04 = 8-bit data, 0x08 = UCS-2
         let text_bytes = pdu_bytes
             .get(text_start..)
             .ok_or_else(|| anyhow!("PDU truncated before text"))?;
         let text = if (dcs & 0x08) != 0 {
-            // Bit 3 set = UCS-2 encoding (Chinese/Unicode)
             debug!("PDU encoding detected: UCS-2 (DCS: 0x{:02X})", dcs);
             Self::decode_pdu_ucs2(text_bytes, user_data_len)
         } else if (dcs & 0x04) != 0 {
-            // Bit 2 set (but not bit 3) = 8-bit data encoding
             debug!("PDU encoding detected: 8-bit data (DCS: 0x{:02X})", dcs);
-            // UDH already skipped, text_start points to actual text
             Self::decode_pdu_8bit(text_bytes)
         } else {
-            // Default 7-bit GSM alphabet (English/ASCII)
             debug!("PDU encoding detected: 7-bit GSM (DCS: 0x{:02X})", dcs);
             Self::decode_pdu_7bit(text_bytes, user_data_len, udhl)
         };
@@ -1448,10 +1331,8 @@ impl AtModemManager {
         })
     }
 
-    /// Preserve ordinary 8-bit text, while turning binary WAP Push payloads into
-    /// a safe, readable notification. Unknown binary data deliberately keeps the
-    /// previous lossy conversion behavior so this narrow fix cannot change other
-    /// message handling paths.
+    /// Plain 8-bit text passes through; binary WAP Push payloads become a readable
+    /// notification; other binary data is converted lossily.
     fn decode_pdu_8bit(bytes: &[u8]) -> String {
         if let Ok(text) = std::str::from_utf8(bytes) {
             let is_plain_text = text.chars().all(|character| {
@@ -1485,7 +1366,6 @@ impl AtModemManager {
             .map(str::to_owned)
     }
 
-    /// Extract concatenation info from UDH
     fn extract_udh_concat(udh_bytes: &[u8]) -> Option<ConcatInfo> {
         let mut rest = udh_bytes;
         while let [iei, iedl, tail @ ..] = rest {
@@ -1528,7 +1408,6 @@ impl AtModemManager {
         }
     }
 
-    /// Decode BCD-encoded phone number
     fn decode_bcd_phone(bytes: &[u8], digit_count: usize) -> String {
         let mut phone = String::new();
         for (i, byte) in bytes.iter().enumerate() {
@@ -1549,7 +1428,6 @@ impl AtModemManager {
         phone
     }
 
-    /// Decode PDU timestamp to ISO 8601 format
     fn decode_pdu_timestamp(bytes: &[u8]) -> String {
         let &[year, month, day, hour, minute, second, tz_byte, ..] = bytes else {
             return chrono::Utc::now()
@@ -1557,8 +1435,7 @@ impl AtModemManager {
                 .to_string();
         };
 
-        // Semi-octet BCD decoding: each byte has nibbles swapped (low nibble first)
-        // After swapping, decode as BCD: (high_nibble * 10) + low_nibble
+        // Semi-octets: each byte carries its BCD digits swapped (low nibble is the tens)
         let decode_bcd = |b: u8| -> u8 {
             let swapped = ((b & 0x0F) << 4) | ((b >> 4) & 0x0F);
             let high = (swapped >> 4) & 0x0F;
@@ -1573,13 +1450,11 @@ impl AtModemManager {
         let minute = u32::from(decode_bcd(minute));
         let second = u32::from(decode_bcd(second));
 
-        // Timezone (in quarter hours, also BCD encoded)
-        // Bit 7 of original byte = sign (0=positive, 1=negative)
+        // Timezone is BCD quarter-hours; bit 7 of the raw byte is the sign.
         let tz_sign = if (tz_byte & 0x80) != 0 { -1 } else { 1 };
-        let tz_quarters = i32::from(decode_bcd(tz_byte & 0x7F)); // Mask out sign bit before BCD decode
+        let tz_quarters = i32::from(decode_bcd(tz_byte & 0x7F));
         let tz_offset_minutes = tz_sign * tz_quarters * 15;
 
-        // Convert to UTC
         let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
             .and_then(|d| d.and_hms_opt(hour, minute, second))
             .unwrap_or_else(|| chrono::Utc::now().naive_utc());
@@ -1592,13 +1467,13 @@ impl AtModemManager {
         dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
     }
 
-    /// GSM 03.38 default alphabet (7-bit) → Unicode mapping.
-    /// Positions that match ASCII are identical; others map to GSM-specific chars.
+    /// GSM 03.38 default alphabet. Index 0x1B (ESC) is never looked up; the decoder
+    /// handles it as the extension prefix.
     const GSM_DEFAULT_ALPHABET: [char; 128] = [
         '@', '£', '$', '¥', 'è', 'é', 'ù', 'ì', // 0x00-0x07
         'ò', 'Ç', '\n', 'Ø', 'ø', '\r', 'Å', 'å', // 0x08-0x0F
         'Δ', '_', 'Φ', 'Γ', 'Λ', 'Ω', 'Π', 'Ψ', // 0x10-0x17
-        'Σ', 'Θ', 'Ξ', ' ', 'Æ', 'æ', 'ß', 'É', // 0x18-0x1F (0x1B=ESC→space fallback)
+        'Σ', 'Θ', 'Ξ', ' ', 'Æ', 'æ', 'ß', 'É', // 0x18-0x1F
         ' ', '!', '"', '#', '¤', '%', '&', '\'', // 0x20-0x27
         '(', ')', '*', '+', ',', '-', '.', '/', // 0x28-0x2F
         '0', '1', '2', '3', '4', '5', '6', '7', // 0x30-0x37
@@ -1613,11 +1488,10 @@ impl AtModemManager {
         'x', 'y', 'z', 'ä', 'ö', 'ñ', 'ü', 'à', // 0x78-0x7F
     ];
 
-    /// GSM 03.38 extension table (reached via ESC 0x1B prefix).
-    /// Returns None for undefined extension codes.
+    /// GSM 03.38 extension table, reached via the ESC 0x1B prefix.
     fn gsm_extension_char(code: u8) -> Option<char> {
         match code {
-            0x0A => Some('\u{000C}'), // form feed (page break)
+            0x0A => Some('\u{000C}'),
             0x14 => Some('^'),
             0x28 => Some('{'),
             0x29 => Some('}'),
@@ -1627,17 +1501,14 @@ impl AtModemManager {
             0x3E => Some(']'),
             0x40 => Some('|'),
             0x65 => Some('€'),
-            _ => None, // undefined extension
+            _ => None,
         }
     }
 
-    /// Decode 7-bit GSM encoded text
-    /// bytes: text data (UDH already removed by caller)
-    /// `septet_count`: User Data Length in septets (characters)
-    /// `udhl`: UDH length in bytes (0 if no UDH) - needed to calculate fill bits
+    /// `bytes` excludes the UDH; `septet_count` is the User Data Length in septets;
+    /// `udhl` is the UDH length in bytes (0 if none), which determines the fill bits.
     fn decode_pdu_7bit(bytes: &[u8], septet_count: usize, udhl: usize) -> String {
-        // For 7-bit encoding with UDH, calculate fill bits to align to septet boundary
-        // Fill bits = (7 - ((udhl + 1) * 8) % 7) % 7
+        // Fill bits pad the UDH out to a septet boundary.
         let fill_bits = if udhl > 0 {
             (7 - ((udhl + 1) * 8) % 7) % 7
         } else {
@@ -1667,11 +1538,9 @@ impl AtModemManager {
                 if let Some(ext_char) = Self::gsm_extension_char(char_val) {
                     result.push(ext_char);
                 } else {
-                    // Unknown extension: output space as fallback
                     result.push(' ');
                 }
             } else if char_val == 0x1B {
-                // ESC: next septet is extension character
                 escape_next = true;
             } else {
                 result.push(
@@ -1688,10 +1557,7 @@ impl AtModemManager {
         result
     }
 
-    /// Decode UCS2 (UTF-16BE) encoded text
-    /// bytes: text data (UDH already removed by caller)
     fn decode_pdu_ucs2(bytes: &[u8], _udl: usize) -> String {
-        // The caller has already skipped the UDH, so we start from byte 0
         if bytes.is_empty() {
             return String::new();
         }
@@ -1707,17 +1573,15 @@ impl AtModemManager {
         String::from_utf16(&u16_values).unwrap_or_else(|_| String::from("?"))
     }
 
-    /// Decode SMS content - handles UCS2 hex encoding for Chinese/Unicode
+    /// Text-mode output after `AT+CSCS="UCS2"` is UTF-16BE hex.
     fn decode_sms_content(raw: &str) -> String {
-        // Check if it looks like UCS2 hex (all hex chars, even length, typical length)
         let is_hex = raw.len() >= 4
             && raw.len().is_multiple_of(4)
             && raw.chars().all(|c| c.is_ascii_hexdigit());
 
         if is_hex {
-            // Try to decode as UCS2 (UTF-16BE) hex string
+            // Plain digit strings can look like hex; keep the raw text unless the decode is printable.
             if let Some(decoded) = Self::decode_ucs2_hex(raw) {
-                // Only use decoded if it produced valid text
                 if !decoded.is_empty()
                     && decoded
                         .chars()
@@ -1729,12 +1593,9 @@ impl AtModemManager {
             }
         }
 
-        // Return as-is if not hex or decode failed
         raw.to_string()
     }
 
-    /// Decode a sender address after applying sender-only normalization.
-    ///
     /// Some modems expose alphanumeric senders as concatenated decimal ASCII
     /// code points (for example, `83 105 110 ...` for `Singtel`). E.164 phone
     /// numbers are at most 15 digits, so only longer numeric values are eligible
@@ -1798,11 +1659,8 @@ impl AtModemManager {
         }
     }
 
-    /// Decode UCS2 hex string to UTF-8
-    /// Input: "4F60597D" (你好)
-    /// Output: "你好"
+    /// "4F60597D" -> "你好"
     fn decode_ucs2_hex(hex: &str) -> Option<String> {
-        // Must be even length (2 hex chars per byte)
         if !hex.len().is_multiple_of(2) {
             return None;
         }
@@ -1815,7 +1673,6 @@ impl AtModemManager {
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
             .collect::<Option<Vec<u8>>>()?;
 
-        // Decode as UTF-16BE (need even number of bytes)
         if bytes.len() % 2 != 0 {
             return None;
         }
@@ -1831,28 +1688,23 @@ impl AtModemManager {
         String::from_utf16(&u16_values).ok()
     }
 
-    /// Parse CMGL header line
+    /// +CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
+    /// Under UCS2 the sender and timestamp fields are hex encoded.
     fn parse_cmgl_header(line: &str) -> Option<(u32, SmsAddress, String)> {
-        // +CMGL: 1,"REC READ","+1234567890","","24/01/15,10:30:45+32"
-        // With UCS2: phone number may be hex encoded like "002B0036003500..."
         let parts: Vec<&str> = line.split(',').collect();
         let [first_field, _, sender_field, ..] = parts.as_slice() else {
             return None;
         };
 
-        // Extract index from "+CMGL: 1"
         let index_part = first_field.split(':').next_back()?.trim();
         let index = index_part.parse::<u32>().ok()?;
 
-        // Extract sender (third part, quoted) - may be UCS2 encoded
         let raw_sender = sender_field.trim().trim_matches('"');
         let sender = SmsAddress::from(Self::decode_sms_sender(raw_sender));
 
-        // Extract timestamp (4th and 5th parts) - may also be UCS2 encoded
         let timestamp = if parts.len() >= 5 {
             let raw_date = parts.get(4).map_or("", |s| s.trim().trim_matches('"'));
             let raw_time = parts.get(5).map_or("", |s| s.trim().trim_matches('"'));
-            // Decode date/time if UCS2 encoded
             let date = Self::decode_sms_content(raw_date);
             let time = Self::decode_sms_content(raw_time);
             Self::normalize_sms_timestamp(&date, &time)
@@ -1872,13 +1724,11 @@ impl AtModemManager {
         Some((clock, tail.strip_prefix('-')?))
     }
 
-    /// Convert SMS timestamp to RFC3339 UTC
+    /// Inputs are "24/01/15" (YY/MM/DD) and "10:30:45+32" (HH:MM:SS plus a UTC offset in
+    /// quarter-hours, so +32 is UTC+8). Returns RFC3339 UTC.
     fn normalize_sms_timestamp(date: &str, time: &str) -> String {
-        // Input: "24/01/15" and "10:30:45+32" (YY/MM/DD and HH:MM:SS+TZ)
-        // TZ offset is in quarter-hours from UTC (e.g. +32 = 32*15min = 8h = UTC+8)
         let date_parts: Vec<&str> = date.split('/').collect();
 
-        // Parse time and timezone offset (quarter-hours)
         let (time_clean, offset_minutes) = if let Some((t, tz)) = time.rsplit_once('+') {
             let tz_quarters: i32 = tz.parse().unwrap_or(0);
             (t, tz_quarters * 15)
@@ -1892,7 +1742,6 @@ impl AtModemManager {
         if let [year, month, day, ..] = date_parts.as_slice() {
             let year = format!("20{year}");
 
-            // Parse local time and convert to UTC using chrono
             let local_str = format!("{year}-{month}-{day}T{time_clean}");
             if let Ok(naive) =
                 chrono::NaiveDateTime::parse_from_str(&local_str, "%Y-%m-%dT%H:%M:%S")
@@ -1901,7 +1750,6 @@ impl AtModemManager {
                 return format!("{}Z", utc.format("%Y-%m-%dT%H:%M:%S%.3f"));
             }
 
-            // Fallback: return with offset if chrono parse fails
             let tz_hours = offset_minutes.abs() / 60;
             let tz_mins = offset_minutes.abs() % 60;
             let sign = if offset_minutes >= 0 { '+' } else { '-' };
@@ -1913,7 +1761,6 @@ impl AtModemManager {
             .to_string()
     }
 
-    /// Delete SMS by index
     pub async fn delete_sms(&self, port: &str, index: u32) -> Result<()> {
         let cmd = format!("AT+CMGD={index}");
         let response = self.send_at_command(port, &cmd, self.timeout).await?;
@@ -1926,8 +1773,7 @@ impl AtModemManager {
         }
     }
 
-    /// Delete an SMS from an explicit CPMS storage. Indices are scoped to mem1, so
-    /// selecting the storage is part of the delete operation rather than shared state.
+    /// Indices are scoped to CPMS mem1, so the storage must be selected first.
     pub async fn delete_sms_from_storage(
         &self,
         port: &str,
@@ -1938,9 +1784,8 @@ impl AtModemManager {
         self.delete_sms(port, index).await
     }
 
-    /// Delete all SMS (use with caution)
     pub async fn delete_all_sms(&self, port: &str) -> Result<()> {
-        // AT+CMGD=1,4 deletes all messages
+        // AT+CMGD=1,4: delete-flag 4 deletes all messages
         let response = self
             .send_at_command(port, "AT+CMGD=1,4", self.timeout)
             .await?;
@@ -1953,7 +1798,6 @@ impl AtModemManager {
         }
     }
 
-    /// Encode string to UCS2 hex format (UTF-16BE)
     fn encode_ucs2_hex(text: &str) -> String {
         use std::fmt::Write as _;
         text.encode_utf16().fold(String::new(), |mut hex, unit| {
@@ -1962,22 +1806,16 @@ impl AtModemManager {
         })
     }
 
-    /// Check if text contains non-ASCII characters
     fn needs_ucs2(text: &str) -> bool {
         !text.is_ascii()
     }
 
-    /// Validate an SMS recipient before it is interpolated into an AT command.
+    /// AT commands are CR-terminated, so a CR in the recipient ends `AT+CMGS="..."` and
+    /// the modem parses the remaining bytes as a new command; the recipient comes from
+    /// an API request body (docs/SECURITY-REVIEW.md finding 3).
     ///
-    /// AT commands are CR-terminated, so a CR anywhere in the recipient ends the
-    /// `AT+CMGS="..."` command and the modem parses the remaining bytes as a new
-    /// command. The recipient arrives from an API request body and is therefore
-    /// untrusted; see docs/SECURITY-REVIEW.md finding 3.
-    ///
-    /// This allow-lists E.164 rather than escaping: a phone number has no legitimate
-    /// use for quotes or control characters, so anything outside `+` and digits is
-    /// rejected outright. Rejecting is deliberate — silently stripping characters
-    /// would send the message to a *different* number than the caller asked for.
+    /// Allow-lists E.164 and rejects rather than strips: stripping would send the
+    /// message to a different number than the caller asked for.
     pub(crate) fn validate_recipient(recipient: &str) -> Result<()> {
         Self::validate_recipient_with_short_code(recipient, false)
     }
@@ -2012,12 +1850,9 @@ impl AtModemManager {
         Ok(())
     }
 
-    /// Validate an outbound SMS body before it is written to the modem.
-    ///
-    /// The body is terminated by Ctrl-Z (0x1A), so a literal 0x1A inside it ends SMS
-    /// entry early and returns the modem to command mode — making every trailing byte
-    /// an AT command. ESC (0x1B) aborts entry, and NUL is never legitimate. Newlines
-    /// ARE allowed: a multi-line SMS body is normal.
+    /// The body is terminated by Ctrl-Z (0x1A), so a literal 0x1A ends SMS entry early
+    /// and turns every trailing byte into an AT command. ESC (0x1B) aborts entry; NUL
+    /// is never legitimate. Newlines are allowed.
     pub(crate) fn validate_message_body(message: &str) -> Result<()> {
         if let Some(c) = message
             .chars()
@@ -2032,7 +1867,6 @@ impl AtModemManager {
         Ok(())
     }
 
-    /// Send SMS
     pub async fn send_sms(
         &self,
         port: &str,
@@ -2051,8 +1885,7 @@ impl AtModemManager {
         message: &str,
         allow_short_code: bool,
     ) -> Result<SmsSubmission> {
-        // Validate before touching the modem: both values are interpolated into AT
-        // command strings below, and both originate from an API request body.
+        // Both values are interpolated into AT commands and come from an API request body.
         Self::validate_recipient_with_short_code(recipient.as_str(), allow_short_code)?;
         Self::validate_message_body(message)?;
 
@@ -2077,8 +1910,7 @@ impl AtModemManager {
         }
     }
 
-    /// One SMS submission on a port whose lock the caller holds: recover the AT
-    /// channel, configure, submit, and recover again if the modem did not confirm.
+    /// The caller holds the port lock.
     async fn submit_sms_unlocked(
         &self,
         port: &str,
@@ -2136,20 +1968,12 @@ impl AtModemManager {
         Self::send_at_command_unlocked(port, "AT+CMGF=1", self.timeout).await?;
 
         if use_ucs2 {
-            // Set UCS2 character set and message format for Unicode messages
             Self::send_at_command_unlocked(port, "AT+CSCS=\"UCS2\"", self.timeout).await?;
-            // Set message parameters: No retry, request delivery report, DCS=8 for UCS2
-            // CSMP format: <fo>,<vp>,<pid>,<dcs>
-            // fo=49 (0x31): TP-SRR=1 (status report), TP-VPF=00 (no validity period)
-            // vp=0: Not used when TP-VPF=00
-            // This prevents modem from retrying SMS sends automatically
+            // AT+CSMP=<fo>,<vp>,<pid>,<dcs>; fo=49 (0x31) is SMS-SUBMIT with a status report
+            // requested and a relative validity period (vp=0 is 5 minutes); dcs 8 = UCS2.
             Self::send_at_command_unlocked(port, "AT+CSMP=49,0,0,8", self.timeout).await?;
         } else {
-            // Set GSM character set for ASCII messages
             Self::send_at_command_unlocked(port, "AT+CSCS=\"GSM\"", self.timeout).await?;
-            // Set message parameters: No retry, request delivery report, GSM 7-bit
-            // fo=49 (0x31): TP-SRR=1 (status report), TP-VPF=00 (no validity period)
-            // This prevents modem from retrying SMS sends automatically
             Self::send_at_command_unlocked(port, "AT+CSMP=49,0,0,0", self.timeout).await?;
         }
 
@@ -2179,14 +2003,13 @@ impl AtModemManager {
         use_ucs2: bool,
         allow_short_code: bool,
     ) -> Result<SmsSubmission> {
-        // Re-checked at the sink rather than trusting send_sms: this is the function
-        // that actually writes to the serial port, so the invariant belongs here too.
+        // Re-checked here because this is the function that writes to the serial port.
         Self::validate_recipient_with_short_code(recipient, allow_short_code)?;
         Self::validate_message_body(message)?;
 
         let mut file = Self::open_serial(port)?;
 
-        // In UCS2 mode, BOTH phone number and message must be UCS2 hex encoded
+        // In UCS2 mode both the recipient and the message are UCS2 hex.
         let (encoded_recipient, encoded_message) = if use_ucs2 {
             (
                 Self::encode_ucs2_hex(recipient),
@@ -2196,12 +2019,10 @@ impl AtModemManager {
             (recipient.to_string(), message.to_string())
         };
 
-        // Send CMGS command
         let cmd = format!("AT+CMGS=\"{encoded_recipient}\"\r");
         file.write_all(cmd.as_bytes())?;
         file.flush()?;
 
-        // Wait for > prompt (read until we see it)
         let mut prompt_buf = Vec::new();
         let mut buf = [0u8; 64];
         let start = Instant::now();
@@ -2234,15 +2055,13 @@ impl AtModemManager {
             return Err(anyhow!(SMS_PROMPT_TIMEOUT_ERROR));
         }
 
-        // Small delay after prompt
         std::thread::sleep(Duration::from_millis(100));
 
-        // Send message with Ctrl-Z (0x1A)
+        // Ctrl-Z (0x1A) terminates the body
         let msg_with_end = format!("{encoded_message}\x1A");
         file.write_all(msg_with_end.as_bytes())?;
         file.flush()?;
 
-        // Read response
         let mut response = Vec::new();
         let mut buf = [0u8; 256];
         let start = Instant::now();
@@ -2308,7 +2127,6 @@ impl AtModemManager {
         })
     }
 
-    /// Get full modem info
     pub async fn get_modem_info(&self, port: &str) -> Result<AtModemInfo> {
         let mut info = AtModemInfo {
             port: port.to_string(),
@@ -2332,17 +2150,13 @@ impl AtModemManager {
         Ok(info)
     }
 
-    /// Convert AT-port path to modem ID.
-    /// The modem ID is simply the AT port's ttyUSB index ("/dev/ttyUSB6" -> "6").
-    /// This is independent of USB composition (no fixed 4-ports-per-modem assumption),
-    /// so it works for both default and slimmed modems. The ID is an internal handle;
-    /// the stable cross-system key is the modem's IMEI (`equipment_id`).
+    /// The modem ID is the AT port's ttyUSB index ("/dev/ttyUSB6" -> "6"), an internal
+    /// handle; the stable cross-system key is the IMEI (`equipment_id`).
     pub fn port_to_modem_id(port: &str) -> String {
         port.strip_prefix("/dev/ttyUSB")
             .map_or_else(|| port.to_string(), std::string::ToString::to_string)
     }
 
-    /// Convert modem ID back to its AT port path ("6" -> "/dev/ttyUSB6").
     pub fn modem_id_to_port(id: &str) -> String {
         if id.parse::<u32>().is_ok() {
             return format!("/dev/ttyUSB{id}");
@@ -2450,10 +2264,6 @@ mod tests {
         );
     }
 
-    // An AT command is terminated by CR, so a CR inside the recipient ends the CMGS
-    // command and everything after it is parsed by the modem as a fresh command. The
-    // recipient reaches here from an API request body, so it is untrusted.
-    // See docs/SECURITY-REVIEW.md finding 3.
     fn four_port_modem() -> BTreeMap<String, Vec<String>> {
         let mut groups = BTreeMap::new();
         groups.insert(
@@ -2508,22 +2318,20 @@ mod tests {
         assert!(AtModemManager::validate_recipient_with_short_code("+6512345678", false).is_ok());
         assert!(AtModemManager::validate_recipient_with_short_code("6512345678", false).is_ok());
         assert!(AtModemManager::validate_recipient_with_short_code("+861380013800", false).is_ok());
-        assert!(AtModemManager::validate_recipient_with_short_code("123456", false).is_ok()); // 6 digits, minimum
+        assert!(AtModemManager::validate_recipient_with_short_code("123456", false).is_ok());
         assert!(
             AtModemManager::validate_recipient_with_short_code("+123456789012345", false).is_ok()
         );
-        // 15, maximum
     }
 
     #[test]
     fn test_validate_recipient_rejects_at_injection() {
-        // The exact payload from the security review: terminate CMGS, then wipe the SIM.
+        // The payload from the security review: terminate CMGS, then wipe the SIM.
         assert!(AtModemManager::validate_recipient_with_short_code(
             "+6512345678\r\nAT+CMGD=1,4\r",
             false
         )
         .is_err());
-        // Bare CR is enough on its own.
         assert!(AtModemManager::validate_recipient_with_short_code(
             "+6512345678\rAT+CMGD=1,4",
             false
@@ -2532,9 +2340,7 @@ mod tests {
         assert!(
             AtModemManager::validate_recipient_with_short_code("+6512345678\n", false).is_err()
         );
-        // Closing the quoted argument early.
         assert!(AtModemManager::validate_recipient_with_short_code("+65123\"", false).is_err());
-        // Other control characters that the modem's line discipline may act on.
         assert!(AtModemManager::validate_recipient_with_short_code("+65123\x1A", false).is_err());
         assert!(AtModemManager::validate_recipient_with_short_code("+65123\x1B", false).is_err());
         assert!(AtModemManager::validate_recipient_with_short_code("+65123\0", false).is_err());
@@ -2544,18 +2350,17 @@ mod tests {
     fn test_validate_recipient_rejects_malformed() {
         assert!(AtModemManager::validate_recipient_with_short_code("", false).is_err());
         assert!(AtModemManager::validate_recipient_with_short_code("+", false).is_err());
-        assert!(AtModemManager::validate_recipient_with_short_code("12345", false).is_err()); // too short
+        assert!(AtModemManager::validate_recipient_with_short_code("12345", false).is_err());
         assert!(
             AtModemManager::validate_recipient_with_short_code("+1234567890123456", false).is_err()
-        ); // too long
+        );
         assert!(
             AtModemManager::validate_recipient_with_short_code("+65 1234 5678", false).is_err()
-        ); // spaces
+        );
         assert!(
             AtModemManager::validate_recipient_with_short_code("+65-1234-5678", false).is_err()
-        ); // punctuation
+        );
         assert!(AtModemManager::validate_recipient_with_short_code("not-a-number", false).is_err());
-        // A '+' is only valid as the leading character.
         assert!(AtModemManager::validate_recipient_with_short_code("65+12345678", false).is_err());
     }
 
@@ -2570,14 +2375,10 @@ mod tests {
         assert!(AtModemManager::validate_recipient_with_short_code("10A86", true).is_err());
     }
 
-    // The body is terminated by Ctrl-Z (0x1A). A literal 0x1A inside the body ends SMS
-    // entry early and returns the modem to command mode, so trailing bytes become AT
-    // commands — the same injection as above, via a different field.
     #[test]
     fn test_validate_message_body_rejects_terminators() {
         assert!(AtModemManager::validate_message_body("hello").is_ok());
         assert!(AtModemManager::validate_message_body("你好，验证码 1234").is_ok());
-        // Newlines are legitimate in a multi-line SMS body.
         assert!(AtModemManager::validate_message_body("line one\nline two").is_ok());
         assert!(AtModemManager::validate_message_body("line one\r\nline two").is_ok());
 
@@ -2588,7 +2389,6 @@ mod tests {
 
     #[test]
     fn test_parse_iccid() {
-        // Standard numeric ICCID
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 89860121750097854321"),
             Iccid::try_from("89860121750097854321").ok()
@@ -2597,7 +2397,6 @@ mod tests {
             AtModemManager::parse_iccid("89860121750097854321\nOK"),
             Iccid::try_from("89860121750097854321").ok()
         );
-        // ICCID with hex padding (F is stripped as BCD filler)
         assert_eq!(
             AtModemManager::parse_iccid("+QCCID: 8965012306052989707F"),
             Iccid::try_from("8965012306052989707").ok()
@@ -2731,42 +2530,34 @@ mod tests {
         assert!(AtModemManager::sms_read_store_candidates(&supported).is_empty());
     }
 
-    // test_port_conversion moved to tests/at_modem_tests.rs (tests public API)
-
     #[test]
     fn test_ucs2_decode() {
-        // Chinese "你好" = 4F60 597D
         assert_eq!(
             AtModemManager::decode_ucs2_hex("4F60597D"),
             Some("你好".to_string())
         );
 
-        // English "Hi" = 0048 0069
         assert_eq!(
             AtModemManager::decode_ucs2_hex("00480069"),
             Some("Hi".to_string())
         );
 
-        // Empty returns empty string, invalid returns None
         assert_eq!(AtModemManager::decode_ucs2_hex(""), Some(String::new()));
-        assert_eq!(AtModemManager::decode_ucs2_hex("4F6"), None); // Odd length (3 chars)
+        assert_eq!(AtModemManager::decode_ucs2_hex("4F6"), None);
     }
 
     #[test]
     fn test_decode_sms_content() {
-        // UCS2 hex should be decoded
         assert_eq!(AtModemManager::decode_sms_content("4F60597D"), "你好");
 
-        // Plain English should pass through
         assert_eq!(
             AtModemManager::decode_sms_content("Hello World"),
             "Hello World"
         );
 
-        // Short hex that might be a code should pass through
         assert_eq!(
             AtModemManager::decode_sms_content("1234"),
-            AtModemManager::decode_sms_content("1234") // May decode or pass through
+            AtModemManager::decode_sms_content("1234")
         );
     }
 
@@ -2793,16 +2584,13 @@ mod tests {
 
     #[test]
     fn test_pdu_7bit_gsm_encoding() {
-        // Simple ASCII message in 7-bit GSM encoding (no UDH)
-        // "Hello" encoded in 7-bit GSM
         let bytes = vec![0xC8, 0x32, 0x9B, 0xFD, 0x06];
-        let result = AtModemManager::decode_pdu_7bit(&bytes, 5, 0); // udhl=0 (no UDH)
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 5, 0);
         assert_eq!(result, "Hello");
     }
 
     #[test]
     fn test_pdu_ucs2_encoding_chinese() {
-        // Chinese "你好" = 4F60 597D in UCS-2 (UTF-16BE)
         let bytes = vec![0x4F, 0x60, 0x59, 0x7D];
         let result = AtModemManager::decode_pdu_ucs2(&bytes, 4);
         assert_eq!(result, "你好");
@@ -2810,7 +2598,6 @@ mod tests {
 
     #[test]
     fn test_pdu_ucs2_encoding_mixed() {
-        // "Hi你好" = 0048 0069 4F60 597D
         let bytes = vec![0x00, 0x48, 0x00, 0x69, 0x4F, 0x60, 0x59, 0x7D];
         let result = AtModemManager::decode_pdu_ucs2(&bytes, 8);
         assert_eq!(result, "Hi你好");
@@ -2818,46 +2605,31 @@ mod tests {
 
     #[test]
     fn test_pdu_ucs2_with_udh() {
-        // UCS-2 message with UDH header (multipart SMS)
-        // NOTE: In real usage, the caller skips the UDH before calling decode_pdu_ucs2
-        // Header would be: 05 00 03 42 02 01 (UDHL=5, IEI=0, IEDL=3, ref=0x42, total=2, seq=1)
-        // We pass only the text part: "你" = 4F60
-        let bytes = vec![
-            0x4F, 0x60, // "你" (UDH already removed by caller)
-        ];
+        // The caller strips the UDH (05 00 03 42 02 01) before decode_pdu_ucs2.
+        let bytes = vec![0x4F, 0x60];
         let result = AtModemManager::decode_pdu_ucs2(&bytes, 2);
         assert_eq!(result, "你");
     }
 
     #[test]
     fn test_pdu_dcs_detection() {
-        // Test Data Coding Scheme bit patterns
-        // Bit 2 (0x04) = indicates 8-bit data
-        // Bit 3 (0x08) = indicates UCS-2 when bit 2 is also set
-
-        // DCS=0x00: 7-bit GSM (default)
         let dcs_7bit = 0x00;
-        assert_eq!(dcs_7bit & 0x04, 0); // Not 8-bit/UCS2
+        assert_eq!(dcs_7bit & 0x04, 0);
 
-        // DCS=0x08: UCS-2 encoding (common for Chinese)
-        // In GSM 03.38, DCS=0x08 means "UCS2" in general data coding group
         let dcs_ucs2_common = 0x08;
-        assert_ne!(dcs_ucs2_common & 0x08, 0); // Bit 3 set
+        assert_ne!(dcs_ucs2_common & 0x08, 0);
 
-        // DCS=0x0C: 8-bit + UCS-2 encoding (both bits set)
         let dcs_ucs2_explicit = 0x0C;
-        assert_ne!(dcs_ucs2_explicit & 0x04, 0); // Bit 2 set (8-bit)
-        assert_ne!(dcs_ucs2_explicit & 0x08, 0); // Bit 3 set (UCS-2)
+        assert_ne!(dcs_ucs2_explicit & 0x04, 0);
+        assert_ne!(dcs_ucs2_explicit & 0x08, 0);
 
-        // DCS=0x04: 8-bit encoding (not UCS-2)
         let dcs_8bit = 0x04;
-        assert_ne!(dcs_8bit & 0x04, 0); // Is 8-bit
-        assert_eq!(dcs_8bit & 0x08, 0); // Not UCS-2
+        assert_ne!(dcs_8bit & 0x04, 0);
+        assert_eq!(dcs_8bit & 0x08, 0);
     }
 
     #[test]
     fn test_extract_udh_concat() {
-        // Concatenation header 8-bit ref: 00 03 42 02 01
         // IEI=0x00, IEDL=0x03, ref_id=0x42, total=2, part=1
         let udh = vec![0x00, 0x03, 0x42, 0x02, 0x01];
         let result = AtModemManager::extract_udh_concat(&udh);
@@ -2870,7 +2642,6 @@ mod tests {
 
     #[test]
     fn test_extract_udh_concat_16bit() {
-        // Concatenation header 16-bit ref: 08 04 0042 02 01
         // IEI=0x08, IEDL=0x04, ref_id=0x0042, total=2, part=1
         let udh = vec![0x08, 0x04, 0x00, 0x42, 0x02, 0x01];
         let result = AtModemManager::extract_udh_concat(&udh);
@@ -2883,35 +2654,23 @@ mod tests {
 
     #[test]
     fn test_chinese_long_message_encoding() {
-        // Test a realistic Chinese SMS scenario
-        // Message: "【联通提醒】尊敬的..." (common Chinese carrier format)
-        // UCS-2 encoded with multipart header
-        // NOTE: In real usage, UDH is removed before calling decode_pdu_ucs2
-
-        // Text part only (UDH already removed by caller)
         let bytes_part1 = vec![
             0x30, 0x10, 0x80, 0x54, 0x90, 0x1A, // "【联通"
         ];
         let text1 = AtModemManager::decode_pdu_ucs2(&bytes_part1, 6);
         assert!(!text1.is_empty());
-        assert!(text1.contains("联") || text1.contains("通")); // Should contain Chinese
+        assert!(text1.contains("联") || text1.contains("通"));
     }
-
-    // ============================================================================
-    // COMPREHENSIVE PDU PARSING TESTS (protect against regressions)
-    // ============================================================================
 
     #[test]
     fn test_decode_bcd_phone_standard() {
-        // "+1234567890" in BCD: 21 43 65 87 09 F0
         let bytes = vec![0x21, 0x43, 0x65, 0x87, 0x09, 0xF0];
         let result = AtModemManager::decode_bcd_phone(&bytes, 11);
-        assert_eq!(result, "12345678900"); // F is padding
+        assert_eq!(result, "12345678900");
     }
 
     #[test]
     fn test_decode_bcd_phone_odd_length() {
-        // "+123456789" (9 digits, odd) in BCD: 21 43 65 87 F9
         let bytes = vec![0x21, 0x43, 0x65, 0x87, 0xF9];
         let result = AtModemManager::decode_bcd_phone(&bytes, 9);
         assert_eq!(result, "123456789");
@@ -2919,8 +2678,6 @@ mod tests {
 
     #[test]
     fn test_decode_bcd_phone_chinese() {
-        // "+8613800138000" (13 digits) - typical Chinese mobile
-        // BCD encoding: 68 31 08 10 83 00 F0
         let bytes = vec![0x68, 0x31, 0x08, 0x10, 0x83, 0x00, 0xF0];
         let result = AtModemManager::decode_bcd_phone(&bytes, 13);
         assert_eq!(result, "8613800138000");
@@ -2928,89 +2685,67 @@ mod tests {
 
     #[test]
     fn test_decode_pdu_timestamp_with_positive_tz() {
-        // Test timestamp decoding (testing the actual decode logic works)
         let bytes = vec![0x62, 0x30, 0x11, 0x41, 0x03, 0x00, 0x00];
         let result = AtModemManager::decode_pdu_timestamp(&bytes);
-        // Should produce valid ISO 8601 format
         assert!(result.contains('T'));
         assert!(result.ends_with('Z'));
-        assert!(result.len() > 20); // ISO format is ~24 chars
+        assert!(result.len() > 20);
     }
 
     #[test]
     fn test_decode_pdu_timestamp_with_negative_tz() {
-        // Test timestamp with timezone handling
         let bytes = vec![0x62, 0x10, 0x51, 0x21, 0x00, 0x00, 0x23];
         let result = AtModemManager::decode_pdu_timestamp(&bytes);
-        // Should produce valid ISO 8601 format with timezone conversion
         assert!(result.contains('T'));
         assert!(result.ends_with('Z'));
     }
 
     #[test]
     fn test_decode_pdu_timestamp_edge_case() {
-        // Test edge case: short/invalid timestamp
-        let bytes = vec![0x99, 0x99, 0x99]; // Invalid but should not crash
+        // Too short: falls back to the current time
+        let bytes = vec![0x99, 0x99, 0x99];
         let result = AtModemManager::decode_pdu_timestamp(&bytes);
-        // Should return fallback timestamp (current time)
         assert!(result.contains('T'));
         assert!(result.ends_with('Z'));
     }
 
     #[test]
     fn test_decode_pdu_7bit_with_udh_fill_bits() {
-        // Multipart SMS with 7-bit encoding requires fill bits
-        // UDH length = 5 bytes (header: 05 00 03 42 02 01)
-        // Fill bits = (7 - ((5+1)*8 % 7)) % 7 = (7 - (48 % 7)) % 7 = (7 - 6) % 7 = 1
-        // Text "Hello" after 1 fill bit
+        // UDHL=5: fill bits = (7 - (5+1)*8 % 7) % 7 = 1
         let bytes = vec![
             0x90, 0x64, 0x36, 0x1B, 0x0D, // "Hello" with 1 fill bit offset
         ];
-        let result = AtModemManager::decode_pdu_7bit(&bytes, 5, 5); // udhl=5
-                                                                    // With fill bit, result should still be "Hello" (or close)
-        assert!(result.len() >= 4); // At least most of "Hello"
+        let result = AtModemManager::decode_pdu_7bit(&bytes, 5, 5);
+        assert!(result.len() >= 4);
     }
 
     #[test]
     fn test_decode_pdu_7bit_long_message() {
-        // Longer 7-bit message to test boundary conditions
-        // "This is a test message" (22 chars) encoded in 7-bit GSM
         let bytes = vec![
             0x54, 0x74, 0x7A, 0x0E, 0x4A, 0xCF, 0x41, 0x61, 0x10, 0xBD, 0x3C, 0x07, 0xD9, 0xDF,
             0x73, 0x90, 0xFB, 0x0D, 0x9A, 0x03,
         ];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 22, 0);
-        assert!(result.len() >= 20); // Should decode most of the message
+        assert!(result.len() >= 20);
     }
 
     #[test]
     fn test_parse_pdu_sms_structure() {
-        // Test PDU parsing structure validation (not full decode)
-        // This test uses a simplified valid PDU structure
-        // SMSC: 00 (no SMSC)
-        // PDU Type: 04
-        // Sender: 0B 91 2143658709F0 (+1234567890, 11 digits in BCD)
-        // PID: 00, DCS: 00 (7-bit), Timestamp: 42301141030023 (7 bytes)
-        // UDL: 05, Text: C8329BFD06 (5 septets)
+        // SMSC 00, type 04, sender 0B 91 2143658709F0, PID 00, DCS 00, timestamp
+        // 42301141030023, UDL 05, text C8329BFD06
         let pdu = "00040B912143658709F00000423011410300230AC8329BFD06";
         let result = AtModemManager::parse_pdu_sms(1, pdu);
         assert!(result.is_ok());
         let sms = result.unwrap();
         assert_eq!(sms.index, 1);
-        assert!(!sms.text.is_empty()); // Should decode something
-        assert!(sms.concat_info.is_none()); // Single-part
+        assert!(!sms.text.is_empty());
+        assert!(sms.concat_info.is_none());
     }
 
     #[test]
     fn test_parse_pdu_sms_with_udh_structure() {
-        // Test UDH extraction (simplified PDU with UDH header)
-        // SMSC: 00
-        // PDU Type: 44 (bit 6 = UDH present)
-        // Sender: 0B 91 2143658709F0
-        // PID: 00, DCS: 00, Timestamp: 7 bytes
-        // UDL: 0A (includes UDH + text)
-        // UDHL: 05, UDH: 00 03 42 02 01 (8-bit concat: ref=0x42, total=2, part=1)
-        // Text: A8 (1 septet after UDH)
+        // Type 44 (bit 6 = UDH present); UDL 0A covers UDH plus text; UDHL 05,
+        // UDH 00 03 42 02 01 (ref=0x42, total=2, part=1); text A8
         let pdu = "00440B912143658709F00000423011410300230A0500034202 01A8";
         let result = AtModemManager::parse_pdu_sms(3, &pdu.replace(' ', ""));
         assert!(result.is_ok());
@@ -3026,7 +2761,6 @@ mod tests {
 
     #[test]
     fn test_parse_pdu_sms_error_truncated() {
-        // Truncated PDU (too short)
         let pdu = "07916831";
         let result = AtModemManager::parse_pdu_sms(5, pdu);
         assert!(result.is_err());
@@ -3034,7 +2768,6 @@ mod tests {
 
     #[test]
     fn test_parse_pdu_sms_error_invalid_hex() {
-        // Invalid hex characters
         let pdu = "ZZZZZZZZZZ";
         let result = AtModemManager::parse_pdu_sms(6, pdu);
         assert!(result.is_err());
@@ -3042,37 +2775,34 @@ mod tests {
 
     #[test]
     fn test_extract_udh_concat_no_concat_header() {
-        // UDH with non-concatenation header (e.g., special SMS indicator)
-        // IEI=0x01 (Special SMS indication), IEDL=0x02, data: 00 01
+        // IEI=0x01 (special SMS indication), IEDL=0x02
         let udh = vec![0x01, 0x02, 0x00, 0x01];
         let result = AtModemManager::extract_udh_concat(&udh);
-        assert!(result.is_none()); // No concatenation header found
+        assert!(result.is_none());
     }
 
     #[test]
     fn test_extract_udh_concat_truncated() {
-        // Truncated UDH (claims IEDL=3 but not enough bytes)
-        let udh = vec![0x00, 0x03, 0x42]; // Missing total_parts and part_number
+        // IEDL=3 but total_parts and part_number are missing
+        let udh = vec![0x00, 0x03, 0x42];
         let result = AtModemManager::extract_udh_concat(&udh);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_extract_udh_concat_16bit_full_reference() {
-        // 16-bit reference ID should use lower byte only
-        // IEI=0x08, IEDL=0x04, ref=0xABCD (use 0xCD), total=3, part=1
+        // IEI=0x08, IEDL=0x04, ref=0xABCD, total=3, part=1
         let udh = vec![0x08, 0x04, 0xAB, 0xCD, 0x03, 0x01];
         let result = AtModemManager::extract_udh_concat(&udh);
         assert!(result.is_some());
         let concat = result.unwrap();
-        assert_eq!(concat.ref_id, 0xCD); // Lower byte of 0xABCD
+        assert_eq!(concat.ref_id, 0xCD);
         assert_eq!(concat.total_parts, 3);
         assert_eq!(concat.part_number, 1);
     }
 
     #[test]
     fn test_decode_pdu_ucs2_empty() {
-        // Empty UCS-2 content
         let bytes = vec![];
         let result = AtModemManager::decode_pdu_ucs2(&bytes, 0);
         assert_eq!(result, "");
@@ -3080,26 +2810,21 @@ mod tests {
 
     #[test]
     fn test_decode_pdu_ucs2_odd_length() {
-        // Odd number of bytes (invalid UTF-16) - should handle gracefully
-        let bytes = vec![0x4F, 0x60, 0x59]; // Missing last byte
+        let bytes = vec![0x4F, 0x60, 0x59];
         let result = AtModemManager::decode_pdu_ucs2(&bytes, 3);
-        // Should return partial decode or "?"
         assert!(!result.is_empty() || result == "?");
     }
 
     #[test]
     fn test_decode_pdu_7bit_boundary_conditions() {
-        // Test boundary: exactly 160 characters (single SMS limit)
-        // 160 septets = 140 bytes when packed
-        // Note: use chars().count() not len() because GSM chars may be multi-byte UTF-8
-        let bytes = vec![0x41; 140]; // 'A' repeated (simplified)
+        // 160 septets (the single-SMS limit) pack into 140 bytes
+        let bytes = vec![0x41; 140];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 160, 0);
         assert_eq!(result.chars().count(), 160);
     }
 
     #[test]
     fn test_decode_bcd_phone_empty() {
-        // Edge case: empty phone number
         let bytes = vec![];
         let result = AtModemManager::decode_bcd_phone(&bytes, 0);
         assert_eq!(result, "");
@@ -3107,11 +2832,7 @@ mod tests {
 
     #[test]
     fn test_parse_pdu_sms_8bit_encoding() {
-        // 8-bit data encoding (DCS=0x04)
-        // SMSC: 00 (no SMSC)
-        // PDU Type: 04, Sender: 0B 91 2143658709F0
-        // PID: 00, DCS: 04 (8-bit), Timestamp: 42301141030023
-        // UDL: 05, Text: 48656C6C6F ("Hello" as raw 8-bit bytes)
+        // DCS 04 (8-bit), UDL 05, text 48656C6C6F
         let pdu = "00040B912143658709F00004423011410300230548656C6C6F";
         let result = AtModemManager::parse_pdu_sms(7, pdu);
         assert!(result.is_ok());
@@ -3140,28 +2861,18 @@ mod tests {
 
     #[test]
     fn test_parse_pdu_sms_ucs2_encoding() {
-        // UCS-2 encoding test (DCS=0x08)
-        // SMSC: 00
-        // PDU Type: 04, Sender: 0B 91 2143658709F0
-        // PID: 00, DCS: 08 (UCS-2), Timestamp: 42301141030023
-        // UDL: 04, Text: 4F60597D ("你好" in UTF-16BE)
+        // DCS 08 (UCS-2), UDL 04, text 4F60597D
         let pdu = "00040B912143658709F000084230114103002304004F60597D";
         let result = AtModemManager::parse_pdu_sms(8, pdu);
         assert!(result.is_ok());
         let sms = result.unwrap();
-        // Check that UCS-2 decoding happened (should contain Chinese characters)
         assert!(sms.text.contains("你") || sms.text.contains("好") || sms.text.len() >= 2);
         assert!(sms.concat_info.is_none());
     }
 
-    // ============================================================================
-    // BCD PHONE NUMBER TESTS — hex nibbles A-F
-    // ============================================================================
-
     #[test]
     fn test_decode_bcd_phone_with_hex_nibbles() {
-        // Nibble 0xA = '*', 0xB = '#'
-        // Byte 0xBA → low=A(*), high=B(#) → "*#"
+        // 0xBA: low nibble A = '*', high nibble B = '#'
         let bytes = vec![0xBA];
         let result = AtModemManager::decode_bcd_phone(&bytes, 2);
         assert_eq!(result, "*#");
@@ -3170,7 +2881,6 @@ mod tests {
     #[test]
     fn test_at_probe_order() {
         let p4: Vec<String> = (0..4).map(|n| format!("/dev/ttyUSB{n}")).collect();
-        // 4-port: AT slot (index 2) tried first, then 0,1,3
         assert_eq!(
             AtModemManager::at_probe_order(&p4),
             vec![
@@ -3180,27 +2890,23 @@ mod tests {
                 "/dev/ttyUSB3"
             ]
         );
-        // 2-port (slimmed): index 0 first
         let p2: Vec<String> = vec!["/dev/ttyUSB6".into(), "/dev/ttyUSB7".into()];
         assert_eq!(
             AtModemManager::at_probe_order(&p2),
             vec!["/dev/ttyUSB6", "/dev/ttyUSB7"]
         );
-        // single port
         let p1: Vec<String> = vec!["/dev/ttyUSB9".into()];
         assert_eq!(AtModemManager::at_probe_order(&p1), vec!["/dev/ttyUSB9"]);
     }
 
     #[test]
     fn test_modem_id_port_roundtrip() {
-        // modem_id is the AT port's ttyUSB index — works for any offset (default or slimmed)
         assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB2"), "2");
         assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB0"), "0");
         assert_eq!(AtModemManager::port_to_modem_id("/dev/ttyUSB58"), "58");
         assert_eq!(AtModemManager::modem_id_to_port("2"), "/dev/ttyUSB2");
         assert_eq!(AtModemManager::modem_id_to_port("0"), "/dev/ttyUSB0");
         assert_eq!(AtModemManager::modem_id_to_port("58"), "/dev/ttyUSB58");
-        // round-trip
         for n in ["0", "1", "2", "6", "57", "240"] {
             let port = AtModemManager::modem_id_to_port(n);
             assert_eq!(AtModemManager::port_to_modem_id(&port), n);
@@ -3225,9 +2931,7 @@ mod tests {
 
     #[test]
     fn test_decode_bcd_phone_mixed_digits_and_hex() {
-        // "1*2#" → BCD bytes: 0xA1, 0x2B (low nibble first per BCD swap)
-        // Wait — BCD encoding: "1*" → low=1, high=A → byte 0xA1
-        //                       "2#" → low=2, high=B → byte 0xB2
+        // "1*" -> 0xA1 (low=1, high=A); "2#" -> 0xB2
         let bytes = vec![0xA1, 0xB2];
         let result = AtModemManager::decode_bcd_phone(&bytes, 4);
         assert_eq!(result, "1*2#");
@@ -3235,7 +2939,6 @@ mod tests {
 
     #[test]
     fn test_decode_bcd_phone_nibble_c_d() {
-        // 0xC = 'a', 0xD = 'b'
         let bytes = vec![0xDC];
         let result = AtModemManager::decode_bcd_phone(&bytes, 2);
         assert_eq!(result, "ab");
@@ -3243,20 +2946,14 @@ mod tests {
 
     #[test]
     fn test_decode_bcd_phone_nibble_e_skipped() {
-        // 0xE is reserved — should be skipped (not produce '?')
-        let bytes = vec![0xE1]; // low=1, high=E(skip)
+        // 0xE is reserved filler and is skipped
+        let bytes = vec![0xE1];
         let result = AtModemManager::decode_bcd_phone(&bytes, 2);
-        assert_eq!(result, "1"); // only digit 1, E skipped
+        assert_eq!(result, "1");
     }
-
-    // ============================================================================
-    // GSM 7-BIT ALPHABET TESTS
-    // ============================================================================
 
     #[test]
     fn test_decode_pdu_7bit_backward_compat() {
-        // "Hello" in GSM 7-bit: H=0x48, e=0x65, l=0x6C, l=0x6C, o=0x6F
-        // Same positions in ASCII and GSM, so this must still work
         let bytes = vec![0xC8, 0x32, 0x9B, 0xFD, 0x06];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 5, 0);
         assert_eq!(result, "Hello");
@@ -3264,8 +2961,7 @@ mod tests {
 
     #[test]
     fn test_decode_pdu_7bit_gsm_alphabet_at_sign() {
-        // '@' is at GSM position 0x00 (NOT 0x40 like ASCII)
-        // Single septet 0x00 packed into one byte
+        // '@' is GSM 0x00, not 0x40 as in ASCII
         let bytes = vec![0x00];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 1, 0);
         assert_eq!(result, "@");
@@ -3273,13 +2969,7 @@ mod tests {
 
     #[test]
     fn test_decode_pdu_7bit_gsm_special_chars() {
-        // Test positions that differ from ASCII:
-        // GSM 0x01 = '£', GSM 0x02 = '$', GSM 0x05 = 'é'
-        // Pack 3 septets: 0x01, 0x02, 0x05
-        // Septet packing:
-        //   byte0: septet0(0x01) | septet1_low1<<7 = 0x01 | (0x02&1)<<7 = 0x01 | 0x00 = 0x01
-        //   byte1: septet1>>1 | septet2_low2<<6 = 0x01 | (0x05&3)<<6 = 0x01 | 0x40 = 0x41
-        //   byte2: septet2>>2 = 0x01
+        // Septets 0x01 '£', 0x02 '$', 0x05 'é' packed 7 bits each
         let bytes = vec![0x01, 0x41, 0x01];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 3, 0);
         assert_eq!(result, "£$é");
@@ -3287,10 +2977,7 @@ mod tests {
 
     #[test]
     fn test_decode_pdu_7bit_gsm_inverted_marks() {
-        // GSM 0x40 = '¡' (NOT '@'), GSM 0x60 = '¿'
-        // Pack 2 septets: 0x40, 0x60
-        // byte0: 0x40 | (0x60 & 0x01) << 7 = 0x40
-        // byte1: 0x60 >> 1 = 0x30
+        // Septets 0x40 '¡' and 0x60 '¿'
         let bytes = vec![0x40, 0x30];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 2, 0);
         assert_eq!(result, "¡¿");
@@ -3298,29 +2985,15 @@ mod tests {
 
     #[test]
     fn test_decode_pdu_7bit_escape_sequences() {
-        // ESC (0x1B) + 0x3C = '[', ESC + 0x3E = ']'
-        // 4 septets: 0x1B, 0x3C, 0x1B, 0x3E
-        // Septet packing (7 bits each):
-        //   bit_pos 0:  0x1B → byte0 bits 0-6
-        //   bit_pos 7:  0x3C → byte0 bit7 + byte1 bits 0-5
-        //   bit_pos 14: 0x1B → byte1 bits 6-7 + byte2 bits 0-4
-        //   bit_pos 21: 0x3E → byte2 bits 5-7 + byte3 bits 0-3
-        // byte0: 0x1B | (0x3C & 0x01) << 7 = 0x1B | 0x00 = 0x1B
-        // byte1: (0x3C >> 1) | (0x1B & 0x03) << 6 = 0x1E | 0xC0 = 0xDE
-        // byte2: (0x1B >> 2) | (0x3E & 0x07) << 5 = 0x06 | 0xC0 = 0xC6
-        // byte3: 0x3E >> 3 = 0x07
+        // Septets ESC 0x3C ESC 0x3E: '[' and ']'; each ESC pair yields one char
         let bytes = vec![0x1B, 0xDE, 0xC6, 0x07];
-        // 4 septets consumed but ESC pairs produce 2 output chars
         let result = AtModemManager::decode_pdu_7bit(&bytes, 4, 0);
         assert_eq!(result, "[]");
     }
 
     #[test]
     fn test_decode_pdu_7bit_euro_sign() {
-        // ESC (0x1B) + 0x65 = '€'
-        // 2 septets: 0x1B, 0x65
-        // byte0: 0x1B | (0x65 & 0x01) << 7 = 0x1B | 0x80 = 0x9B
-        // byte1: 0x65 >> 1 = 0x32
+        // Septets ESC 0x65
         let bytes = vec![0x9B, 0x32];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 2, 0);
         assert_eq!(result, "€");
@@ -3328,36 +3001,16 @@ mod tests {
 
     #[test]
     fn test_decode_pdu_7bit_high_positions() {
-        // GSM 0x7B = 'ä', 0x7C = 'ö', 0x7D = 'ñ', 0x7E = 'ü', 0x7F = 'à'
-        // Pack 2 septets: 0x7B, 0x7C
-        // byte0: 0x7B | (0x7C & 0x01) << 7 = 0x7B | 0x00 = 0x7B
-        // byte1: 0x7C >> 1 = 0x3E
+        // Septets 0x7B 'ä' and 0x7C 'ö'
         let bytes = vec![0x7B, 0x3E];
         let result = AtModemManager::decode_pdu_7bit(&bytes, 2, 0);
         assert_eq!(result, "äö");
     }
 
-    // ============================================================================
-    // ALPHANUMERIC SENDER TESTS
-    // ============================================================================
-
     #[test]
     fn test_parse_pdu_sms_alphanumeric_sender() {
-        // PDU with alphanumeric sender "Google"
-        // SMSC: 00
-        // PDU Type: 04
-        // Sender length: 0C (12 semi-octets → 6 bytes → (12*4)/7 = 6 septets)
-        // Sender TOA: D0 (TON=5 alphanumeric, NPI=0)
-        // Sender: C7F7FBCC2E03 ("Google" in GSM 7-bit packed)
-        //   G=0x47, o=0x6F, o=0x6F, g=0x67, l=0x6C, e=0x65
-        //   byte0: 0x47 | (0x6F & 0x01) << 7 = 0x47 | 0x80 = 0xC7
-        //   byte1: 0x6F >> 1 | (0x6F & 0x03) << 6 = 0x37 | 0xC0 = 0xF7
-        //   byte2: 0x6F >> 2 | (0x67 & 0x07) << 5 = 0x1B | 0xE0 = 0xFB
-        //   byte3: 0x67 >> 3 | (0x6C & 0x0F) << 4 = 0x0C | 0xC0 = 0xCC
-        //   byte4: 0x6C >> 4 | (0x65 & 0x1F) << 3 = 0x06 | 0x28 = 0x2E
-        //   byte5: 0x65 >> 5 = 0x03
-        // PID: 00, DCS: 00, Timestamp: 42301141030023, UDL: 05
-        // Text: C8329BFD06 ("Hello")
+        // Sender length 0C (12 semi-octets = 6 septets), TOA D0 (alphanumeric),
+        // sender C7F7FBCC2E03 = "Google" packed as GSM 7-bit
         let pdu = "00040CD0C7F7FBCC2E0300004230114103002305C8329BFD06";
         let result = AtModemManager::parse_pdu_sms(1, pdu);
         assert!(result.is_ok());

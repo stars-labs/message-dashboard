@@ -1,9 +1,5 @@
-// Local message store using SQLite for reliable message handling
-// This ensures messages are:
-// 1. Saved locally before deletion from SIM
-// 2. Uploaded reliably even if API is down
-// 3. Deduplicated to prevent re-uploads
-// 4. Deleted from SIM only after successful processing
+// A message is saved here before it is deleted from the SIM, and deleted from
+// the SIM only after upload.
 
 use crate::identifiers::{Iccid, SmsAddress};
 use crate::types::{Message, SmsStorage};
@@ -68,7 +64,6 @@ impl FromSql for MessageStatus {
     }
 }
 
-/// A multipart SMS fragment and its physical location on the modem.
 pub struct Segment<'a> {
     pub iccid: &'a Iccid,
     pub sender: &'a SmsAddress,
@@ -110,7 +105,6 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 }
 
 fn configure_connection(conn: &Connection) -> Result<()> {
-    // Enable WAL mode for better concurrency
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
@@ -121,7 +115,6 @@ fn configure_connection(conn: &Connection) -> Result<()> {
 }
 
 fn create_messages_table(conn: &Connection) -> Result<()> {
-    // Create tables
     conn.execute(
         "CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,8 +143,7 @@ fn create_messages_table(conn: &Connection) -> Result<()> {
 }
 
 fn upgrade_messages_table(conn: &Connection) -> Result<()> {
-    // Existing databases are upgraded in place. The server never creates an
-    // ID for these rows: each local row receives its durable identity here.
+    // The server never assigns these IDs: each local row gets its identity here.
     for (column, definition) in [
         ("source_message_id", "TEXT"),
         ("next_attempt_at", "TIMESTAMP"),
@@ -194,8 +186,8 @@ fn recover_message_statuses(conn: &Connection) -> Result<()> {
         "UPDATE messages SET status = ?1 WHERE status = 'uploading'",
         params![MessageStatus::InFlight],
     )?;
-    // `uploading` predates leases. Such rows have no lease expiry, so they
-    // would otherwise never satisfy the in-flight recovery predicate.
+    // Rows migrated from `uploading` have no lease expiry, so they would never
+    // satisfy the in-flight recovery predicate in `claim_messages`.
     conn.execute(
         "UPDATE messages
          SET status = ?1, lease_token = NULL, lease_expires_at = NULL
@@ -206,7 +198,6 @@ fn recover_message_statuses(conn: &Connection) -> Result<()> {
 }
 
 fn create_message_indexes(conn: &Connection) -> Result<()> {
-    // Create indexes
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_status ON messages(status)",
         [],
@@ -219,7 +210,6 @@ fn create_message_indexes(conn: &Connection) -> Result<()> {
 }
 
 fn create_sim_storage_table(conn: &Connection) -> Result<()> {
-    // Create SIM storage tracking table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sim_storage (
             iccid TEXT PRIMARY KEY,
@@ -234,7 +224,6 @@ fn create_sim_storage_table(conn: &Connection) -> Result<()> {
 }
 
 fn create_multipart_segments_table(conn: &Connection) -> Result<()> {
-    // Create multipart SMS segments table for buffering incomplete messages
     conn.execute(
         "CREATE TABLE IF NOT EXISTS multipart_segments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,8 +242,8 @@ fn create_multipart_segments_table(conn: &Connection) -> Result<()> {
         [],
     )?;
 
-    // Existing databases predate storage-aware ME/SM polling. Their buffered
-    // segments came from EC20's MT view, which is an alias for ME.
+    // Segments buffered before the column existed came from EC20's MT view,
+    // which is an alias for ME.
     let has_sms_storage = {
         let mut stmt = conn.prepare("PRAGMA table_info(multipart_segments)")?;
         let columns = stmt
@@ -270,7 +259,6 @@ fn create_multipart_segments_table(conn: &Connection) -> Result<()> {
         )?;
     }
 
-    // Create index for querying message groups
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_multipart_group
          ON multipart_segments(phone_iccid, sender, ref_id, total_parts)",
@@ -280,9 +268,7 @@ fn create_multipart_segments_table(conn: &Connection) -> Result<()> {
 }
 
 impl MessageStore {
-    /// Create a new message store with SQLite backend
     pub fn new(db_path: &str) -> Result<Self> {
-        // Create directory if it doesn't exist
         if let Some(parent) = Path::new(db_path).parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -308,9 +294,6 @@ impl MessageStore {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Store a message from SIM card (returns true if new, false if duplicate)
-    /// Fold the write-ahead log back into the database and truncate it.
-    ///
     /// `TRUNCATE` rather than the passive default: a passive checkpoint gives up
     /// when a reader is active, and under constant writes that meant never.
     pub fn checkpoint_wal(&self) -> Result<()> {
@@ -319,10 +302,11 @@ impl MessageStore {
         Ok(())
     }
 
+    /// Returns false for a duplicate: same ICCID and content within 10 seconds,
+    /// matching the server's rule.
     pub fn store_message(&self, message: &Message, modem_id: &str, sms_path: &str) -> Result<bool> {
         let conn = self.conn();
 
-        // Check for duplicate first (same logic as server - within 10 seconds)
         let existing: Option<i64> = conn
             .query_row(
                 "SELECT id FROM messages
@@ -344,7 +328,6 @@ impl MessageStore {
             return Ok(false);
         }
 
-        // Insert new message
         conn.execute(
             "INSERT INTO messages
              (source_message_id, phone_iccid, phone_number, content, timestamp, direction, modem_id, sms_path, status)
@@ -364,7 +347,6 @@ impl MessageStore {
 
         debug!("Stored new message from ICCID: {}", &message.phone_iccid);
 
-        // Update SIM storage count
         conn.execute(
             "INSERT INTO sim_storage (iccid, total_messages)
              VALUES (?1, 1)
@@ -498,7 +480,7 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Get SMS paths to delete from SIM (only uploaded messages)
+    /// Only uploaded messages are deletable from the SIM.
     pub fn get_deletable_sms(&self) -> Result<Vec<(String, String)>> {
         let conn = self.conn();
 
@@ -519,7 +501,6 @@ impl MessageStore {
         Ok(paths)
     }
 
-    /// Mark SMS as deleted from SIM
     pub fn mark_sms_deleted(&self, modem_id: &str, sms_path: &str) -> Result<()> {
         let conn = self.conn();
 
@@ -530,7 +511,6 @@ impl MessageStore {
             params![modem_id, sms_path],
         )?;
 
-        // Update SIM storage count
         conn.execute(
             "UPDATE sim_storage
              SET deleted_messages = deleted_messages + 1
@@ -578,11 +558,11 @@ impl MessageStore {
         })
     }
 
-    /// Check if database has many messages for any SIM (NOT actual SIM card storage)
+    /// ICCIDs with more than 200 undeleted rows in this database; says nothing
+    /// about the physical SIM's storage.
     pub fn check_sim_storage(&self) -> Result<Vec<Iccid>> {
         let conn = self.conn();
 
-        // This checks DATABASE message count, NOT physical SIM card!
         let mut stmt = conn.prepare(
             "SELECT iccid
              FROM sim_storage
@@ -603,7 +583,6 @@ impl MessageStore {
         Ok(full_sims)
     }
 
-    /// Clean up old uploaded and deleted messages (>7 days)
     pub fn cleanup_old_messages(&self) -> Result<usize> {
         let conn = self.conn();
 
@@ -622,12 +601,11 @@ impl MessageStore {
         Ok(deleted)
     }
 
-    /// Mark old uploaded messages as having been deleted (to stop deletion attempts)
-    /// This is for messages that were uploaded before the immediate deletion fix
+    /// Uploaded messages older than an hour are marked deleted: their SMS paths
+    /// are stale, so deletion would never succeed.
     pub fn mark_old_uploaded_as_deleted(&self) -> Result<usize> {
         let conn = self.conn();
 
-        // Mark messages uploaded >1 hour ago as deleted (they have stale paths)
         let updated = conn.execute(
             "UPDATE messages
              SET deleted_at = CURRENT_TIMESTAMP
@@ -685,9 +663,8 @@ mod segment_write_tests {
             .unwrap()
     }
 
-    /// The AUTOINCREMENT counter. `total_changes()` does not count writes to
-    /// `sqlite_sequence`, which is how a first fix passed its test while the daemon
-    /// was still writing 2.6 GB an hour.
+    /// The AUTOINCREMENT counter; `total_changes()` does not count writes to
+    /// `sqlite_sequence`.
     fn sequence(store: &MessageStore) -> i64 {
         let conn = store.conn.lock().unwrap();
         conn.query_row(
@@ -714,8 +691,6 @@ mod segment_write_tests {
             .unwrap();
     }
 
-    /// The 2026-09-21 finding: an orphan part re-read on every scan must cost
-    /// nothing once it is stored.
     #[test]
     fn storing_an_unchanged_segment_again_writes_nothing() {
         let store = MessageStore::new(":memory:").unwrap();
@@ -736,7 +711,6 @@ mod segment_write_tests {
         store_part(&store, "part one", 3);
         let before = changes(&store);
 
-        // Same slot in the concatenation, but the SIM moved it to another index.
         store_part(&store, "part one", 7);
 
         assert_eq!(changes(&store), before + 1);
@@ -888,7 +862,6 @@ pub struct QueueStats {
 }
 
 impl MessageStore {
-    /// Get uploaded messages grouped by modem
     pub fn get_uploaded_messages_by_modem(&self) -> Result<HashMap<String, Vec<Message>>> {
         let conn = self.conn();
 
@@ -923,7 +896,6 @@ impl MessageStore {
         Ok(result)
     }
 
-    /// Mark message as deleted by content match
     pub fn mark_message_deleted_by_content(&self, iccid: &Iccid, content: &str) -> Result<()> {
         let conn = self.conn();
 
@@ -940,11 +912,10 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Clean up messages with empty content that have failed multiple times
+    /// Deletes empty-content messages that have failed 3 or more times.
     pub fn cleanup_empty_messages(&self) -> Result<usize> {
         let conn = self.conn();
 
-        // Delete messages with empty content that have failed 3+ times
         let deleted = conn.execute(
             "DELETE FROM messages
              WHERE (content IS NULL OR content = '')
@@ -959,11 +930,6 @@ impl MessageStore {
         Ok(deleted)
     }
 
-    // ============================================================================
-    // Multipart SMS segment management
-    // ============================================================================
-
-    /// Store an incomplete message part together with its CPMS location.
     pub fn store_segment(&self, segment: &Segment<'_>) -> Result<()> {
         let Segment {
             iccid,
@@ -978,18 +944,11 @@ impl MessageStore {
         } = *segment;
         let conn = self.conn();
 
-        // Look before writing. A part whose siblings never arrive stays on the SIM
-        // and is re-read on every scan; `INSERT OR REPLACE` deleted and re-inserted
-        // it each time even though nothing differed. By 2026-09-21 that was 664
-        // orphan parts (the oldest from October 2025) rewritten every ten seconds:
-        // 140 writes a second, 10.9 GB an hour onto the SD card, and an id past
-        // 500 million.
-        //
-        // The check has to be a separate SELECT. An upsert whose DO UPDATE is
-        // filtered out by a WHERE clause leaves the table alone, but this table is
-        // AUTOINCREMENT, and SQLite allocates the rowid — and rewrites
-        // sqlite_sequence — before it discovers the conflict. That alone was still
-        // 2.6 GB an hour.
+        // Look before writing: an orphan part stays on the SIM and is re-read on
+        // every scan, and rewriting it each time wears out the SD card.
+        // It must be a separate SELECT, not an upsert with a filtering WHERE: this
+        // table is AUTOINCREMENT, and SQLite allocates the rowid and rewrites
+        // sqlite_sequence before it discovers the conflict.
         let unchanged = conn
             .query_row(
                 "SELECT 1 FROM multipart_segments
@@ -1048,8 +1007,6 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Get all parts for a message group
-    /// Returns: Vec<(`part_number`, content, timestamp, `sms_index`)>
     pub fn get_segments(
         &self,
         iccid: &Iccid,
@@ -1064,7 +1021,6 @@ impl MessageStore {
             .collect())
     }
 
-    /// Get buffered parts including their CPMS storage and index.
     pub fn get_segments_with_storage(
         &self,
         iccid: &Iccid,
@@ -1102,7 +1058,6 @@ impl MessageStore {
         Ok(segments)
     }
 
-    /// Delete segments after successful assembly
     pub fn delete_segments(&self, iccid: &Iccid, ref_id: u8) -> Result<usize> {
         let conn = self.conn();
 
@@ -1123,8 +1078,6 @@ impl MessageStore {
         Ok(deleted)
     }
 
-    /// Get all incomplete segments (for recovery on startup)
-    /// Returns buffered segment metadata including CPMS storage and index.
     pub fn get_all_segments(&self) -> Result<Vec<RecoverySegment>> {
         let conn = self.conn();
 
@@ -1153,8 +1106,6 @@ impl MessageStore {
         Ok(segments)
     }
 
-    /// Cleanup segments older than `timeout_secs`
-    /// Returns count of segments deleted
     pub fn cleanup_old_segments(&self, timeout_secs: i64) -> Result<usize> {
         let conn = self.conn();
 
