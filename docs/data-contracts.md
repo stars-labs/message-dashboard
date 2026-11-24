@@ -19,14 +19,23 @@
   `/api/control/phones` route was removed; do not reintroduce it.
 - SIM indices are displayed as `S` plus two digits (`S01`, `S36`) everywhere.
   Reuse the centralized formatter instead of formatting individual views.
+- The SIMs in this fleet do not carry their MSISDN (Singtel and M1 never
+  provision it), so `AT+CNUM` returns nothing. Phone numbers come only from
+  `sims.phone_number`, entered by an operator.
+- `messages.phone_iccid` has no foreign key to `sims`: messages arrive for ICCIDs
+  that are not in the inventory yet.
 - Daemon health and SIM state are different domains. A healthy daemon can report
   offline SIMs; legacy activity must not make a schema-v1 daemon healthy.
+- Daemon liveness is the Worker's receive time (`last_heartbeat =
+  CURRENT_TIMESTAMP`). The Pi's wall clock never decides whether it is online.
 
 ## Authentication contracts
 
 - Browser users authenticate with Auth0 JWTs and RBAC. Daemon/legacy control
   clients authenticate with `API_KEY`.
-- Middleware order is CORS → Auth0 JWT → RBAC.
+- Every `/api/*` route declares its access on the contract. `server/contract/handler.ts`
+  admits the caller (API key, runner token, or Auth0 session plus permission)
+  before the input is parsed.
 - Balance Agent requires scopes `balance:runners:heartbeat`,
   `balance:skills:run`, and `balance:browser:run`.
 - Migration `057` binds Dashboard-created balance work to the requesting Auth0
@@ -60,6 +69,11 @@
   migration `067` owns account versions and account audit events; migration `068`
   performs the one-time exact normalization of confirmed Singtel senders; migration
   `069` enforces one active bill stream per receiving SIM.
+- Each carrier has its own deterministic parser profile (exact senders and
+  templates, no AI, no cross-carrier fuzzy matching). Only Singtel's
+  (`sg-singtel-postpaid-bill-sms-v1`) exists. A new profile needs two authentic
+  notices from different billing cycles, sanitized positive and negative
+  fixtures, and a controlled preview; it starts disabled.
 
 Browser users need `bills.read` to list accounts and read bills. Administrators need
 `bills.write` for account configuration, bill actions, and historical backfill.
