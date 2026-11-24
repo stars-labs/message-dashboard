@@ -1,6 +1,3 @@
-// Lint rules for the whole dashboard and balance-agent. TypeScript files are
-// linted with type information, so the rules see the same types tsc does.
-// Run with `bun run lint`; `bun run check` includes it.
 import js from '@eslint/js';
 import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import { defineConfig, globalIgnores } from 'eslint/config';
@@ -10,8 +7,6 @@ import svelte from 'eslint-plugin-svelte';
 import tseslint from 'typescript-eslint';
 import { fileURLToPath } from 'node:url';
 
-// A leading underscore marks a parameter or caught error that is unused on
-// purpose; `{ dropped, ...kept }` is the idiom for omitting a field.
 const unusedVars: [
   'error',
   { argsIgnorePattern: string; caughtErrorsIgnorePattern: string; ignoreRestSiblings: boolean },
@@ -20,8 +15,8 @@ const unusedVars: [
   { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', ignoreRestSiblings: true },
 ];
 
-// A later block that sets a rule for a file replaces the options of an earlier
-// one, so each block below lists every selector or import its files are held to.
+// A later block that sets a rule replaces the options of an earlier one, so each block
+// lists every selector or import its files are held to.
 
 const UNTYPED_DATA = [
   {
@@ -92,7 +87,6 @@ const ORPC_OC = {
 };
 
 export default defineConfig([
-  // Whatever git ignores is not source: local worktrees, caches, builds.
   includeIgnoreFile(fileURLToPath(new URL('.gitignore', import.meta.url))),
   globalIgnores([
     'docs/',
@@ -129,7 +123,6 @@ export default defineConfig([
       },
     },
     rules: {
-      // A number has one string form; anything else is converted explicitly.
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       '@typescript-eslint/no-unused-vars': unusedVars,
       // `as const` stays legal; no `as`, no `<T>x`, no `!` non-null assertion.
@@ -250,17 +243,15 @@ export default defineConfig([
     files: ['shared/**/*.ts', 'config/**/*.ts'],
     languageOptions: { sourceType: 'module' },
   },
-  // After the TypeScript block, so the Svelte parser owns .svelte files and
-  // hands their scripts to the TypeScript parser.
+  // After the TypeScript block, so the Svelte parser owns .svelte files.
   svelte.configs.recommended,
   {
     name: 'Svelte components: scripts parsed as TypeScript',
     files: ['**/*.svelte', '**/*.svelte.ts'],
     languageOptions: { parserOptions: { parser: tseslint.parser } },
-    // TypeScript resolves every name, as typescript-eslint has it do for .ts.
     rules: { 'no-undef': 'off' },
   },
-  // Last: switches off every rule Prettier owns, so the two never disagree.
+  // Last: switches off the rules Prettier owns.
   prettier,
   svelte.configs.prettier,
 ]);
