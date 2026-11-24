@@ -7,9 +7,9 @@ import { coverageViolations, lcovTotals, type Coverage } from './coverage-rules.
 const root = join(import.meta.dirname, '..');
 
 const FLOORS: Record<string, { report: string; floor: Coverage }> = {
-  runtime: { report: 'coverage/runtime/lcov.info', floor: { lines: 99.3, functions: 99.5 } },
+  runtime: { report: 'coverage/runtime/lcov.info', floor: { lines: 99.4, functions: 99.5 } },
   client: { report: 'coverage/client/lcov.info', floor: { lines: 81.2, functions: 82.5 } },
-  agent: { report: 'balance-agent/coverage/lcov.info', floor: { lines: 62.7, functions: 68.3 } },
+  agent: { report: 'balance-agent/coverage/lcov.info', floor: { lines: 62.8, functions: 68.3 } },
 };
 
 const violations: string[] = [];
