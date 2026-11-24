@@ -82,7 +82,7 @@ printed only after address N was allocated, so it means an address was free.
 
 An EC20 exposes DIAG, NMEA, AT, MODEM and QMI. `orange-pi-daemon/scripts/slim-modem-usbcfg.sh`
 cuts a modem to AT and MODEM to save endpoints, but voice calls carry audio on the
-NMEA port ([voice-call-plan.md](voice-call-plan.md)), so a slimmed modem cannot take
+NMEA port ([voice-calls.md](voice-calls.md)), so a slimmed modem cannot take
 calls.
 
 ## Power

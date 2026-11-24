@@ -4,7 +4,7 @@
 //! audio to the browser, the `down` leg carries browser audio to the modem. The
 //! first admitted leg of a call places or answers it; losing either leg, the far
 //! end hanging up, or a failed setup tears the call down and reports it to the
-//! Worker. Design and evidence: `docs/voice-call-plan.md`.
+//! Worker. Design and hardware facts: `docs/voice-calls.md`.
 //!
 //! The same listener serves Let's Encrypt TLS-ALPN-01 challenges, so the
 //! certificate renews itself with no DNS token on the Pi.

@@ -1,4 +1,4 @@
-// Media flow (docs/voice-call-plan.md, "Media topology"):
+// Media flow (docs/voice-calls.md, "Realtime SFU quirks"):
 //   1. dial / answer: create the browser session and publish its mic as `mic`.
 //   2. connect: create the `down` adapter (SFU streams `mic` to the Pi) and the
 //      `up` adapter (the Pi feeds modem audio in as `modem`), then pull `modem`

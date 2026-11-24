@@ -96,7 +96,7 @@
                     signalCheckIntervalSeconds = 10;
                     debugBuild = false;
                     # Cloudflare Realtime adapters connect here; DNS-only A record
-                    # to the office IP, 443 forwarded to the Pi. docs/voice-call-plan.md
+                    # to the office IP, 443 forwarded to the Pi. docs/voice-calls.md
                     voiceBridgeDomain = "voice-bridge.itoken.world";
                   };
                 }

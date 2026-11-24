@@ -278,7 +278,7 @@ pub(crate) fn spawn_rediscovery(manager: Arc<ModemManager>, modem_set: Arc<RwLoc
 }
 
 /// Runs only when `VOICE_BRIDGE_DOMAIN` is set: a wss:// listener for the Cloudflare Realtime adapters plus one URC reader per
-/// voice-capable modem for incoming calls. See docs/voice-call-plan.md.
+/// voice-capable modem for incoming calls. See docs/voice-calls.md.
 pub(crate) fn spawn_voice_bridge(
     api_key: ApiKey,
     modem_manager: Arc<ModemManager>,

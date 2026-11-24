@@ -76,5 +76,6 @@ no longer reported fails too, so remove it once fixed.
   balance, and the rules for adding a query method
 - [SMS storage safety](docs/sms-storage-safety.md): rules for reading and deleting
   SMS on the modem or SIM
-- [Voice call plan](docs/voice-call-plan.md)
+- [Voice calls](docs/voice-calls.md): EC20 voice-over-USB facts, call flow and
+  endpoint security
 - [USB topology](docs/usb-topology-explained.md)
