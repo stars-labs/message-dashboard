@@ -19,6 +19,20 @@
 - SMS send methods return `Result<SmsSubmission>`: `Ok` means confirmed or
   submitted without confirmation; a failed submission must be `Err`.
 
+## Received-SMS outbox
+
+Delivery to D1 is at-least-once with an exactly-once effect:
+
+- A message gets one ID when first stored locally. Retries and restarts never
+  change it, and D1 stores it as `messages.id`, so a repeated upload changes
+  nothing.
+- A message Cloudflare has not acknowledged is never deleted by age. A crash at
+  any point leaves it acknowledged or retryable once its lease expires.
+- Transient failures retry forever with capped backoff. A permanent rejection is
+  dead-lettered where an operator can see it, never counted as uploaded.
+- The stored payload is the uploaded payload; retries never rebuild it.
+- The heartbeat never changes delivery or device-sync state.
+
 ## Build and verify
 
 ```bash
