@@ -12,6 +12,7 @@ import {
 } from '../../config/auth0-roles.js';
 import type { D1 } from '../lib/d1.js';
 import { readKvJson, type KV } from '../lib/kv.js';
+import { auth0Origin } from '../utils/auth0-origin.js';
 import { extractSessionToken } from '../utils/session-token.js';
 import { getUserRoles, setUserRole, type Auth0ManagementEnv } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
@@ -224,7 +225,7 @@ export const auth0Handler = {
       );
     }
 
-    const authUrl = new URL(`https://${env.AUTH0_DOMAIN}/authorize`);
+    const authUrl = new URL(`${auth0Origin(env.AUTH0_DOMAIN)}/authorize`);
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID);
     authUrl.searchParams.set('redirect_uri', redirectUri);
@@ -269,7 +270,7 @@ export const auth0Handler = {
       if (!domain) throw new Error('AUTH0_DOMAIN is not configured');
 
       const redirectUri = `${url.origin}/callback`;
-      const tokenResponse = await fetch(`https://${domain}/oauth/token`, {
+      const tokenResponse = await fetch(`${auth0Origin(domain)}/oauth/token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -302,7 +303,7 @@ export const auth0Handler = {
       }
       const tokens = tokenBody.value;
 
-      const userResponse = await fetch(`https://${domain}/userinfo`, {
+      const userResponse = await fetch(`${auth0Origin(domain)}/userinfo`, {
         headers: {
           Authorization: `Bearer ${tokens.access_token}`,
         },
@@ -464,7 +465,7 @@ export const auth0Handler = {
         headers: { 'Content-Type': 'text/plain', 'Set-Cookie': COOKIE_CLEARED },
       });
     }
-    const logoutUrl = new URL(`https://${env.AUTH0_DOMAIN}/v2/logout`);
+    const logoutUrl = new URL(`${auth0Origin(env.AUTH0_DOMAIN)}/v2/logout`);
     logoutUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID ?? '');
     logoutUrl.searchParams.set('returnTo', url.origin);
 
@@ -503,7 +504,9 @@ export const auth0Handler = {
     if (!env.AUTH0_DOMAIN || expectedAudience === undefined) return null;
 
     try {
-      const JWKS = createRemoteJWKSet(new URL(`https://${env.AUTH0_DOMAIN}/.well-known/jwks.json`));
+      const JWKS = createRemoteJWKSet(
+        new URL(`${auth0Origin(env.AUTH0_DOMAIN)}/.well-known/jwks.json`),
+      );
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: `https://${env.AUTH0_DOMAIN}/`,
         audience: expectedAudience,

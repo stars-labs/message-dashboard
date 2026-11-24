@@ -42,7 +42,7 @@ interface TestEnv extends Auth0ManagementEnv {
   SESSIONS: ReturnType<typeof kvStub>;
 }
 
-function makeEnv(overrides: { AUTH0_ADMIN_ROLE?: string } = {}): TestEnv {
+function makeEnv(overrides: { AUTH0_ADMIN_ROLE?: string; AUTH0_DOMAIN?: string } = {}): TestEnv {
   return {
     AUTH0_DOMAIN: 'tenant.auth0.com',
     AUTH0_M2M_CLIENT_ID: 'm2m-client',
@@ -132,6 +132,14 @@ describe('getManagementToken', () => {
       client_secret: 'm2m-secret',
       audience: 'https://tenant.auth0.com/api/v2/',
     });
+  });
+
+  test('talks plain HTTP to a loopback stand-in for Auth0', async () => {
+    mockFetch([TOKEN_OK]);
+
+    await getManagementToken(makeEnv({ AUTH0_DOMAIN: 'localhost:8788' }));
+
+    expect(calls[0]?.url).toBe('http://localhost:8788/oauth/token');
   });
 
   test('caches the token in KV with a TTL below its expiry', async () => {

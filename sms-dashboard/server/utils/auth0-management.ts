@@ -5,6 +5,7 @@ import * as v from 'valibot';
 import { createRoleConfig, type RoleEnv } from '../../config/auth0-roles.js';
 import { parseJson } from '../../shared/parse-json.js';
 import { readKvJson, type KV } from '../lib/kv.js';
+import { auth0Origin } from './auth0-origin.js';
 
 export interface Auth0ManagementEnv extends RoleEnv {
   AUTH0_DOMAIN?: string;
@@ -107,7 +108,7 @@ export async function getManagementToken(env: Auth0ManagementEnv): Promise<strin
   const cached = await env.SESSIONS.get(cacheKey);
   if (cached) return cached;
 
-  const response = await fetch(`https://${domain}/oauth/token`, {
+  const response = await fetch(`${auth0Origin(domain)}/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -158,7 +159,7 @@ async function mgmtFetch(
   const { domain } = requireConfig(env);
   const token = await getManagementToken(env);
 
-  const response = await fetch(`https://${domain}/api/v2${path}`, {
+  const response = await fetch(`${auth0Origin(domain)}/api/v2${path}`, {
     method,
     ...(body === undefined ? {} : { body }),
     headers: {
