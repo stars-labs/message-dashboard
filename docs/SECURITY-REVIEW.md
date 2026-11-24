@@ -23,11 +23,21 @@ anyone who knows one of the phone numbers can inject arbitrary text into this da
 | 4 | [Session token in URL query string](#4-24-hour-session-token-placed-in-the-url-query-string) | MEDIUM | **Fixed & verified in production** |
 | 5 | [Unnamespaced `roles` claim trusted first](#5-unnamespaced-roles-claim-trusted-ahead-of-the-namespaced-one) | MEDIUM | **Fixed** |
 
+**Rechecked 2026-11-24.** All five fixes still hold in the current code. The file
+references below predate the TypeScript migration: `*.js` files are now `*.ts`,
+`server/api/` was merged into `server/handlers/`, the role table is
+`config/auth0-roles.ts`, keyword colours are normalized in `shared/keyword-color.ts`,
+and recipient validation on the daemon is in `orange-pi-daemon/src/at_modem/sms_send.rs`.
+Still open: [OAuth `state`](#open-follow-up-oauth-state-is-generated-but-never-validated)
+(GRA-240), the [Pi firewall and fail2ban](#unresolved--needs-on-device-confirmation)
+(GRA-241; the Pi now also serves the voice bridge and NetBird on 443), and the CORS
+tidy-up under [Discarded findings](#discarded-findings) (GRA-242).
+
 ## Follow-up: admin/viewer split (done)
 
 The fix for finding 1 left a single role granting all permissions, so
 `requirePermission()` could not distinguish read from write. That has since been replaced
-with two roles — see `config/auth0-roles.js` for the table.
+with two roles — see `config/auth0-roles.ts` for the table.
 
 | | viewer | admin |
 |---|:--:|:--:|
@@ -101,20 +111,8 @@ Suites after all of the above: **293 JS / 181 Rust, 0 failures.**
 
 ---
 
-> ⚠️ **Historical — this was the pre-deploy gate for finding 1** (now satisfied). Retained
-> because it is the checklist to re-run if the Auth0 tenant is ever rebuilt; every item is
-> a silent-failure mode:
-> 1. The post-login Action setting the `https://sexy.itoken.world/roles` claim is deployed and
->    **active in the Login flow**.
-> 2. Both `sms-admin` and `sms-viewer` roles exist, and **you hold `sms-admin`** — the role UI is
->    admin-only and nobody can change their own role.
-> 3. `AUTH0_M2M_CLIENT_ID` / `AUTH0_M2M_CLIENT_SECRET` are set, or viewer
->    auto-provisioning fails and denies login.
-> 4. Real users' addresses are `email_verified` on one of the domains in
->    `ALLOWED_EMAIL_DOMAINS`.
->
-> Recovery needs no redeploy — assign the role in Auth0 and log in again. Every denial
-> writes a `login_denied` row to `audit_logs` with a `reason` saying which gate fired.
+> The pre-deploy gate for finding 1 is now the tenant checklist in
+> [docs/auth0.md](auth0.md); re-run it if the Auth0 tenant is ever rebuilt.
 
 **Fix order.** 1 first — it is what turns 2 and 3 from privileged-insider issues into
 any-user issues. Then 3 (reaches physical hardware and carrier billing), then 2. Fix 5

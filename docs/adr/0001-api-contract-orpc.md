@@ -3,6 +3,12 @@
 - Status: accepted (GRA-62, pilot for GRA-40)
 - Date: 2026-11-15
 - Pilot commit: `d266b2e`, on top of the safety nets in `64b701b`, `2748602`, `10c3280`
+- Outcome: every `/api/*` route moved to the contract (GRA-63, GRA-64). The legacy
+  Router now serves only the OAuth redirects, CORS preflight and the app shell, and
+  the follow-ups listed under Consequences shipped: `openapi.json` generation,
+  `check-api-compat` in CI, a problem 404 for unknown `/api/*` paths, and
+  runner-token access. The 1.16.2 pin stands. The rest of this record describes
+  the pilot as it was.
 
 ## Context
 
