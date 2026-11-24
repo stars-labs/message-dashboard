@@ -84,6 +84,22 @@ ssh root@10.171.150.102 pi-deploy "$drv"
 After deploy: confirm `sms-daemon` is active, check `journalctl -u sms-daemon -f`
 for errors, and wait for a fresh production heartbeat.
 
+### Pi secrets
+
+`nixos-config/secrets/orange-pi.yaml` is SOPS-encrypted. sops-nix decrypts it on
+the Pi at activation with the Pi's SSH host key (`/etc/ssh/ssh_host_ed25519_key`,
+the `orangepi` age recipient in `.sops.yaml`); people are PGP recipients. The keys
+it must hold are the `sops.secrets` entries in `flake.nix` and `nixos-config/`.
+
+Opening the file decrypts it, so it needs the operator's go-ahead each time
+([AGENTS.md](../AGENTS.md)). From the dev shell:
+
+```bash
+sops nixos-config/secrets/orange-pi.yaml               # edit; re-encrypts on save
+sops updatekeys nixos-config/secrets/orange-pi.yaml    # after changing recipients in .sops.yaml
+nix shell nixpkgs#ssh-to-age -c ssh-to-age < ssh_host_ed25519_key.pub   # a new Pi's age recipient
+```
+
 ## Balance Agent Release
 
 ```bash
