@@ -16,7 +16,9 @@ import { startFakeAI } from './e2e/fake-ai.ts';
 import { startLocalStack } from './local-stack.ts';
 import type { PageIssue, Viewport } from './page-report.ts';
 import { recordIssues, VIEWPORTS } from './page-visit.ts';
-import { remoteBindings, strayStacks } from './verify/doctor.ts';
+import { startAgentSandbox, type AgentSandbox } from './verify/agent.ts';
+import { daemonClient } from './verify/daemon.ts';
+import { remoteBindings, strayKeychainServices, strayStacks } from './verify/doctor.ts';
 import type { JourneyContext } from './verify/journey.ts';
 import { verdict } from './verify/verdict.ts';
 
@@ -27,13 +29,19 @@ const { values, positionals } = parseArgs({
 
 async function doctor(): Promise<number> {
   const ps = Bun.spawnSync(['ps', '-axo', 'pid=,command=']).stdout.toString();
-  const leftovers = (await readdir(tmpdir())).filter((name) =>
-    name.startsWith('sms-dashboard-stack-'),
+  const leftovers = (await readdir(tmpdir())).filter(
+    (name) => name.startsWith('sms-dashboard-stack-') || name.startsWith('sms-dashboard-agent-'),
   );
+  // Attributes only: without -d, dump-keychain prints no secret.
+  const keychain = Bun.spawnSync(['/usr/bin/security', 'dump-keychain']).stdout.toString();
   const checks: [string, string[]][] = [
     ['wrangler.toml binds nothing remote', remoteBindings(await Bun.file('wrangler.toml').text())],
     ['no stack process is still running', strayStacks(ps).map((pid) => `pid ${pid}`)],
-    ['no stack state is left in the temp dir', leftovers.map((name) => join(tmpdir(), name))],
+    [
+      'no stack or agent state is left in the temp dir',
+      leftovers.map((name) => join(tmpdir(), name)),
+    ],
+    ['no agent Keychain items are left', strayKeychainServices(keychain)],
     [
       'Chromium is installed for Playwright',
       existsSync(chromium.executablePath()) ? [] : [chromium.executablePath()],
@@ -59,6 +67,7 @@ async function verify(journeyFile: string, out: string): Promise<number> {
   await mkdir(out, { recursive: true });
 
   const pages: { label: string; page: Page; issues: PageIssue[] }[] = [];
+  const agents: AgentSandbox[] = [];
   const evidence: string[] = [];
   let error: string | null = null;
 
@@ -84,6 +93,12 @@ async function verify(journeyFile: string, out: string): Promise<number> {
           stack,
           ai,
           out,
+          daemon: daemonClient(stack.baseUrl, stack.apiKey),
+          async agent() {
+            const sandbox = await startAgentSandbox();
+            agents.push(sandbox);
+            return sandbox;
+          },
           async page(viewport: Viewport = 'desktop') {
             const page = await context.newPage();
             const issues: PageIssue[] = [];
@@ -108,6 +123,7 @@ async function verify(journeyFile: string, out: string): Promise<number> {
       await browser.close();
     }
   } finally {
+    for (const sandbox of agents) await sandbox.stop();
     await ai.stop();
     await stack.stop();
   }

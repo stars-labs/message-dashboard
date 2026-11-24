@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { remoteBindings, strayStacks } from './doctor.ts';
+import { remoteBindings, strayKeychainServices, strayStacks } from './doctor.ts';
 
 describe('verify doctor', () => {
   test('names every binding that would reach Cloudflare from a local run', () => {
@@ -23,6 +23,21 @@ experimental_remote = true
 
   test('finds nothing remote in an all-local config', () => {
     expect(remoteBindings('[[d1_databases]]\nbinding = "DB"\n')).toEqual([]);
+  });
+
+  test('finds Keychain items a Balance Agent sandbox left behind, not the real ones', () => {
+    const dump = [
+      'keychain: "/Users/x/Library/Keychains/login.keychain-db"',
+      '    "acct"<blob>="aiToken"',
+      '    "svce"<blob>="io.qzz.message-dashboard.balance-agent.verify-1b2c"',
+      '    "acct"<blob>="aiToken"',
+      '    "svce"<blob>="io.qzz.message-dashboard.balance-agent.cli"',
+      '    "acct"<blob>="auth0RefreshToken"',
+      '    "svce"<blob>="io.qzz.message-dashboard.balance-agent.verify-1b2c"',
+    ].join('\n');
+    expect(strayKeychainServices(dump)).toEqual([
+      'io.qzz.message-dashboard.balance-agent.verify-1b2c',
+    ]);
   });
 
   test('picks out processes a verify or e2e stack left running', () => {

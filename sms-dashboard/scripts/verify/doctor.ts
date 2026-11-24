@@ -22,6 +22,14 @@ export function remoteBindings(wranglerToml: string): string[] {
   });
 }
 
+/** Keychain services, from `security dump-keychain` (attributes only), a sandbox left behind. */
+export function strayKeychainServices(dump: string): string[] {
+  const services = dump.matchAll(
+    /"svce"<blob>="(io\.qzz\.message-dashboard\.balance-agent\.verify-[^"]+)"/g,
+  );
+  return [...new Set([...services].map((match) => match[1] ?? ''))];
+}
+
 /** PIDs, from `ps -axo pid=,command=`, of processes still serving a stack's temp state. */
 export function strayStacks(ps: string): string[] {
   return ps
