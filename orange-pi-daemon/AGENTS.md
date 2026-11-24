@@ -40,7 +40,7 @@ check-daemon          # rustfmt check + strict Clippy + all tests with coverage 
 
 cd orange-pi-daemon
 cargo build --release
-RUST_LOG=debug cargo run
+SMS_API_URL=http://localhost:8787 SMS_API_KEY=<local key> RUST_LOG=debug cargo run   # both required
 ```
 
 `check-daemon` is the only accepted verification gate. Do not substitute `cargo check`.

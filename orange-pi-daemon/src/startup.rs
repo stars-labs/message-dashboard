@@ -31,8 +31,8 @@ pub(crate) fn print_help(program: &str) {
     println!();
     println!("ENVIRONMENT VARIABLES:");
     println!("    MESSAGE_DB_PATH     SQLite database path (overridden by --db-path)");
-    println!("    SMS_API_URL         API endpoint URL");
-    println!("    SMS_API_KEY         API authentication key");
+    println!("    SMS_API_URL         API endpoint URL (required)");
+    println!("    SMS_API_KEY         API authentication key (required)");
     println!("    USE_DBUS            Set to '1' to use ModemManager D-Bus (default: AT commands)");
     println!("    RUST_LOG            Log level (e.g., orange_pi_daemon_rust=debug)");
 }
@@ -97,14 +97,14 @@ pub(crate) async fn build_modem_cache(
     Ok(valid_modems)
 }
 
-pub(crate) fn load_api_settings() -> (String, ApiKey) {
-    let api_url =
-        std::env::var("SMS_API_URL").unwrap_or_else(|_| "http://localhost:8787".to_string());
-    let api_key = std::env::var("SMS_API_KEY").unwrap_or_else(|_| {
-        warn!("SMS_API_KEY not set, using default");
-        "default_api_key".to_string()
-    });
-    (api_url, api_key.into())
+/// Without either, every request would fail while the process looked healthy.
+pub(crate) fn api_settings(env: impl Fn(&str) -> Option<String>) -> Result<(String, ApiKey)> {
+    let required = |name: &str| {
+        env(name)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("{name} is not set"))
+    };
+    Ok((required("SMS_API_URL")?, required("SMS_API_KEY")?.into()))
 }
 
 pub(crate) async fn check_modem_manager(modem_manager: &ModemManager) -> Result<()> {
@@ -154,4 +154,49 @@ pub(crate) fn init_worker_pool(
         worker_config.num_workers, worker_config.batch_size
     );
     worker_pool
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        |name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        }
+    }
+
+    #[test]
+    fn api_settings_reads_both_variables() {
+        let (url, key) = api_settings(env(&[
+            ("SMS_API_URL", "https://sexy.itoken.world"),
+            ("SMS_API_KEY", "k".repeat(32).as_str()),
+        ]))
+        .unwrap();
+
+        assert_eq!(url, "https://sexy.itoken.world");
+        assert_eq!(key.expose(), "k".repeat(32));
+    }
+
+    #[test]
+    fn api_settings_refuses_a_missing_or_empty_key() {
+        for vars in [
+            &[("SMS_API_URL", "https://sexy.itoken.world")][..],
+            &[
+                ("SMS_API_URL", "https://sexy.itoken.world"),
+                ("SMS_API_KEY", ""),
+            ][..],
+        ] {
+            let error = api_settings(env(vars)).unwrap_err();
+            assert_eq!(error.to_string(), "SMS_API_KEY is not set");
+        }
+    }
+
+    #[test]
+    fn api_settings_refuses_a_missing_url() {
+        let error = api_settings(env(&[("SMS_API_KEY", "key")])).unwrap_err();
+        assert_eq!(error.to_string(), "SMS_API_URL is not set");
+    }
 }

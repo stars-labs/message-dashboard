@@ -329,7 +329,7 @@
               cargo clippy --locked --all-targets --all-features -- -D warnings
               # Coverage floors: raise them when coverage rises, never lower one to pass.
               cargo llvm-cov --locked --all-features --summary-only \
-                --fail-under-lines 49.9 --fail-under-functions 58.3
+                --fail-under-lines 50.2 --fail-under-functions 58.9
               cargo test --locked --doc
               check-daemon-wire
             '';

@@ -25,8 +25,8 @@ use periodic_tasks::{
 };
 use reader::{spawn_modem_reader, ModemReader};
 use startup::{
-    build_modem_cache, check_modem_manager, init_worker_pool, load_api_settings,
-    open_message_store, print_help, resolve_db_path,
+    api_settings, build_modem_cache, check_modem_manager, init_worker_pool, open_message_store,
+    print_help, resolve_db_path,
 };
 use uploader::spawn_uploader;
 
@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
         return PerformanceBenchmark::run_benchmark().await;
     }
 
-    let (api_url, api_key) = load_api_settings();
+    let (api_url, api_key) = api_settings(|name| std::env::var(name).ok())?;
 
     let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
     info!(
