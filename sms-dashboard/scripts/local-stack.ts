@@ -75,7 +75,7 @@ export async function startLocalStack(): Promise<LocalStack> {
   await run(['bun', 'run', 'build:unified'], 'frontend build');
 
   const state = await mkdtemp(join(tmpdir(), 'sms-dashboard-stack-'));
-  const auth0 = startFakeAuth0();
+  const auth0 = await startFakeAuth0();
   let worker: ChildProcess | null = null;
   const stop = async () => {
     if (worker !== null) await stopGroup(worker);
@@ -123,6 +123,7 @@ export async function startLocalStack(): Promise<LocalStack> {
       envFile,
       [
         `AUTH0_DOMAIN=${auth0.domain}`,
+        `AUTH0_AUDIENCE=${auth0.audience}`,
         'AUTH0_CLIENT_ID=e2e-client',
         'AUTH0_CLIENT_SECRET=e2e-client-secret',
         'AUTH0_M2M_CLIENT_ID=e2e-m2m',
