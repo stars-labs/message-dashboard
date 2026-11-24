@@ -32,20 +32,12 @@
   let loading = $state(false);
   let error = $state<string | null>(null);
   let searchQuery = $state('');
-  let statusFilter = $state<StatusFilter>(initialStatusFilter);
+  // A chip click overrides it; a new deep-link value resets it.
+  let statusFilter = $derived<StatusFilter>(initialStatusFilter);
   let carrierFilter = $state('all');
   let successMessage = $state<string | null>(null);
   let sortKey = $state<SortKey | null>(null);
   let sortDirection = $state<'asc' | 'desc'>('asc');
-
-  // Must not track statusFilter, or every manual chip click would reset to the deep-link value.
-  let lastInitialStatusFilter = initialStatusFilter;
-  $effect(() => {
-    if (initialStatusFilter !== lastInitialStatusFilter) {
-      lastInitialStatusFilter = initialStatusFilter;
-      statusFilter = initialStatusFilter;
-    }
-  });
 
   let panel = $state<Panel | null>(null);
 

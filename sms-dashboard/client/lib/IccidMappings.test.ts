@@ -71,6 +71,32 @@ afterEach(() => {
   auth.baseUrl = originalBaseUrl;
 });
 
+describe('Device & Card status filter', () => {
+  test('starts from the deep link, a chip overrides it, a new deep link resets it', async () => {
+    stubMappings([
+      { iccid: 'online-iccid', phone_number: '+6501', sim_index: 1, is_active: 'active' },
+      { iccid: 'spare-iccid', phone_number: '+6502', sim_index: 2, is_active: 'no_modem' },
+    ]);
+    const rowCount = () => view.container.querySelectorAll('tbody tr').length;
+
+    const view = render(IccidMappings, { initialStatusFilter: 'active' });
+    await waitFor(() => {
+      expect(rowCount()).toBe(1);
+    });
+
+    await fireEvent.click(view.getByRole('button', { name: /^全部/ }));
+    await waitFor(() => {
+      expect(rowCount()).toBe(2);
+    });
+
+    await view.rerender({ initialStatusFilter: 'inactive' });
+    await waitFor(() => {
+      expect(rowCount()).toBe(1);
+    });
+    expect(view.container.querySelector('tbody tr')?.textContent).toContain('S02');
+  });
+});
+
 describe('Device & Card sorting', () => {
   test('keeps the desktop table in its own scroll region', async () => {
     stubMappings([
