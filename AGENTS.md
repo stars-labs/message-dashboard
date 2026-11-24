@@ -74,6 +74,7 @@ no longer reported fails too, so remove it once fixed.
 - [Balance Agent CLI](docs/balance-agent-cli.md)
 - [Carrier balance facts](docs/carrier-balance.md): how each carrier exposes a
   balance, and the rules for adding a query method
-- [SMS hardware safety](docs/sms-hardware-storage-safety-plan.md)
+- [SMS storage safety](docs/sms-storage-safety.md): rules for reading and deleting
+  SMS on the modem or SIM
 - [Voice call plan](docs/voice-call-plan.md)
 - [USB topology](docs/usb-topology-explained.md)
