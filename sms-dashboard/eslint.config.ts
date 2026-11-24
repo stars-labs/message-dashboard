@@ -54,6 +54,62 @@ const API_PATHS = [
   { selector: 'TemplateElement[value.raw=/^\\/api\\//]', message: API_PATH_MESSAGE },
 ];
 
+const D1_ACCESS = [
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.property.name=/^(prepare|batch)$/]",
+    message:
+      'Reach D1 through a function in server/db/; only the data layer prepares or batches statements.',
+  },
+];
+
+const DEVICE_TABLE_MESSAGE =
+  'Read devices from device_view. Only server/db/sims.ts touches sims, and only server/db/modems.ts touches modems.';
+const DEVICE_TABLE_SQL = '/\\b(from|join|into|update)\\s+(sims|modems)\\b/i';
+
+const DEVICE_TABLES = [
+  { selector: `TemplateElement[value.raw=${DEVICE_TABLE_SQL}]`, message: DEVICE_TABLE_MESSAGE },
+  { selector: `Literal[value=${DEVICE_TABLE_SQL}]`, message: DEVICE_TABLE_MESSAGE },
+];
+
+const SCHEMA_CHANGE_MESSAGE =
+  'Change the schema in a new migration (migrations/NNN_name.sql), never at runtime.';
+const SCHEMA_CHANGE_SQL = '/\\b(create|drop|alter)\\s+(unique\\s+)?(table|index|view|trigger)\\b/i';
+
+const SCHEMA_CHANGES = [
+  { selector: `TemplateElement[value.raw=${SCHEMA_CHANGE_SQL}]`, message: SCHEMA_CHANGE_MESSAGE },
+  { selector: `Literal[value=${SCHEMA_CHANGE_SQL}]`, message: SCHEMA_CHANGE_MESSAGE },
+];
+
+// Each moves its SQL into server/db/ and leaves this list; nothing joins it.
+const NOT_YET_ON_THE_DATA_LAYER = [
+  'server/handlers/balance-queries.ts',
+  'server/handlers/balance-runners.ts',
+  'server/handlers/balance-skill-runner.ts',
+  'server/handlers/calls.ts',
+  'server/handlers/carrier-billing-backfill.ts',
+  'server/handlers/carrier-bills.ts',
+  'server/handlers/carrier-web-balance.ts',
+  'server/handlers/control.ts',
+  'server/handlers/filters.ts',
+  'server/handlers/health.ts',
+  'server/handlers/iccid-mappings.ts',
+  'server/handlers/keywords.ts',
+  'server/handlers/messages.ts',
+  'server/handlers/phones.ts',
+  'server/utils/audit-log.ts',
+  'server/utils/carrier-billing-backfill.ts',
+  'server/utils/carrier-billing.ts',
+  'server/utils/filter-history.ts',
+  'server/utils/keyword-history.ts',
+  'server/utils/message-retention.ts',
+  'server/utils/spam-backfill.ts',
+  'server/utils/spam-filter.ts',
+  'server/utils/verification-backfill.ts',
+];
+
+const DEVICE_TABLE_OWNERS = ['server/db/sims.ts', 'server/db/modems.ts'];
+
 const ORPC_OC = {
   name: '@orpc/contract',
   importNames: ['oc'],
@@ -118,6 +174,33 @@ export default defineConfig([
     files: ['**/*.ts'],
     ignores: ['shared/parse-json.ts', 'server/lib/d1.ts', '**/*.test.ts'],
     rules: { 'no-restricted-syntax': ['error', ...UNTYPED_DATA] },
+  },
+  {
+    name: 'Only server/db reaches D1',
+    files: ['server/**/*.ts'],
+    ignores: ['server/lib/d1.ts', 'server/db/**', '**/*.test.ts', ...NOT_YET_ON_THE_DATA_LAYER],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...UNTYPED_DATA,
+        ...D1_ACCESS,
+        ...DEVICE_TABLES,
+        ...SCHEMA_CHANGES,
+      ],
+    },
+  },
+  {
+    name: 'server/db reads devices from device_view',
+    files: ['server/db/**/*.ts'],
+    ignores: ['**/*.test.ts', ...DEVICE_TABLE_OWNERS],
+    rules: {
+      'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...DEVICE_TABLES, ...SCHEMA_CHANGES],
+    },
+  },
+  {
+    name: 'The device tables owners, and the files not yet on the data layer',
+    files: [...DEVICE_TABLE_OWNERS, ...NOT_YET_ON_THE_DATA_LAYER],
+    rules: { 'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...SCHEMA_CHANGES] },
   },
   {
     name: 'Clients reach the Dashboard through the contract client',
