@@ -1,271 +1,108 @@
-# USB Cascaded Hub Topology Explained
+# USB Topology
 
-**Date**: 2026-03-09
-**Hardware**: Orange Pi with 73 Quectel EC25 modems
-**Data Source**: `lsusb -t` output
+What bounds how many EC20 modems the Orange Pi can run, and how to tell which
+limit you hit. Live counts come from the Pi (commands at the end; host and access
+in [deployment.md](deployment.md)); where each modem sits comes from
+`device_view.usb_path`.
 
-## Understanding the USB Tree Structure
+## Controllers and sockets
 
-The USB subsystem organizes devices in a **tree hierarchy**, similar to a file system. At the root is the **USB Host Controller** (the Orange Pi's USB chip), and devices branch out through **hubs**.
+A bus is one USB host controller, and the 127-address limit applies per bus.
 
-### Reading the lsusb -t Output
+| Bus | Controller | Socket |
+|-----|-----------|--------|
+| `usb1` | `fc800000.usb`, EHCI 480M | Socket A |
+| `usb2` | `fc840000.usb`, OHCI 12M | Socket A, low/full-speed companion |
+| `usb3` | `fc880000.usb`, EHCI 480M | Socket B |
+| `usb4` | `fc8c0000.usb`, OHCI 12M | Socket B, low/full-speed companion |
+| `usb5` / `usb6` | `xhci-hcd.5.auto`, xHCI | USB 3.0 socket, unused |
 
-Each line shows:
-```
-|__ Port XXX: Dev YYY, If Z, Class=ClassName, Driver=driver_name, Speed
-```
+- Modems go on the two EHCI buses. xHCI gains nothing (the EC20 is USB 2.0 only)
+  and runs out of per-device context memory at scale (`error -12`, ENOMEM).
+- EHCI and its OHCI companion are two controllers on one socket. xHCI is one
+  controller that registers two buses, because the USB 2 and SuperSpeed wire pairs
+  are separate.
+- Every root hub has one port (`maxchild=1`). A socket takes one cable; a second
+  cable needs the small hub, at 4 addresses.
 
-- **Port**: Physical port number on the parent hub
-- **Dev**: USB device number assigned by Linux (not stable across reboots)
-- **If**: Interface number (modems have 5 interfaces: 0-4)
-- **Class**: USB device class (Hub, Vendor Specific, etc.)
-- **Driver**: Kernel driver handling this interface
-- **Speed**: 480M = USB 2.0 High Speed (480 Mbps)
+## Hub chips cost addresses
 
-## The Complete Topology
+A hub's label counts sockets; the kernel counts chips, and each chip takes an
+address before any modem is plugged in. An EC20 takes one address for all five of
+its interfaces.
 
-### Layer 0: Orange Pi USB Host Controller
+- **"100-port" hub**: 5 independent blocks, one cable each. A block is one
+  `1a40:0201` 7-port MTT chip feeding five `1a40:0101` 4-port leaf chips: 20 sockets
+  for 6 addresses, so 100 sockets for 30.
+- **"10-port" small hub**: four `1a40:0101` chips, 10 sockets for 4 addresses.
 
-```
-Bus 001 (EHCI USB 2.0 controller)
-└─ Root Hub (Dev 001) - 480 Mbps
-```
+Sockets are never the limit; addresses are. Two 100-port hubs on one bus cost
+`1 root + 4 small hub + 60 = 65` addresses, leaving 62 for modems, so spreading
+across two hubs on one bus loses modems. Expand on the bus with free addresses.
 
-**EHCI** = Enhanced Host Controller Interface (USB 2.0 spec)
-The Orange Pi has a single USB 2.0 controller with 1 root port.
+In practice each cable has held about 11 modems, not 20: every leaf chip carried
+2–3 modems in an even pattern, which suggests module bodies too wide for adjacent
+sockets. That is inferred, not checked at the rack.
 
-### Layer 1: Primary Distribution Hub
+## Two failure modes
 
-```
-Root Hub Port 1
-└─ Dev 057: Terminus 4-port Hub
-     ├─ Port 2: Dev 058 (4-port hub)
-     ├─ Port 3: Dev 059 (4-port hub) ← Main modem cascade
-     └─ Port 4: Dev 060 (4-port hub) ← Main modem cascade
-```
-
-**Purpose**: Splits the single root port into 4 ports to create two independent modem branches.
-
-**Manufacturer**: Terminus Technology (common USB hub chip maker)
-
-### Layer 2: Secondary Distribution Hubs
-
-#### Branch A (via Dev 059 Port 3)
-```
-Dev 059 (4-port hub)
-├─ Port 2: Dev 061 (7-port hub) → 5× 4-port hubs → ~15 modems
-├─ Port 3: Dev 063 (7-port hub) → 6× 4-port hubs → ~20 modems
-└─ Port 4: Dev 067 (7-port hub) → 6× 4-port hubs → ~15 modems
-```
-
-#### Branch B (via Dev 060 Port 4)
-```
-Dev 060 (4-port hub)
-├─ Port 1: Dev 062 (7-port hub) → 6× 4-port hubs → ~16 modems
-└─ Port 2: Dev 065 (7-port hub) → 6× 4-port hubs → ~16 modems
-```
-
-**Key observation**: Layer 2 uses **7-port hubs** to maximize port count before the next cascade level.
-
-### Layer 3: Aggregation Hubs (7-port hubs)
-
-Example: **Dev 061** (7-port hub under Dev 059)
+**Signal integrity.** Deep hub chains produce protocol errors that drop modems:
 
 ```
-Dev 061 (7-port hub)
-├─ Port 2: Dev 064 (4-port hub) → 3 modems
-├─ Port 3: Dev 068 (4-port hub) → 2 modems
-├─ Port 4: Dev 074 (4-port hub) → 1 modem
-├─ Port 5: Dev 085 (4-port hub) → 3 modems
-└─ Port 6: Dev 100 (4-port hub) → 4 modems
+usb 1-1.4.2: device descriptor read/8, error -71     ← the MTT chip itself
+usb 1-1.4-port2: unable to enumerate USB device      ← a whole 20-socket block
 ```
 
-**Total under Dev 061**: 5 hubs × ~3 modems each = 13 modems
+`-71` (EPROTO) and `-32` (EPIPE) are this mode. The number of segments in the path
+gives the blast radius: `1-1.4-port1` is a small-hub port and loses a whole block,
+`1-1.3.3.4-port1` a leaf port and one modem. Repeated retries on one port mean an
+intermittent fault. USB 2.0 allows 7 tiers; root → small hub (2 chips) → MTT → leaf
+→ EC20 uses 4 external hub levels. On 2026-08-06 all 246 such lines came from `usb1` and none
+from `usb3`. One untested explanation is the passive extension cables used on
+`usb1` (voltage drop in LTE bursts, then re-enumeration); whether `usb3` is free of
+them was not confirmed. A cable adds no tier and no address, only signal loss.
 
-Each 7-port hub connects to **5-6 smaller 4-port hubs** which hold the actual modems.
+**Address exhaustion.** USB addresses are 7 bits and address 0 is reserved, so 127
+per bus, shared by hubs and modems. Exhaustion prints nothing distinctive; never
+diagnose it from error text, count instead. `device not accepting address N` is
+printed only after address N was allocated, so it means an address was free.
 
-### Layer 4: Modem Hubs (4-port hubs)
+## Identifying a modem
 
-Example: **Dev 064** (4-port hub under Dev 061)
+- **IMEI** (`AT+CGSN`, 15 digits) is the modem's identity and the join key:
+  `device_view` matches `sims.imei = modems.equipment_id`.
+- **`usb_path`** is its location, the kernel devpath. `1-1.A.B.C.D` is bus 1, root
+  port 1, small-hub ports A and B, MTT port C (the cable), leaf port D (the modem).
+  It survives reboot and replug, but not moving a cable.
+- **ttyUSB number and USB address** change on every re-enumeration, even while
+  the daemon runs. Use them only for the AT command you are about to send.
+- **ICCID** is read with `AT+QCCID`; trailing `F` padding is stripped, which is
+  why ICCIDs here have 19 or 20 digits. A SIM is `active` only when
+  `modems.detected_iccid` matches `sims.iccid`.
 
-```
-Dev 064 (4-port hub)
-├─ Port 2: Dev 070 (Quectel EC25 modem)
-│    ├─ If 0: option (ttyUSB*0 - DM/diagnostic)
-│    ├─ If 1: option (ttyUSB*1 - GPS/NMEA)
-│    ├─ If 2: option (ttyUSB*2 - AT commands) ← Daemon uses this
-│    ├─ If 3: option (ttyUSB*3 - PPP data)
-│    └─ If 4: qmi_wwan (wwan* - QMI network interface)
-├─ Port 3: Dev 079 (Quectel EC25 modem) - same 5 interfaces
-└─ Port 4: Dev 093 (Quectel EC25 modem) - same 5 interfaces
-```
+An EC20 exposes DIAG, NMEA, AT, MODEM and QMI. `orange-pi-daemon/scripts/slim-modem-usbcfg.sh`
+cuts a modem to AT and MODEM to save endpoints, but voice calls carry audio on the
+NMEA port ([voice-call-plan.md](voice-call-plan.md)), so a slimmed modem cannot take
+calls.
 
-Each 4-port hub typically connects **2-4 modems** (not all ports populated).
+## Power
 
-## Key Design Principles
+An EC20 can draw far more in an LTE burst than a USB port supplies. Every hub must
+be externally powered; an underpowered hub shows up as dropouts, resets and `-71`
+errors, the same as a signal problem.
 
-### 1. **4-Tier Cascade** (Maximum per USB 2.0 spec)
+## Commands
 
-```
-Tier 1: Root Hub (1 device)
-Tier 2: Primary distribution (1 hub → 4 ports)
-Tier 3: Secondary distribution (3 hubs → 7 ports each)
-Tier 4: Aggregation (6 hubs → 7 ports → 4-port hubs)
-Tier 5: Modems (20+ hubs → 4 ports each → 73 modems)
-```
-
-**USB 2.0 Limit**: Maximum 5 tiers (127 devices total)
-**Current usage**: 5 tiers, 73 modems + ~30 hubs = ~103 devices ✅
-
-### 2. **Balanced Load Distribution**
-
-The topology splits into **2 main branches** early (Dev 059 and Dev 060):
-- Branch A: ~50 modems
-- Branch B: ~23 modems
-
-This prevents overloading a single upstream hub path.
-
-### 3. **Mix of Hub Sizes**
-
-- **Layer 2-3**: 7-port hubs (maximize port count)
-- **Layer 4**: 4-port hubs (cheaper, sufficient for 2-4 modems each)
-
-### 4. **Hub Chip Models**
-
-From `lsusb` output:
-- **Terminus Technology Inc. Hub** (ID 1a40:0101) - 4-port hubs
-- **Terminus Technology Inc. FE 2.1 7-port Hub** (ID 1a40:0201) - 7-port hubs
-
-Both are common, inexpensive USB 2.0 hub controllers.
-
-## Bandwidth Considerations
-
-### Theoretical Bandwidth
-
-```
-USB 2.0 High Speed: 480 Mbps (60 MB/s)
-Per modem (SMS only): ~100 Kbps average, ~1 Mbps peak
-73 modems peak: 73 MB/s > 60 MB/s ⚠️
-```
-
-**Problem**: If all modems transmit simultaneously, they **exceed** USB 2.0 bandwidth!
-
-**Reality**: SMS traffic is bursty and low-volume:
-- Average: ~1-10 messages/second across all modems
-- Each SMS: ~200 bytes
-- Total: ~2 KB/s = 0.016 Mbps (negligible)
-
-**Verdict**: **No bandwidth bottleneck** for SMS workload. Bandwidth would be a concern if modems were doing LTE data transfers.
-
-### Bandwidth Sharing in Cascade
-
-Each tier shares bandwidth with all children:
-
-```
-Root Hub (480 Mbps)
-├─ Dev 057 Hub (480 Mbps shared across 4 ports = 120 Mbps per port)
-    ├─ Dev 059 Hub (120 Mbps shared across 3 active ports = 40 Mbps per port)
-        ├─ Dev 061 Hub (40 Mbps shared across 5 active ports = 8 Mbps per port)
-            ├─ Dev 064 Hub (8 Mbps shared across 3 modems = 2.7 Mbps per modem)
-```
-
-**Worst-case modem bandwidth**: ~2.7 Mbps
-**SMS requirement**: ~100 Kbps
-**Margin**: 27× overhead ✅
-
-## Power Delivery
-
-### USB 2.0 Power Spec
-
-- **Per port**: 500 mA @ 5V = 2.5W maximum
-- **Quectel EC25 draw**: 2A @ 5V = 10W peak (4× spec!)
-
-### Powered Hubs Required
-
-**Why**: Modems draw more power than USB spec allows.
-
-**Solution**: All hubs must be **externally powered** (not bus-powered):
-- 7-port hubs: 12V/5A power supplies (60W capacity)
-- 4-port hubs: 5V/5A power supplies (25W capacity)
-
-**Current setup**:
-- 73 modems × 10W = **730W theoretical peak**
-- Actual average: ~150-200W (modems idle most of the time)
-
-## Practical Implications
-
-### 1. **Why Only 73 Modems Detected (Expected 78)?**
-
-**Likely causes**:
-- **Hub port exhaustion**: 100 leaf ports available, 78 modems attempted, but some hubs may be daisy-chained incorrectly
-- **Power delivery limits**: Insufficient power on some hub branches causes brown-outs
-- **USB endpoint limits**: Each modem uses 5 interfaces. 73 × 5 = 365 endpoints, nearing USB controller's ~400-500 endpoint limit
-
-### 2. **Why This Topology Works**
-
-✅ **Low bandwidth requirements** (SMS only)
-✅ **Well-distributed load** (2 main branches)
-✅ **Externally powered hubs** (sufficient power delivery)
-✅ **Within USB tier limits** (5 tiers max, using 5)
-
-### 3. **Scaling Limitations**
-
-To exceed 80 modems, you'd need:
-- **Second Orange Pi** with separate USB controller
-- **PCIe USB 3.0 card** (10× bandwidth, 2× endpoint capacity)
-- **Reduce modem interfaces** (disable DM/GPS to free endpoints)
-
-## Troubleshooting with lsusb -t
-
-### Check for Missing Hubs
+Run on the Pi:
 
 ```bash
-lsusb -t | grep "Class=Hub" | wc -l
-# Should see ~30 hubs
+lsusb | awk '{print $2}' | sort | uniq -c                      # addresses used per bus
+dmesg | grep -iE 'unable to enumerate|not accepting address|error -(71|32|12)' | tail
+lsusb -v 2>/dev/null | grep -i translator                       # a non-MTT hub serializes traffic
+for t in /sys/class/tty/ttyUSB*; do                             # ttyUSB -> usb_path
+  echo "$(basename "$t") -> $(readlink -f "$t/device" | grep -oE '[0-9]+-[0-9.]+' | tail -1)"
+done
 ```
 
-### Find Modems Under Specific Hub
-
-```bash
-lsusb -t | grep -A 50 "Dev 061"
-# Shows all devices under Dev 061 (7-port hub)
-```
-
-### Verify All Modems Have 5 Interfaces
-
-```bash
-lsusb -t | grep "2c7c:0125" | wc -l
-# Should be 73 × 5 = 365 lines
-```
-
-### Check for USB Errors
-
-```bash
-dmesg | grep -i 'usb.*error\|hub.*error'
-# Look for device descriptor errors, over-current, etc.
-```
-
-## Visual Summary
-
-```
-Orange Pi USB 2.0 Controller (480 Mbps)
- │
- └─ 4-port Hub (Dev 057) ← Entry point
-     ├─ [Empty]
-     ├─ Branch A (Dev 059)
-     │   ├─ 7-port Hub (Dev 061) → 5× 4-port hubs → 13 modems
-     │   ├─ 7-port Hub (Dev 063) → 6× 4-port hubs → 20 modems
-     │   └─ 7-port Hub (Dev 067) → 6× 4-port hubs → 15 modems
-     └─ Branch B (Dev 060)
-         ├─ 7-port Hub (Dev 062) → 6× 4-port hubs → 16 modems
-         └─ 7-port Hub (Dev 065) → 6× 4-port hubs → 16 modems
-
-Total: 73 modems across ~30 hubs in 5-tier cascade
-```
-
-## References
-
-- Full USB tree: [usb-topology-2026-03-09.txt](usb-topology-2026-03-09.txt)
-- USB 2.0 specification: USB_2.0_specification.pdf (Section 4.1: Hub Topology)
-- Terminus hub datasheets: FE2.1 series
-- Quectel EC25 hardware design guide: Section 3.3 (USB Interface)
+Stop `sms-daemon` before re-cabling and start it afterwards; its 60-second
+rediscovery cannot see a modem that never enumerated.
