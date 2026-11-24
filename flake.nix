@@ -304,6 +304,7 @@
             name = "check-daemon";
             runtimeInputs = with pkgs; [
               cargo
+              cargo-llvm-cov
               check-daemon-wire
               clippy
               findutils
@@ -311,6 +312,11 @@
               git
               rustfmt
             ];
+            # llvm-cov reads the profiles rustc writes, so it comes from rustc's own LLVM.
+            runtimeEnv = {
+              LLVM_COV = "${pkgs.rustc.llvm}/bin/llvm-cov";
+              LLVM_PROFDATA = "${pkgs.rustc.llvm}/bin/llvm-profdata";
+            };
             text = ''
               cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
               too_long="$(find src -name '*.rs' ! -name tests.rs -exec awk 'END { if (NR > 600) print FILENAME ": " NR " lines" }' {} \;)"
@@ -321,7 +327,10 @@
               fi
               cargo fmt --all --check
               cargo clippy --locked --all-targets --all-features -- -D warnings
-              cargo test --locked
+              # Coverage floors: raise them when coverage rises, never lower one to pass.
+              cargo llvm-cov --locked --all-features --summary-only \
+                --fail-under-lines 49.9 --fail-under-functions 58.3
+              cargo test --locked --doc
               check-daemon-wire
             '';
           };
@@ -815,7 +824,7 @@
                 echo "  • dev-api       — Wrangler + Auth0 secrets via SOPS on :8787"
                 echo "  • dev-server    — restart/stop/status the unique :8080 + :8787 pair"
                 echo "  • balance-agent — authenticated CLI for SMS AI and browser balance work"
-                echo "  • check-daemon  — required Rust format check + strict Clippy + full test suite"
+                echo "  • check-daemon  — required Rust format check + strict Clippy + full test suite with coverage floors"
                 echo "  • check-api-compat — breaking API changes against origin/main (fails for /api/control/)"
                 echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
