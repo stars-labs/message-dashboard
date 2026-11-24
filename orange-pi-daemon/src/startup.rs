@@ -146,8 +146,8 @@ pub(crate) fn init_worker_pool(
     let worker_config = WorkerPoolConfig::default();
     let worker_pool = Arc::new(WorkerPool::new(
         worker_config.clone(),
-        modem_manager.clone(),
-        message_store.clone(),
+        Arc::clone(modem_manager),
+        Arc::clone(message_store),
     ));
     info!(
         "👷 Worker pool initialized with {} parallel workers (batch size: {})",

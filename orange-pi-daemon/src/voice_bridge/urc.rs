@@ -69,7 +69,7 @@ impl VoiceBridge {
                         if readers.contains_key(&port) {
                             continue;
                         }
-                        let handle = tokio::spawn(self.clone().read_urcs(
+                        let handle = tokio::spawn(Arc::clone(&self).read_urcs(
                             modem_id,
                             iccid.clone(),
                             port.clone(),

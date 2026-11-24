@@ -166,7 +166,7 @@ impl VoiceBridge {
     ) where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
-        let handles = match self.clone().join_or_start(&request).await {
+        let handles = match Arc::clone(&self).join_or_start(&request).await {
             Ok(handles) => handles,
             Err(e) => {
                 warn!(call_id = %request.call_id, "📞 Call refused: {:#}", e);
@@ -242,14 +242,14 @@ impl VoiceBridge {
             down_seen: Arc::new(AtomicBool::new(false)),
         };
 
-        let bridge = self.clone();
+        let bridge = Arc::clone(&self);
         let call_id = request.call_id.clone();
         let stop = handles.stop.clone();
         tokio::spawn(async move {
             let reason = pump_nmea(nmea, to_browser, from_browser, pcm_ready_rx, stop).await;
             bridge.end_call(&call_id, reason).await;
         });
-        tokio::spawn(self.clone().watchdog(handles.clone(), modem_id.clone()));
+        tokio::spawn(Arc::clone(&self).watchdog(handles.clone(), modem_id.clone()));
 
         info!(
             call_id = %request.call_id,

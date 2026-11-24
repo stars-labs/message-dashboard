@@ -287,7 +287,7 @@ pub(crate) fn spawn_voice_bridge(
 ) {
     if let Some(voice_config) = VoiceBridgeConfig::from_env() {
         let bridge = VoiceBridge::new(api_key, modem_manager, api_client, devices);
-        tokio::spawn(bridge.clone().run_urc_readers());
+        tokio::spawn(Arc::clone(&bridge).run_urc_readers());
         tokio::spawn(async move {
             if let Err(e) = bridge.serve(voice_config).await {
                 error!("📞 Voice bridge stopped: {:#}", e);

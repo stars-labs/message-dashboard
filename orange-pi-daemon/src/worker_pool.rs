@@ -126,7 +126,7 @@ impl WorkerPool {
             debug!("⏭️  Skipping modem processing - previous cycle still running");
             return Ok(vec![]);
         }
-        let _guard = ProcessingGuard(self.processing.clone());
+        let _guard = ProcessingGuard(Arc::clone(&self.processing));
 
         let start_time = Instant::now();
         let total_modems = modem_ids.len();
@@ -170,11 +170,11 @@ impl WorkerPool {
             for modem_id in batch {
                 let modem_id = modem_id.clone();
                 let tx = tx.clone();
-                let semaphore = self.semaphore.clone();
-                let modem_manager = self.modem_manager.clone();
-                let message_store = self.message_store.clone();
+                let semaphore = Arc::clone(&self.semaphore);
+                let modem_manager = Arc::clone(&self.modem_manager);
+                let message_store = Arc::clone(&self.message_store);
                 let timeout = self.config.modem_timeout;
-                let stats = self.stats.clone();
+                let stats = Arc::clone(&self.stats);
 
                 join_set.spawn(async move {
                     let _permit = match semaphore.acquire().await {

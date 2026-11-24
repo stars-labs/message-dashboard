@@ -105,39 +105,39 @@ async fn main() -> Result<()> {
     // Beaten by the reader on every completed cycle, read by the watchdog thread.
     let reader_heartbeat = Heartbeat::default();
     spawn_modem_reader(ModemReader {
-        store: message_store.clone(),
-        manager: modem_manager.clone(),
-        pool: worker_pool.clone(),
-        modem_set: modem_set.clone(),
-        devices: latest_devices.clone(),
-        health: health_tracker.clone(),
+        store: Arc::clone(&message_store),
+        manager: Arc::clone(&modem_manager),
+        pool: Arc::clone(&worker_pool),
+        modem_set: Arc::clone(&modem_set),
+        devices: Arc::clone(&latest_devices),
+        health: Arc::clone(&health_tracker),
         heartbeat: reader_heartbeat.clone(),
     });
     spawn_uploader(
-        message_store.clone(),
-        api_client.clone(),
-        health_tracker.clone(),
+        Arc::clone(&message_store),
+        Arc::clone(&api_client),
+        Arc::clone(&health_tracker),
     );
     spawn_device_sync(
-        api_client.clone(),
-        latest_devices.clone(),
-        modem_set.clone(),
+        Arc::clone(&api_client),
+        Arc::clone(&latest_devices),
+        Arc::clone(&modem_set),
         session_id.clone(),
     );
-    spawn_statistics_logger(message_store.clone());
-    spawn_retention_cleanup(message_store.clone());
-    spawn_segment_cleanup(message_store.clone());
+    spawn_statistics_logger(Arc::clone(&message_store));
+    spawn_retention_cleanup(Arc::clone(&message_store));
+    spawn_segment_cleanup(Arc::clone(&message_store));
     spawn_sms_sender(
         (*api_client).clone(),
-        modem_manager.clone(),
+        Arc::clone(&modem_manager),
         valid_modems
             .iter()
             .filter_map(|(modem_id, iccid)| iccid.as_ref().map(|i| (i.clone(), modem_id.clone())))
             .collect(),
         session_id,
     );
-    spawn_health_heartbeat(api_client.clone(), health_tracker, message_store);
-    spawn_rediscovery(modem_manager.clone(), modem_set);
+    spawn_health_heartbeat(Arc::clone(&api_client), health_tracker, message_store);
+    spawn_rediscovery(Arc::clone(&modem_manager), modem_set);
     spawn_voice_bridge(
         api_key,
         modem_manager,

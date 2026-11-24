@@ -168,10 +168,11 @@ impl AtModemManager {
 
     async fn port_lock(&self, port: &str) -> Arc<Mutex<()>> {
         let mut locks = self.port_locks.lock().await;
-        locks
-            .entry(port.to_string())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone()
+        Arc::clone(
+            locks
+                .entry(port.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
     }
 
     pub async fn get_modem_info(&self, port: &str) -> Result<AtModemInfo> {

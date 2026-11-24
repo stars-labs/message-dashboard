@@ -91,9 +91,9 @@ impl VoiceBridge {
                     continue;
                 }
             };
-            let bridge = self.clone();
-            let challenge_config = challenge_config.clone();
-            let default_config = default_config.clone();
+            let bridge = Arc::clone(&self);
+            let challenge_config = Arc::clone(&challenge_config);
+            let default_config = Arc::clone(&default_config);
             tokio::spawn(async move {
                 let mut tcp = tcp;
                 // Behind the router every TCP peer is 127.0.0.1; the PROXY header
@@ -156,7 +156,7 @@ impl VoiceBridge {
 
         let api_key = self.api_key.clone();
         let admitted = Arc::new(std::sync::Mutex::new(None));
-        let admitted_slot = admitted.clone();
+        let admitted_slot = Arc::clone(&admitted);
         #[expect(
             clippy::result_large_err,
             reason = "Tungstenite requires an unboxed ErrorResponse in its handshake callback"
