@@ -200,6 +200,7 @@ impl MessageStore {
         let tx = conn.transaction()?;
         let lease_token = uuid::Uuid::new_v4().to_string();
         let lease_interval = format!("+{lease_seconds} seconds");
+        let limit = i64::try_from(limit)?;
         let ids = {
             let mut stmt = tx.prepare(
                 "SELECT id FROM messages
@@ -364,10 +365,10 @@ impl MessageStore {
     pub fn get_queue_stats(&self) -> Result<QueueStats> {
         let conn = self.conn();
         let (pending, dead_letter, in_flight, oldest_unacknowledged_age_seconds): (
-            usize,
-            usize,
-            usize,
-            Option<u64>,
+            i64,
+            i64,
+            i64,
+            Option<i64>,
         ) = conn.query_row(
             "SELECT
                 COUNT(CASE WHEN status = ?1 THEN 1 END),
@@ -385,10 +386,12 @@ impl MessageStore {
         )?;
 
         Ok(QueueStats {
-            pending,
-            dead_letter,
-            in_flight,
-            oldest_unacknowledged_age_seconds,
+            pending: usize::try_from(pending)?,
+            dead_letter: usize::try_from(dead_letter)?,
+            in_flight: usize::try_from(in_flight)?,
+            oldest_unacknowledged_age_seconds: oldest_unacknowledged_age_seconds
+                .map(u64::try_from)
+                .transpose()?,
         })
     }
 

@@ -2,7 +2,6 @@
 
 [advisories]
 ignore = [
-  { id = "RUSTSEC-2026-0459", reason = "Bundled SQLite < 3.54 can return stale page-cache bytes when it opens a crafted db + -wal pair. The daemon opens only its own store, which no one else writes; the fix is rusqlite 0.30 -> 0.43, a separate change verified on the Pi." },
   { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained, with no known vulnerability; moving to jiff is a separate change." },
   { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained, with no known vulnerability; it goes away with zbus 6 (src/native_dbus.rs), a separate change verified on the Pi." },
   { id = "RUSTSEC-2026-0371", reason = "zbus_names: as RUSTSEC-2026-0370." },
@@ -21,6 +20,7 @@ allow = [
   "MIT",
   "Unicode-3.0",
   "Unlicense",
+  "Zlib",
 ]
 private = { ignore = true }
 
