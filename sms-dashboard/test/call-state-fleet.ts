@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { CallState } from '../server/api/call-state.js';
+import { CallState } from '../server/handlers/call-state.js';
 
 export interface CallFixture {
   id: string;
