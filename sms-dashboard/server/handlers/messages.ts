@@ -9,7 +9,17 @@ import type {
   SendMessageBody,
   SendMessageResponse,
 } from '../../shared/api/messages.js';
-import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import { D1_MAX_BOUND_PARAMETERS, type D1 } from '../lib/d1.js';
+import {
+  findActiveDeviceNumber,
+  findDeviceStatus,
+  insertSentMessage,
+  listDeviceSummaries,
+  listMessages,
+  listOutboundStatusChanges,
+  type DeviceSummary,
+  type MessageRow,
+} from '../db/messages.js';
 
 /**
  * How many outbound status changes one incremental response carries. Sending is
@@ -25,114 +35,6 @@ interface SendCall {
   env: { DB: D1<'first' | 'run'> };
 }
 
-const MESSAGE_COLUMN_NAMES = [
-  'id',
-  'phone_iccid',
-  'phone_number',
-  'content',
-  'timestamp',
-  'type',
-  'status',
-  'recipient',
-  'verification_code',
-  'created_at',
-  'updated_at',
-  'error_message',
-  'sms_id',
-  'filter_status',
-  'filter_rule_id',
-  'purpose',
-  'balance_check_id',
-  'processing_session_id',
-];
-
-const MESSAGE_COLUMNS_OF_M = MESSAGE_COLUMN_NAMES.map((name) => `m.${name}`).join(', ');
-
-/** A messages row, every column the API returns. */
-const MessageRow = v.object({
-  id: v.string(),
-  phone_iccid: v.nullable(v.string()),
-  phone_number: v.nullable(v.string()),
-  content: v.string(),
-  timestamp: v.nullable(v.string()),
-  type: v.nullable(v.string()),
-  status: v.nullable(v.string()),
-  recipient: v.nullable(v.string()),
-  verification_code: v.nullable(v.string()),
-  created_at: v.nullable(v.string()),
-  updated_at: v.nullable(v.string()),
-  error_message: v.nullable(v.string()),
-  sms_id: v.nullable(v.string()),
-  filter_status: v.string(),
-  filter_rule_id: v.nullable(v.number()),
-  purpose: v.string(),
-  balance_check_id: v.nullable(v.string()),
-  processing_session_id: v.nullable(v.string()),
-});
-
-type MessageRow = v.InferOutput<typeof MessageRow>;
-
-/** The device_view columns enrichMessagePage joins onto each message. */
-const DeviceSummary = v.object({
-  iccid: v.string(),
-  number: v.string(),
-  carrier: v.nullable(v.string()),
-  sim_status: v.string(),
-  sim_index: v.number(),
-  country: v.nullable(v.string()),
-});
-
-type DeviceSummary = v.InferOutput<typeof DeviceSummary>;
-
-/**
- * Outbound rows whose status moved inside the sync window. Scoped to `sent`
- * rows and ordered by the indexed `updated_at` (migration 079), so it cannot
- * turn into a scan of message history.
- */
-async function outboundStatusChanges(
-  db: D1<'all'>,
-  {
-    since,
-    until,
-    phoneIccid,
-    limit,
-  }: {
-    since: string;
-    until: string;
-    phoneIccid: string | null;
-    limit: number;
-  },
-): Promise<MessageRow[]> {
-  const conditions = [
-    `m.purpose = 'user'`,
-    `m.type = 'sent'`,
-    `m.updated_at IS NOT NULL`,
-    `m.updated_at >= datetime(?, '-2 seconds')`,
-    `m.updated_at <= datetime(?)`,
-  ];
-  const params: unknown[] = [since, until];
-  if (phoneIccid) {
-    conditions.push(`m.phone_iccid = ?`);
-    params.push(phoneIccid);
-  }
-  params.push(limit);
-
-  return queryAll(
-    db
-      .prepare(
-        `
-    SELECT ${MESSAGE_COLUMNS_OF_M}
-    FROM messages m
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY m.updated_at DESC
-    LIMIT ?
-  `,
-      )
-      .bind(...params),
-    MessageRow,
-  );
-}
-
 async function enrichMessagePage(db: D1<'all'>, messages: MessageRow[]) {
   const iccids = [
     ...new Set(
@@ -145,19 +47,7 @@ async function enrichMessagePage(db: D1<'all'>, messages: MessageRow[]) {
 
   for (let start = 0; start < iccids.length; start += D1_MAX_BOUND_PARAMETERS) {
     const chunk = iccids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
-    const placeholders = chunk.map(() => '?').join(', ');
-    const devices = await queryAll(
-      db
-        .prepare(
-          `
-      SELECT iccid, number, carrier, sim_status, sim_index, country
-      FROM device_view
-      WHERE iccid IN (${placeholders})
-    `,
-        )
-        .bind(...chunk),
-      DeviceSummary,
-    );
+    const devices = await listDeviceSummaries(db, chunk);
     for (const device of devices) devicesByIccid.set(device.iccid, device);
   }
 
@@ -248,22 +138,18 @@ export const messagesHandler = {
         listParams.push(...VISIBLE_FILTER_STATUSES);
       }
 
-      const listWhere = listConditions.length ? `WHERE ${listConditions.join(' AND ')}` : '';
       const orderBy = isIncremental
         ? 'm.created_at DESC, m.id DESC'
         : 'm.timestamp DESC, m.id DESC';
-      const sql = `
-        SELECT ${MESSAGE_COLUMNS_OF_M}
-        FROM messages m
-        ${listWhere}
-        ORDER BY ${orderBy}
-        LIMIT ? OFFSET ?
-      `;
       // Fetch one extra row to answer "is there another page?" without an
       // unbounded COUNT/SUM over message history.
       listParams.push(limit + 1, offset);
 
-      const rawMessages = await queryAll(env.DB.prepare(sql).bind(...listParams), MessageRow);
+      const rawMessages = await listMessages(env.DB, {
+        conditions: listConditions,
+        params: listParams,
+        orderBy,
+      });
       const hasMore = rawMessages.length > limit;
       const pageRows = rawMessages.slice(0, limit);
       const lastPageRow = pageRows.at(-1);
@@ -274,7 +160,7 @@ export const messagesHandler = {
       // inside this window but which are too old for the page above. Outbound
       // volume is low and the window is the poll interval, so this stays small.
       const refreshRows = isIncremental
-        ? await outboundStatusChanges(env.DB, {
+        ? await listOutboundStatusChanges(env.DB, {
             since,
             until: syncUntil,
             phoneIccid,
@@ -331,25 +217,11 @@ export const messagesHandler = {
 
     try {
       // Get phone details - check for active statuses
-      const phone = await queryFirst(
-        env.DB.prepare(
-          `
-        SELECT number FROM device_view WHERE iccid = ? AND sim_status = 'active'
-      `,
-        ).bind(phoneIccid),
-        v.object({ number: v.string() }),
-      );
+      const phone = await findActiveDeviceNumber(env.DB, phoneIccid);
 
       if (!phone) {
         // Check if phone exists with any status
-        const anyPhone = await queryFirst(
-          env.DB.prepare(
-            `
-          SELECT iccid, sim_status FROM device_view WHERE iccid = ?
-        `,
-          ).bind(phoneIccid),
-          v.object({ iccid: v.string(), sim_status: v.string() }),
-        );
+        const anyPhone = await findDeviceStatus(env.DB, phoneIccid);
 
         throw badRequest(
           anyPhone
@@ -362,14 +234,14 @@ export const messagesHandler = {
       const messageId = `msg-sent-${nanoid()}`;
       const timestamp = new Date().toISOString();
 
-      await env.DB.prepare(
-        `
-        INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type, recipient, status)
-        VALUES (?, ?, ?, ?, ?, 'sent', ?, 'sending')
-      `,
-      )
-        .bind(messageId, phoneIccid, phone.number, content, timestamp, recipient)
-        .run();
+      await insertSentMessage(env.DB, {
+        id: messageId,
+        phoneIccid,
+        phoneNumber: phone.number,
+        content,
+        timestamp,
+        recipient,
+      });
 
       // Note: SMS sending is now handled by daemon polling /api/control/pending-sms
       // The daemon will pick up this message and send it via real SMS network

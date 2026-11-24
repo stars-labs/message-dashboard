@@ -1,4 +1,5 @@
 import { boundedErrorText, classifyD1Error } from './d1-error.js';
+import { insertAuditLog } from '../db/audit-log.js';
 import type { D1, D1RunResult } from '../lib/d1.js';
 
 /** One audit_logs row. `details` is serialized; callers choose its shape. */
@@ -19,14 +20,13 @@ export async function writeAuditLog(
   env: AuditEnv,
   { action, resourceType = 'user', resourceId, userEmail = null, details = {} }: AuditEvent,
 ): Promise<D1RunResult> {
-  return env.DB.prepare(
-    `
-    INSERT INTO audit_logs (action, resource_type, resource_id, user_email, details, timestamp)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
-  `,
-  )
-    .bind(action, resourceType, resourceId, userEmail, JSON.stringify(details))
-    .run();
+  return insertAuditLog(env.DB, {
+    action,
+    resourceType,
+    resourceId,
+    userEmail,
+    details: JSON.stringify(details),
+  });
 }
 
 /**

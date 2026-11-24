@@ -1,5 +1,5 @@
-import * as v from 'valibot';
-import { queryAll, type D1, type D1Batch } from '../lib/d1.js';
+import type { D1, D1Batch } from '../lib/d1.js';
+import { listReceivedMessagesAfter, updateVerificationCodes } from '../db/messages.js';
 import { extractVerificationCode } from './verification.js';
 import { FILTER_STATUS } from './spam-filter.js';
 
@@ -13,14 +13,6 @@ interface CodeChange {
   previous: string | null;
   next: string | null;
 }
-
-/** The row shape the scan selects. */
-const ScanRow = v.object({
-  row_cursor: v.number(),
-  id: v.string(),
-  content: v.string(),
-  verification_code: v.nullable(v.string()),
-});
 
 interface VerificationPage {
   processed: number;
@@ -62,18 +54,7 @@ export async function reprocessVerificationPage(
     MAX_PAGE_SIZE,
   );
 
-  const results = await queryAll(
-    db
-      .prepare(
-        `SELECT rowid AS row_cursor, id, content, verification_code
-       FROM messages
-       WHERE rowid > ? AND type = 'received'
-       ORDER BY rowid
-       LIMIT ?`,
-      )
-      .bind(cursor, boundedPageSize),
-    ScanRow,
-  );
+  const results = await listReceivedMessagesAfter(db, cursor, boundedPageSize);
 
   const changes: CodeChange[] = [];
   for (const row of results) {
@@ -85,13 +66,10 @@ export async function reprocessVerificationPage(
   }
 
   if (!dryRun && changes.length > 0) {
-    const update = db.prepare(
-      `UPDATE messages
-       SET verification_code = ?, filter_status = ?, filter_rule_id = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-    );
-    await db.batch(
-      changes.map((change) => update.bind(change.next, FILTER_STATUS.PENDING, change.id)),
+    await updateVerificationCodes(
+      db,
+      changes.map((change) => ({ id: change.id, code: change.next })),
+      FILTER_STATUS.PENDING,
     );
   }
 
