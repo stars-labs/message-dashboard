@@ -55,7 +55,8 @@ The feature file defines the coverage set for a change to that feature:
 
 ## Full sweep
 
-Walk the index top to bottom.
+Walk the index top to bottom, skipping `daemon-live-pi`. The two checked-in journeys in
+`cross-component-journeys` close it.
 
 ## Dashboard
 
@@ -79,6 +80,21 @@ Walk the index top to bottom.
 - [agent-app](agent-app.md): the menu-bar app's window: status and settings.
 - [agent-carrier-browser](agent-carrier-browser.md): carrier portal queries. Manual
   only past the queued job.
+
+## Daemon (control protocol, replayed)
+
+- [daemon-heartbeat](daemon-heartbeat.md): health reports and the 采集服务 panel.
+- [daemon-sms-upload](daemon-sms-upload.md): received SMS into the feed, with codes.
+- [daemon-device-sync](daemon-device-sync.md): modem reports and SIM availability.
+- [daemon-send-outbox](daemon-send-outbox.md): pending sends and their outcomes.
+- [daemon-calls](daemon-calls.md): incoming, busy and ended calls.
+- [daemon-live-pi](daemon-live-pi.md): read-only checks on the real Pi, on request
+  only. Not part of the sweep.
+
+## Cross-component
+
+- [cross-component-journeys](cross-component-journeys.md): send → deliver, balance
+  query over SMS AI, inventory → availability.
 
 ## Entry contract
 
