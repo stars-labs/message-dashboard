@@ -72,6 +72,8 @@ no longer reported fails too, so remove it once fixed.
 - [Deployment procedures](docs/deployment.md)
 - [Auth0 tenant setup](docs/auth0.md)
 - [Balance Agent CLI](docs/balance-agent-cli.md)
+- [Carrier balance facts](docs/carrier-balance.md): how each carrier exposes a
+  balance, and the rules for adding a query method
 - [SMS hardware safety](docs/sms-hardware-storage-safety-plan.md)
 - [Voice call plan](docs/voice-call-plan.md)
 - [USB topology](docs/usb-topology-explained.md)
