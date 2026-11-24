@@ -27,7 +27,7 @@ import {
 } from '../../shared/balance-skill.js';
 import { errorText } from '../../shared/error-text.js';
 import { runnerCanAccessOwner, type AuthorizedRunner } from '../utils/runner-auth.js';
-import { queueBalanceFollowUp } from './balance-queries.js';
+import { queueBalanceFollowUp } from './balance-replies.js';
 
 const LEASE_SECONDS = 120;
 

@@ -1,59 +1,39 @@
 import { ORPCError } from '@orpc/server';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
-import { parseJson, type Schema } from '../../shared/parse-json.js';
-import { D1_MAX_BOUND_PARAMETERS, type D1, type D1Batch, type D1Statement } from '../lib/d1.js';
+import { D1_MAX_BOUND_PARAMETERS, type D1, type D1Batch } from '../lib/d1.js';
 import {
-  expireStaleBalanceChecks,
   findBalanceCheckId,
   findBalanceCheckToContinue,
   findBalanceCheckToRetry,
   findBalanceCheckToStop,
-  findCheckPhone,
-  findEnabledBalanceProfile,
-  findRecentBalanceCheck,
   listBalanceCheckMessages,
   listBalanceChecks,
   listBalanceChecksByIds,
   listBalanceCheckStatuses,
   listBalanceCheckWebEvents,
-  listCooldownChecks,
-  listParsedChecks,
-  listPendingChecksForReply,
-  listPlanPhones,
-  listQueryProfiles,
-  markBalanceCheckSmsResult,
-  queueBalanceFollowUpMessage,
   queueSmsBalanceCheck,
-  recordBalanceReply,
   requeueBalanceCheck,
   runBalanceStatements,
   stopBalanceCheck,
-  type BalanceCheckListRow,
-  type BalanceCheckRow,
-  type BalanceMessage,
-  type BalanceProfile,
-  type FollowUpCheck,
-  type ParsedCheck,
-  type PlanPhone,
 } from '../db/balance-checks.js';
-import { parseBalanceSkillConfig } from '../../shared/balance-skill.js';
 import {
-  type CheckStatus,
-  type DisplayStatus,
-  type SkillJobStatus,
-  type WebJobStatus,
-} from '../../shared/balance-status.js';
+  findCheckPhone,
+  findEnabledBalanceProfile,
+  findRecentBalanceCheck,
+  listCooldownChecks,
+  listParsedChecks,
+  listPlanPhones,
+  listQueryProfiles,
+  type BalanceProfile,
+  type PlanPhone,
+} from '../db/balance-plan.js';
 import {
-  BATCH_METHODS,
-  BalanceMetric,
   INELIGIBLE_REASONS,
-  type BalanceMethod,
   type BalanceQueryBatchResponse,
   type BalanceQueryPreflightResponse,
   type BalanceQueryPreviewResponse,
   type BalanceQueryResponse,
-  type RecentBalanceCheck,
   type BalanceCheck,
   type BalanceQueryRefusal,
   type QueuedBalanceCheck,
@@ -73,71 +53,27 @@ import {
   type BalanceCheckStopResponse,
 } from '../../shared/api/balance-checks.js';
 import { errorText } from '../../shared/error-text.js';
-import { senderMatches } from '../utils/spam-filter.js';
+import {
+  buildBalanceQueryPlan,
+  carrierMatchesProfile,
+  describeBalanceMethod,
+  filterBalancePlanByMethods,
+  queryMethod,
+  summarizeMethods,
+  summarizePlan,
+  type EligiblePlanItem,
+  type PlanItem,
+} from '../utils/balance-plan.js';
+import { displayBalanceStatus, toBalanceChecks } from '../utils/balance-display.js';
+import { attemptedStep, matchingNextStep } from '../utils/balance-reply-parse.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
+import { queueBalanceFollowUp } from './balance-replies.js';
 import {
   createCarrierWebBalanceStatements,
   newCarrierWebBalanceIds,
 } from './carrier-web-balance.js';
 
-/** The three send outcomes the daemon reports for an outbound SMS. */
-export type SmsOutcome = 'confirmed' | 'submitted_unconfirmed' | 'failed';
-type BatchMethod = (typeof BATCH_METHODS)[number];
 type IneligibleReason = (typeof INELIGIBLE_REASONS)[number];
-
-export type { BalanceCheckRow, BalanceProfile, PlanPhone };
-
-type RecentCheck = RecentBalanceCheck;
-
-/** One SIM's balance-query eligibility. An eligible SIM always has a profile. */
-type PlanItem =
-  | {
-      phone: PlanPhone;
-      profile: BalanceProfile;
-      eligible: true;
-      reason: null;
-      recentCheck: null;
-    }
-  | {
-      phone: PlanPhone;
-      profile: BalanceProfile | null;
-      eligible: false;
-      reason: IneligibleReason;
-      recentCheck: RecentCheck | null;
-    };
-
-type EligiblePlanItem = Extract<PlanItem, { eligible: true }>;
-
-const ConversationStep = v.object({ command: v.string(), response_contains: v.string() });
-const AttemptedStep = v.object({ command: v.string() });
-const SkillOutputs = v.object({ outputs: v.array(v.unknown()) });
-const RequiredServiceType = v.object({ required_service_type: v.pipe(v.string(), v.nonEmpty()) });
-
-const CHINA_MOBILE_NAMES = ['china mobile', 'cmcc', '中国移动', '移动'];
-const CHINA_UNICOM_NAMES = ['china unicom', 'unicom', '中国联通', '联通'];
-const CHINA_TELECOM_NAMES = ['china telecom', 'telecom', 'ctcc', '中国电信', '电信'];
-const CMHK_NAMES = ['cmhk', 'china mobile hong kong', '中国移动香港', '中移香港', '香港移动'];
-
-/**
- * The cash balance patterns of each SMS parser, in order of preference.
- * China Telecom reports both 当前号码总余额 (total account balance) and
- * 当前可用余额 (available balance); 总余额 includes prepaid amounts and is the
- * canonical figure the Telecom app shows. 当前号码通用余额 is the older format
- * that omits 总余额.
- */
-const CASH_BALANCE_PATTERNS = new Map<string, readonly RegExp[]>([
-  [
-    'cn-telecom-balance-v1',
-    [
-      /当前号码总余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/,
-      /(?:当前可用余额|当前号码通用余额)(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/,
-    ],
-  ],
-  [
-    'cn-mobile-balance-v1',
-    [/(?:账户|话费|可用)?余额(?:为|是)?[：:\s]*([0-9]+(?:\.[0-9]{1,2})?)\s*元/],
-  ],
-]);
 
 const NOT_ELIGIBLE = 'SIM is not eligible for a balance query';
 
@@ -181,181 +117,6 @@ function refused(
   message: string,
 ): ORPCError<string, undefined> {
   return new ORPCError(code, { message });
-}
-
-function normalizeCarrier(value: string | null): string {
-  return (value ?? '').trim().toLocaleLowerCase();
-}
-
-function checkKey(simIccid: string, profileId: string): string {
-  return `${simIccid}\u0000${profileId}`;
-}
-
-function requiredServiceType(profile: BalanceProfile): string | null {
-  const parsed = parseJson(profile.skill_config, RequiredServiceType);
-  return parsed.ok ? parsed.value.required_service_type : null;
-}
-
-function profileOutputs(skillConfig: string): string[] {
-  const parsed = parseJson(skillConfig, SkillOutputs);
-  return parsed.ok
-    ? parsed.value.outputs.filter((output): output is string => typeof output === 'string')
-    : [];
-}
-
-function parseMetrics(metricsJson: string): BalanceMetric[] {
-  const parsed = parseJson(metricsJson, v.array(BalanceMetric));
-  return parsed.ok ? parsed.value : [];
-}
-
-function webDisplayStatus(status: WebJobStatus): DisplayStatus | null {
-  switch (status) {
-    case 'pending':
-      return 'web_pending';
-    case 'leased':
-      return 'web_processing';
-    case 'awaiting_otp':
-      return 'web_otp';
-    case 'authenticating':
-      return 'web_authenticating';
-    case 'querying':
-      return 'web_querying';
-    case 'human_verification_required':
-      return 'web_human_required';
-    case 'completed':
-    case 'failed':
-    case 'stopped':
-      return null;
-  }
-}
-
-function displayBalanceStatus(record: {
-  status: CheckStatus;
-  skill_job_status: SkillJobStatus | null;
-  web_job_status: WebJobStatus | null;
-}): DisplayStatus {
-  if (
-    (record.status === 'response_received' || record.status === 'unparsed') &&
-    (record.skill_job_status === 'pending' || record.skill_job_status === 'leased')
-  ) {
-    return record.skill_job_status === 'leased' ? 'skill_processing' : 'skill_pending';
-  }
-  if (record.status === 'queued' && record.web_job_status !== null) {
-    return webDisplayStatus(record.web_job_status) ?? record.status;
-  }
-  return record.status;
-}
-
-export function buildBalanceQueryPlan({
-  phones,
-  profiles,
-  recentChecks = [],
-  successfulChecks = [],
-  allowDiscovery = false,
-}: {
-  phones: readonly PlanPhone[];
-  profiles: readonly BalanceProfile[];
-  recentChecks?: readonly RecentCheck[];
-  successfulChecks?: readonly ParsedCheck[];
-  allowDiscovery?: boolean;
-}): PlanItem[] {
-  const recentBySim = new Map(recentChecks.map((check) => [check.sim_iccid, check]));
-  const successful = new Set(
-    successfulChecks.map((check) => checkKey(check.sim_iccid, check.profile_id)),
-  );
-
-  return phones.map((phone): PlanItem => {
-    const matchingProfiles = profiles
-      .filter(
-        (profile) =>
-          phone.country === profile.country_code &&
-          carrierMatchesProfile(phone.carrier, profile.carrier),
-      )
-      .sort((a, b) => b.enabled - a.enabled);
-    const profile =
-      matchingProfiles.find(
-        (candidate) =>
-          candidate.enabled === 1 ||
-          (candidate.discovery_enabled === 1 &&
-            (allowDiscovery || successful.has(checkKey(phone.iccid, candidate.id)))),
-      ) ?? null;
-    const recentCheck = recentBySim.get(phone.iccid) ?? null;
-    const ineligible = (reason: IneligibleReason): PlanItem => ({
-      phone,
-      profile,
-      eligible: false,
-      reason,
-      recentCheck,
-    });
-
-    if (phone.sim_role === 'secondary') return ineligible('secondary');
-    if (phone.sim_status !== 'active') return ineligible('offline');
-    if (!profile) return ineligible(matchingProfiles.length ? 'unverified' : 'unsupported');
-    const serviceType = requiredServiceType(profile);
-    if (serviceType !== null && phone.service_type !== serviceType) {
-      return ineligible('service_type');
-    }
-    if (recentCheck) return ineligible('cooldown');
-    return { phone, profile, eligible: true, reason: null, recentCheck: null };
-  });
-}
-
-function summarizePlan(plan: readonly PlanItem[]) {
-  const summary = {
-    total: plan.length,
-    eligible: 0,
-    offline: 0,
-    unsupported: 0,
-    unverified: 0,
-    cooldown: 0,
-    secondary: 0,
-    service_type: 0,
-  };
-  for (const item of plan) {
-    if (item.eligible) summary.eligible += 1;
-    else summary[item.reason] += 1;
-  }
-  return summary;
-}
-
-function queryMethod(
-  profile: Pick<BalanceProfile, 'method' | 'skill_config'>,
-): BalanceMethod & { category: BatchMethod } {
-  switch (profile.method) {
-    case 'browser':
-      return { category: 'browser', capability: 'carrier_browser', interactive: true };
-    case 'sms':
-      return parseBalanceSkillConfig(profile.skill_config)
-        ? { category: 'sms_ai', capability: 'sms_ai', interactive: false }
-        : { category: 'direct_sms', capability: null, interactive: false };
-  }
-}
-
-export function describeBalanceMethod(
-  profile: Pick<BalanceProfile, 'method' | 'skill_config'> | null,
-): BalanceMethod {
-  return profile
-    ? queryMethod(profile)
-    : { category: 'unsupported', capability: null, interactive: false };
-}
-
-function summarizeMethods(plan: readonly PlanItem[]): Record<BatchMethod, number> {
-  const summary = { direct_sms: 0, sms_ai: 0, browser: 0 };
-  for (const item of plan) {
-    if (item.eligible) summary[queryMethod(item.profile).category] += 1;
-  }
-  return summary;
-}
-
-export function filterBalancePlanByMethods(
-  plan: readonly PlanItem[],
-  methods: readonly BatchMethod[],
-): EligiblePlanItem[] {
-  const selected = new Set(methods);
-  return plan.filter(
-    (item): item is EligiblePlanItem =>
-      item.eligible && selected.has(queryMethod(item.profile).category),
-  );
 }
 
 async function loadBalanceQueryPlan(
@@ -428,216 +189,6 @@ async function queueBalanceCheck(
     profile_carrier: profile.carrier,
     outbound_message_id: messageId,
   };
-}
-
-/** The conversation step at `index`, if it exists and has the shape `schema` requires. */
-function stepAt<T>(conversationSteps: string, index: number, schema: Schema<T>): T | null {
-  const steps = parseJson(conversationSteps, v.array(v.unknown()));
-  if (!steps.ok) return null;
-  const step = v.safeParse(schema, steps.value[index]);
-  return step.success ? step.output : null;
-}
-
-function matchingNextStep(
-  check: { conversation_steps: string; step_index: number },
-  content: string,
-): { command: string } | null {
-  const step = stepAt(check.conversation_steps, check.step_index, ConversationStep);
-  return step && content.includes(step.response_contains) ? step : null;
-}
-
-function attemptedStep(check: {
-  conversation_steps: string;
-  step_index: number;
-}): { command: string } | null {
-  const stepIndex = check.step_index - 1;
-  return stepIndex < 0 ? null : stepAt(check.conversation_steps, stepIndex, AttemptedStep);
-}
-
-export function parseBalanceMetrics(parserVersion: string, content: string): BalanceMetric[] {
-  for (const pattern of CASH_BALANCE_PATTERNS.get(parserVersion) ?? []) {
-    const amount = pattern.exec(content)?.[1];
-    if (amount !== undefined) {
-      return [
-        {
-          metric_type: 'cash_balance',
-          value: Number(amount),
-          unit: null,
-          currency: 'CNY',
-          expires_at: null,
-        },
-      ];
-    }
-  }
-  return [];
-}
-
-export function carrierMatchesProfile(
-  actualCarrier: string | null,
-  profileCarrier: string,
-): boolean {
-  const actual = normalizeCarrier(actualCarrier);
-  const expected = normalizeCarrier(profileCarrier);
-  if (!actual || !expected) return false;
-  if (actual === expected) return true;
-
-  if (CHINA_MOBILE_NAMES.includes(expected)) {
-    return CHINA_MOBILE_NAMES.some((name) => actual.includes(name));
-  }
-
-  if (CHINA_UNICOM_NAMES.includes(expected)) {
-    return CHINA_UNICOM_NAMES.some((name) => actual.includes(name));
-  }
-
-  if (CHINA_TELECOM_NAMES.includes(expected)) {
-    return CHINA_TELECOM_NAMES.some((name) => actual.includes(name));
-  }
-
-  if (CMHK_NAMES.includes(expected)) {
-    return CMHK_NAMES.some((name) => actual.includes(name)) || actual === '移动';
-  }
-
-  return actual.includes(expected) || expected.includes(actual);
-}
-
-export function expectedSenderMatches(rawSender: string, expectedSendersJson: string): boolean {
-  const expected = parseJson(expectedSendersJson, v.array(v.unknown()));
-  return expected.ok && expected.value.some((sender) => senderMatches(rawSender, sender));
-}
-
-export async function findPendingBalanceCheck(
-  db: D1<'all'>,
-  {
-    phone_iccid,
-    phone_number,
-    message_timestamp = new Date().toISOString(),
-  }: { phone_iccid: string; phone_number: string; message_timestamp?: string },
-): Promise<BalanceCheckRow | null> {
-  if (!phone_iccid || !phone_number) return null;
-
-  const candidates = await listPendingChecksForReply(db, { phone_iccid, message_timestamp });
-
-  return (
-    candidates.find((candidate) =>
-      expectedSenderMatches(phone_number, candidate.expected_senders),
-    ) ?? null
-  );
-}
-
-/** The fields of a message the daemon uploads that multipart grouping reads. */
-interface UploadedPart {
-  id?: unknown;
-  content?: unknown;
-  phone_iccid?: unknown;
-  phone_number?: unknown;
-  timestamp?: unknown;
-}
-
-function keyPart(value: unknown): string {
-  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-}
-
-// In text mode the daemon cannot read the concatenation header, so each part of a
-// carrier reply is uploaded as its own message; the parts share sender and arrival
-// timestamp. Without grouping, the first part processed finalizes the check on a
-// fragment and a balance in a later part is never parsed. Parts carry no sequence
-// number, so batch order is the only ordering available.
-export function mergeMultipartReplies(
-  messages: readonly UploadedPart[],
-): Map<string, { key: string; content: string }> {
-  const groups = new Map<string, { id: string; content: string }[]>();
-  for (const message of messages) {
-    const id = keyPart(message.id);
-    const content = keyPart(message.content);
-    if (!id || !content) continue;
-    const key = [
-      keyPart(message.phone_iccid),
-      keyPart(message.phone_number),
-      keyPart(message.timestamp),
-    ].join('\0');
-    const entry = { id, content };
-    const group = groups.get(key);
-    if (group) group.push(entry);
-    else groups.set(key, [entry]);
-  }
-
-  const merged = new Map<string, { key: string; content: string }>();
-  for (const [key, group] of groups) {
-    if (group.length < 2) continue;
-    const content = group.map((message) => message.content).join('');
-    for (const message of group) merged.set(message.id, { key, content });
-  }
-  return merged;
-}
-
-export async function linkBalanceReply(
-  db: D1<'run'> & D1Batch<'run'>,
-  check: BalanceCheckRow,
-  message: BalanceMessage,
-  { mergedContent = null }: { mergedContent?: string | null } = {},
-): Promise<FollowUp | { linked: boolean }> {
-  const content = mergedContent ?? message.content;
-  const nextStep = matchingNextStep(check, content);
-  const responseWindowOpen = check.response_window_open === 1;
-  if (nextStep && responseWindowOpen) {
-    return queueBalanceFollowUp(db, check, message, nextStep, check.status);
-  }
-
-  const metrics = parseBalanceMetrics(check.parser_version, content);
-  const skill = parseBalanceSkillConfig(check.skill_config);
-  const skillJobId =
-    !metrics.length && skill && responseWindowOpen && check.step_index < skill.max_turns
-      ? `skill-${nanoid()}`
-      : null;
-
-  const linked = await recordBalanceReply(db, { check, message, content, metrics, skillJobId });
-  return { linked };
-}
-
-export { expireStaleBalanceChecks };
-
-/** A follow-up step: queued with its outbound message, or lost to a writer that got there first. */
-type FollowUp = { queued: true; message_id: string } | { queued: false; message_id: null };
-
-export async function queueBalanceFollowUp(
-  db: D1<'run'> & D1Batch<'run'>,
-  check: FollowUpCheck,
-  message: BalanceMessage,
-  step: { command: string },
-  fromStatus: CheckStatus,
-  extraStatements: readonly D1Statement<'run'>[] = [],
-): Promise<FollowUp> {
-  const messageId = `msg-balance-${nanoid()}`;
-  const queued = await queueBalanceFollowUpMessage(db, {
-    messageId,
-    check,
-    message,
-    step,
-    fromStatus,
-    extraStatements,
-  });
-
-  return queued ? { queued: true, message_id: messageId } : { queued: false, message_id: null };
-}
-
-export async function updateBalanceCheckForSmsResult(
-  db: D1<'run'>,
-  messageId: string,
-  outcome: SmsOutcome,
-  errorMessage: string | null = null,
-): Promise<void> {
-  const submitted = outcome === 'confirmed' || outcome === 'submitted_unconfirmed';
-  const failure = errorMessage === null || errorMessage === '' ? 'SMS send failed' : errorMessage;
-  await markBalanceCheckSmsResult(db, messageId, { submitted, failure });
-}
-
-function toBalanceChecks(rows: readonly BalanceCheckListRow[]): BalanceCheck[] {
-  return rows.map(({ metrics_json, skill_config, ...record }) => ({
-    ...record,
-    display_status: displayBalanceStatus(record),
-    profile_outputs: profileOutputs(skill_config),
-    metrics: parseMetrics(metrics_json),
-  }));
 }
 
 /** The checks just queued, as the list shows them, in the order they were queued. */

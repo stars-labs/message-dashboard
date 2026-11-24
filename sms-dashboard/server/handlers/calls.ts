@@ -1,6 +1,3 @@
-// A Durable Object owns the live call state; D1 holds the call log, written only at
-// transitions, so three-second polling never touches D1.
-//
 // Media flow (docs/voice-call-plan.md, "Media topology"):
 //   1. dial / answer: create the browser session and publish its mic as `mic`.
 //   2. connect: create the `down` adapter (SFU streams `mic` to the Pi) and the
@@ -11,27 +8,11 @@
 
 import { ORPCError } from '@orpc/server';
 import * as v from 'valibot';
-import { parseJson, readJson } from '../../shared/parse-json.js';
+import { parseJson } from '../../shared/parse-json.js';
+import { listCallHistory } from '../db/calls.js';
 import {
-  closeStaleCalls,
-  findOpenRing,
-  insertCall,
-  insertInboundRing,
-  listCallHistory,
-  listSimsByIccid,
-  markCallAnswered,
-  markCallEnded,
-  setRemoteNumber,
-  type OpenRingRow,
-  type SimRow,
-} from '../db/calls.js';
-import { D1_MAX_BOUND_PARAMETERS, type D1 } from '../lib/d1.js';
-import {
-  type CallHistoryRow,
   IceServersResponse,
-  LiveCall,
   PhoneNumber,
-  SessionDescription,
   type AnswerBody,
   type CallHistoryQuery,
   type CallIdBody,
@@ -42,312 +23,39 @@ import {
   type CallRenegotiateResponse,
   type CallStateResponse,
   type DialBody,
-  type Direction,
-  type EndedCallBody,
-  type EndedCallResponse,
-  type IncomingCallBody,
-  type IncomingCallResponse,
+  type LiveCall,
   type RenegotiateBody,
 } from '../../shared/api/calls.js';
+import { enrichCallPage, logCallAnswered, logCallEnded, logCallStarted } from './call-history.js';
+import {
+  CALL_TTL_SECONDS,
+  beginEnding,
+  callChanged,
+  clearCall,
+  conflict,
+  readCall,
+  writeCall,
+  type CallEnv,
+} from './call-live.js';
+import {
+  TRACK_MIC,
+  TRACK_MODEM,
+  adapterEndpoint,
+  callConfig,
+  closeAdapters,
+  isDescription,
+  present,
+  publishMic,
+  sfu,
+  sfuError,
+} from './call-media.js';
 
-const CallSnapshot = v.nullable(v.object({ call: LiveCall, revision: v.string() }));
-
-/** The SFU can report an error inside a 200. */
-const SfuBody = v.object({
-  sessionId: v.optional(v.string()),
-  sessionDescription: v.optional(SessionDescription),
-  requiresImmediateRenegotiation: v.optional(v.boolean()),
-  tracks: v.optional(
-    v.array(
-      v.object({
-        adapterId: v.optional(v.string()),
-        sessionId: v.optional(v.string()),
-        errorCode: v.nullish(v.string()),
-      }),
-    ),
-  ),
-  errorCode: v.nullish(v.string()),
-});
-
-type SfuBody = v.InferOutput<typeof SfuBody>;
-
-interface SfuResult {
-  ok: boolean;
-  status: number;
-  body: SfuBody;
-  detail: unknown;
-}
-
-const Configured = v.pipe(v.string(), v.minLength(1));
-
-const CallConfig = v.object({
-  REALTIME_APP_ID: Configured,
-  REALTIME_APP_SECRET: Configured,
-  TURN_KEY_ID: Configured,
-  TURN_API_TOKEN: Configured,
-  VOICE_BRIDGE_HOST: Configured,
-  API_KEY: Configured,
-});
-
-type CallConfig = v.InferOutput<typeof CallConfig>;
-
-interface CallEnv {
-  CALL_STATE: {
-    getByName(name: string): { fetch(input: string, init?: RequestInit): Promise<Response> };
-  };
-  DB: D1<'all' | 'first' | 'run'>;
-  REALTIME_APP_ID?: string;
-  REALTIME_APP_SECRET?: string;
-  TURN_KEY_ID?: string;
-  TURN_API_TOKEN?: string;
-  VOICE_BRIDGE_HOST?: string;
-  API_KEY?: string;
-}
-
-/** A wedged call expires on its own rather than blocking the fleet. */
-const CALL_TTL_SECONDS = 3600;
-/** The daemon refreshes a ring on every RING; the TTL only covers a lost end report. */
-const RING_TTL_SECONDS = 60;
 const ENDPOINT_TTL_SECONDS = CALL_TTL_SECONDS;
-const TRACK_MIC = 'mic';
-const TRACK_MODEM = 'modem';
 
-const SFU_BASE = 'https://rtc.live.cloudflare.com/v1';
-const SFU_REQUEST_TIMEOUT_MS = 15_000;
 const TURN_BASE = 'https://rtc.live.cloudflare.com/v1/turn/keys';
-
-export function missingConfig(env: object): string[] {
-  const result = v.safeParse(CallConfig, env);
-  if (result.success) return [];
-  return result.issues.flatMap((issue) => {
-    const key = v.getDotPath(issue);
-    return key === null ? [] : [key];
-  });
-}
-
-function callConfig(env: CallEnv): CallConfig {
-  const result = v.safeParse(CallConfig, env);
-  if (result.success) return result.output;
-  throw new ORPCError('SERVICE_UNAVAILABLE', {
-    message: `Voice calling is not configured: missing ${missingConfig(env).join(', ')}`,
-  });
-}
-
-const revisions = new WeakMap<LiveCall, string>();
-const stateUrl = 'https://call-state/';
-
-async function readCall(env: CallEnv): Promise<LiveCall | null> {
-  const response = await env.CALL_STATE.getByName('fleet').fetch(stateUrl);
-  if (!response.ok) throw new Error('Could not read live call state');
-  const snapshot = await readJson(response, CallSnapshot);
-  if (!snapshot.ok) throw new Error(`Live call state is unreadable: ${snapshot.error}`);
-  if (snapshot.value === null) return null;
-  revisions.set(snapshot.value.call, snapshot.value.revision);
-  return snapshot.value.call;
-}
-
-async function changeCall(
-  env: CallEnv,
-  expected: LiveCall | null,
-  call: LiveCall | null,
-  ttl: number = CALL_TTL_SECONDS,
-): Promise<boolean> {
-  const expectedRevision = expected === null ? null : revisions.get(expected);
-  // A call this isolate never read has no known revision, so it cannot match.
-  if (expectedRevision === undefined) return false;
-  const response = await env.CALL_STATE.getByName('fleet').fetch(stateUrl, {
-    method: 'POST',
-    body: JSON.stringify({ expected: expectedRevision, call, ttl }),
-  });
-  if (response.status === 409) return false;
-  if (!response.ok) throw new Error('Could not change live call state');
-  if (call) {
-    const revision = await readJson(response, v.string());
-    if (!revision.ok) throw new Error(`Live call revision is unreadable: ${revision.error}`);
-    revisions.set(call, revision.value);
-  }
-  return true;
-}
-
-function writeCall(
-  env: CallEnv,
-  call: LiveCall,
-  ttl: number = CALL_TTL_SECONDS,
-  expected: LiveCall | null = call,
-): Promise<boolean> {
-  return changeCall(env, expected !== null && revisions.has(expected) ? expected : null, call, ttl);
-}
-
-function clearCall(env: CallEnv, call: LiveCall): Promise<boolean> {
-  return changeCall(env, call, null);
-}
-
-async function beginEnding(
-  env: CallEnv,
-  matches: (call: LiveCall) => boolean,
-): Promise<LiveCall | null> {
-  let call = await readCall(env);
-  const id = call?.id;
-  while (call && call.id === id && call.state !== 'ending' && matches(call)) {
-    call.state = 'ending';
-    if (await writeCall(env, call)) return call;
-    call = await readCall(env);
-  }
-  return null;
-}
-
-function callChanged(): ORPCError<'CONFLICT', undefined> {
-  return new ORPCError('CONFLICT', { message: 'No active call' });
-}
-
-function conflict(
-  message: string,
-  call?: LiveCall,
-): ORPCError<'CONFLICT', { call: LiveCall } | undefined> {
-  return new ORPCError('CONFLICT', { message, data: call === undefined ? undefined : { call } });
-}
 
 export function validNumber(value: unknown): boolean {
   return v.is(PhoneNumber, value);
-}
-
-function present(value: string | null | undefined): value is string {
-  return value !== undefined && value !== null && value !== '';
-}
-
-function isDescription(
-  value: SessionDescription | undefined,
-  type: SessionDescription['type'],
-): value is SessionDescription {
-  return value?.type === type && value.sdp !== '';
-}
-
-function toHex(buffer: ArrayBuffer): string {
-  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * Signed adapter endpoint the daemon verifies before it touches a modem.
- *
- * Path: /voice/{callId}/{leg}/{action}/{iccid}/{number}/{exp}/{sig}
- * sig = hex HMAC-SHA256(API_KEY, "callId\nleg\naction\niccid\nnumber\nexp").
- * The same test vector lives in the daemon's tests; change both together.
- */
-export async function adapterEndpoint(
-  config: Pick<CallConfig, 'API_KEY' | 'VOICE_BRIDGE_HOST'>,
-  {
-    callId,
-    leg,
-    action,
-    iccid,
-    number,
-    exp,
-  }: {
-    callId: string;
-    leg: 'up' | 'down';
-    action: 'dial' | 'answer';
-    iccid: string;
-    number: string | null;
-    exp: number;
-  },
-): Promise<string> {
-  const numberSegment = action === 'answer' ? '-' : (number ?? '');
-  const message = [callId, leg, action, iccid, numberSegment, String(exp)].join('\n');
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(config.API_KEY),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const sig = toHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
-  const segments = [callId, leg, action, iccid, numberSegment, String(exp), sig].map(
-    encodeURIComponent,
-  );
-  return `wss://${config.VOICE_BRIDGE_HOST}/voice/${segments.join('/')}`;
-}
-
-/** `body === undefined` sends no body at all, which sessions/new requires. */
-async function sfu(
-  config: Pick<CallConfig, 'REALTIME_APP_ID' | 'REALTIME_APP_SECRET'>,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<SfuResult> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${config.REALTIME_APP_SECRET}`,
-  };
-  const init: RequestInit = {
-    method,
-    headers,
-    signal: AbortSignal.timeout(SFU_REQUEST_TIMEOUT_MS),
-  };
-  if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
-  }
-  let response;
-  let text;
-  try {
-    response = await fetch(`${SFU_BASE}/apps/${config.REALTIME_APP_ID}${path}`, init);
-    text = await response.text();
-  } catch {
-    return { ok: false, status: 502, body: {}, detail: { error: 'SFU connection failed' } };
-  }
-  const raw = parseJson(text, v.unknown());
-  const parsed = raw.ok ? v.safeParse(SfuBody, raw.value) : null;
-  if (!raw.ok || !parsed?.success) {
-    return {
-      ok: false,
-      status: response.status,
-      body: {},
-      detail: { error: 'Invalid SFU response', raw: text },
-    };
-  }
-  const reply = parsed.output;
-  const trackError = reply.tracks?.some((track) => present(track.errorCode)) ?? false;
-  const ok = response.ok && !present(reply.errorCode) && !trackError;
-  return { ok, status: response.status, body: reply, detail: raw.value };
-}
-
-function sfuError(message: string, result: SfuResult): ORPCError<'BAD_GATEWAY', undefined> {
-  const detail = typeof result.detail === 'string' ? result.detail : JSON.stringify(result.detail);
-  console.error(`[calls] ${message}:`, detail);
-  return new ORPCError('BAD_GATEWAY', { message: `${message}: ${detail}` });
-}
-
-async function publishMic(
-  config: CallConfig,
-  offer: { type: 'offer'; sdp: string },
-  mid: string,
-): Promise<
-  { sessionId: string; answer: SessionDescription } | { error: ORPCError<'BAD_GATEWAY', undefined> }
-> {
-  const session = await sfu(config, 'POST', '/sessions/new');
-  const sessionId = session.body.sessionId;
-  if (!session.ok || !present(sessionId)) {
-    return { error: sfuError('Could not create an SFU session', session) };
-  }
-
-  const tracks = await sfu(config, 'POST', `/sessions/${sessionId}/tracks/new`, {
-    sessionDescription: offer,
-    tracks: [{ location: 'local', mid, trackName: TRACK_MIC }],
-  });
-  const answer = tracks.body.sessionDescription;
-  if (!tracks.ok || !isDescription(answer, 'answer')) {
-    return { error: sfuError('Could not publish the microphone', tracks) };
-  }
-  return { sessionId, answer };
-}
-
-/** Best effort: the daemon also hangs up when its WebSocket drops or the call TTL ends. */
-async function closeAdapters(env: CallEnv, call: LiveCall): Promise<void> {
-  const ids = [call.adapters?.up, call.adapters?.down].filter(present);
-  const config = v.safeParse(CallConfig, env);
-  if (ids.length === 0 || !config.success) return;
-  await sfu(config.output, 'POST', '/adapters/websocket/close', {
-    tracks: ids.map((adapterId) => ({ adapterId })),
-  });
 }
 
 async function failMedia(
@@ -360,127 +68,6 @@ async function failMedia(
     await logCallEnded(env.DB, call, { reason: 'sfu_error', endedBy: 'worker' });
   }
   throw error;
-}
-
-// Every history write is swallowed on failure: logging must never stop a call being
-// placed, answered, or hung up, because hangup releases the fleet lock.
-
-/** A row still open after this lost its end report. */
-const STALE_CALL_MS = 2 * 60 * 60 * 1000;
-const STALE_RING_MS = 5 * 60 * 1000;
-
-async function history(db: D1<'run'>, write: (db: D1<'run'>) => Promise<unknown>): Promise<void> {
-  try {
-    await write(db);
-  } catch (error) {
-    console.error('call history write failed', error);
-  }
-}
-
-/** An unanswered ring is swept sooner: while open it holds this SIM's open-ring slot. */
-function sweepStaleCalls(db: D1<'run'>, now: string): Promise<unknown> {
-  return closeStaleCalls(db, {
-    now,
-    startedBefore: new Date(Date.now() - STALE_CALL_MS).toISOString(),
-    ringStartedBefore: new Date(Date.now() - STALE_RING_MS).toISOString(),
-  });
-}
-
-/**
- * Concurrent RING and caller-ID reports can both reach D1 before either claims
- * the live state. The partial unique index keeps one open row per SIM, so both
- * reports use the same ID.
- */
-async function claimRing(
-  db: D1<'first' | 'run'>,
-  iccid: string,
-  from: string | null,
-): Promise<OpenRingRow | null> {
-  try {
-    const now = new Date().toISOString();
-    await sweepStaleCalls(db, now);
-    await insertInboundRing(db, { id: crypto.randomUUID(), iccid, from, now });
-
-    return await findOpenRing(db, iccid);
-  } catch (error) {
-    console.error('call history ring claim failed', error);
-    return null;
-  }
-}
-
-function logCallStarted(db: D1<'run'>, call: LiveCall): Promise<void> {
-  return history(db, async (log) => {
-    await sweepStaleCalls(log, new Date().toISOString());
-    await insertCall(log, call);
-  });
-}
-
-function logCallerId(db: D1<'run'>, callId: string, number: string): Promise<void> {
-  return history(db, (log) => setRemoteNumber(log, callId, number));
-}
-
-function logCallAnswered(
-  db: D1<'run'>,
-  callId: string,
-  { at, by = null }: { at: string; by?: string | null },
-): Promise<void> {
-  return history(db, (log) => markCallAnswered(log, callId, at, by));
-}
-
-type EndedBy = 'dashboard' | 'daemon' | 'worker';
-
-/** `dashboard` is the operator, `daemon` the Pi, `worker` a setup failure here. */
-export function unansweredOutcome(
-  direction: Direction,
-  endedBy: EndedBy,
-  reason: string,
-): 'failed' | 'rejected' | 'cancelled' | 'missed' {
-  if (endedBy === 'worker' || reason === 'setup_failed' || reason === 'adapter_missing') {
-    return 'failed';
-  }
-  if (endedBy === 'dashboard') return direction === 'inbound' ? 'rejected' : 'cancelled';
-  return 'missed';
-}
-
-/**
- * Idempotent through the `in_progress` guard: the dashboard and the daemon both
- * report the end of the same call, and whoever arrives first decides.
- */
-function logCallEnded(
-  db: D1<'run'>,
-  call: LiveCall,
-  { reason, endedBy }: { reason: string; endedBy: EndedBy },
-): Promise<void> {
-  return history(db, (log) => {
-    const endedAt = new Date().toISOString();
-    return markCallEnded(log, {
-      callId: call.id,
-      endedAt,
-      reason,
-      unansweredOutcome: unansweredOutcome(call.direction, endedBy, reason),
-    });
-  });
-}
-
-async function enrichCallPage(db: D1<'all'>, calls: CallHistoryRow[]) {
-  const iccids = [...new Set(calls.map((call) => call.iccid).filter(present))];
-  const sims = new Map<string, SimRow>();
-
-  for (let start = 0; start < iccids.length; start += D1_MAX_BOUND_PARAMETERS) {
-    const chunk = iccids.slice(start, start + D1_MAX_BOUND_PARAMETERS);
-    const rows = await listSimsByIccid(db, chunk);
-    for (const sim of rows) sims.set(sim.iccid, sim);
-  }
-
-  return calls.map((call) => {
-    const sim = sims.get(call.iccid);
-    return {
-      ...call,
-      sim_index: sim?.sim_index ?? null,
-      sim_number: sim?.number ?? null,
-      sim_carrier: sim?.carrier ?? null,
-    };
-  });
 }
 
 function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
@@ -735,70 +322,5 @@ export const callsHandler = {
     call.state = 'ended';
     call.ended_at = new Date().toISOString();
     return { call };
-  },
-};
-
-interface DaemonCall {
-  env: CallEnv;
-}
-
-export const daemonCallsHandler = {
-  async incoming(
-    { env }: DaemonCall,
-    body: v.InferOutput<typeof IncomingCallBody>,
-  ): Promise<IncomingCallResponse> {
-    const { iccid } = body;
-    const from = present(body.from) ? body.from : null;
-
-    let existing = await readCall(env);
-    const open = existing ? null : await claimRing(env.DB, iccid, from);
-    for (;;) {
-      if (existing && (existing.state !== 'ringing' || existing.iccid !== iccid)) {
-        // The daemon reads this 409 body.
-        throw new ORPCError('CONFLICT', {
-          data: { wire: { ok: false, reason: 'another call is active' } },
-        });
-      }
-      const knownNumber = [existing?.number, open?.remote_number].find(present) ?? null;
-      const call: LiveCall = {
-        id: existing?.id ?? open?.id ?? crypto.randomUUID(),
-        direction: 'inbound',
-        state: 'ringing',
-        iccid,
-        number: from ?? knownNumber,
-        started_at: existing?.started_at ?? open?.started_at ?? new Date().toISOString(),
-      };
-      if (await writeCall(env, call, RING_TTL_SECONDS, existing)) {
-        if (!existing && !open) {
-          await logCallStarted(env.DB, call);
-        } else if (from !== null && !present(existing?.number ?? open?.remote_number)) {
-          await logCallerId(env.DB, call.id, from);
-        }
-        return { ok: true, call };
-      }
-      existing = await readCall(env);
-      // An ended ring should not be revived by a refresh that was already in flight.
-      if (!existing) return { ok: true, ignored: true };
-    }
-  },
-
-  async ended(
-    { env }: DaemonCall,
-    { call_id: callId, iccid, reason }: v.InferOutput<typeof EndedCallBody>,
-  ): Promise<EndedCallResponse> {
-    const call = await beginEnding(env, (current) =>
-      present(callId)
-        ? current.id === callId
-        : current.iccid === iccid && current.state === 'ringing',
-    );
-    if (!call) return { ok: true, ignored: true };
-
-    await closeAdapters(env, call);
-    await clearCall(env, call);
-    await logCallEnded(env.DB, call, {
-      reason: present(reason) ? reason.slice(0, 40) : 'ended',
-      endedBy: 'daemon',
-    });
-    return { ok: true, call_id: call.id };
   },
 };

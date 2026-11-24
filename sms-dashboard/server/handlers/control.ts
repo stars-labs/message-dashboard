@@ -38,14 +38,14 @@ import type { HeartbeatResponse } from '../../shared/api/contract/control.js';
 import { findKeywordMatches } from '../utils/keyword-match.js';
 import { classifyMessage, loadActiveRules } from '../utils/spam-filter.js';
 import { extractVerificationCode } from '../utils/verification.js';
+import type { BalanceCheckRow } from '../db/balance-replies.js';
+import { mergeMultipartReplies } from '../utils/balance-reply-parse.js';
 import {
   findPendingBalanceCheck,
   linkBalanceReply,
-  mergeMultipartReplies,
   updateBalanceCheckForSmsResult,
-  type BalanceCheckRow,
   type SmsOutcome,
-} from './balance-queries.js';
+} from './balance-replies.js';
 
 /** A stored, normalized message, before classification side effects. */
 interface StoredMessage {

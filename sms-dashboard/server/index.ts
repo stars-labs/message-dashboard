@@ -1,4 +1,4 @@
-import { expireStaleBalanceChecks } from './handlers/balance-queries.js';
+import { expireStaleBalanceChecks } from './db/balance-replies.js';
 import { maintainWebBalanceJobs } from './handlers/carrier-web-balance.js';
 import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';

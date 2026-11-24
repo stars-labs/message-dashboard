@@ -8,22 +8,24 @@ import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
+import { expireStaleBalanceChecks, type BalanceCheckRow } from '../db/balance-replies.js';
+import type { BalanceProfile, PlanPhone } from '../db/balance-plan.js';
 import {
   buildBalanceQueryPlan,
   carrierMatchesProfile,
   describeBalanceMethod,
-  expectedSenderMatches,
-  expireStaleBalanceChecks,
   filterBalancePlanByMethods,
-  findPendingBalanceCheck,
-  linkBalanceReply,
+} from '../utils/balance-plan.js';
+import {
+  expectedSenderMatches,
   mergeMultipartReplies,
   parseBalanceMetrics,
+} from '../utils/balance-reply-parse.js';
+import {
+  findPendingBalanceCheck,
+  linkBalanceReply,
   updateBalanceCheckForSmsResult,
-  type BalanceCheckRow,
-  type BalanceProfile,
-  type PlanPhone,
-} from './balance-queries.js';
+} from './balance-replies.js';
 
 type TestDb = D1 & D1Batch<'run'>;
 

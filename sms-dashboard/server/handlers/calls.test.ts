@@ -9,7 +9,9 @@ import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker, TEST_API_KEY } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import type { AppEnv } from '../worker-context.js';
-import { adapterEndpoint, missingConfig, unansweredOutcome, validNumber } from './calls.js';
+import { unansweredOutcome } from './call-history.js';
+import { adapterEndpoint, missingConfig } from './call-media.js';
+import { validNumber } from './calls.js';
 
 const SESSION_TOKEN = 'session-token';
 const ICCID = '8965012306052373985';
