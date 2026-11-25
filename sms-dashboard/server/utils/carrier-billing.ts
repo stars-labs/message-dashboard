@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { formatCardNumber } from '../../shared/card-number.js';
 import type { D1 } from '../lib/d1.js';
 import {
   findBillForCycle,
@@ -54,10 +55,9 @@ async function ensureBillingStream(
   }
 
   const accountId = crypto.randomUUID();
-  const displayIndex = String(sim.sim_index).padStart(2, '0');
   await insertSingtelAccountIfAbsent(db, {
     id: accountId,
-    displayName: `S${displayIndex} Singtel postpaid`,
+    displayName: `${formatCardNumber(sim.sim_index)} Singtel postpaid`,
     notificationSimIccid: sim.iccid,
     accountRefDigest: parsed.account_ref_digest,
     accountRefLast4: parsed.account_ref_last4,

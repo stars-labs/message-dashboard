@@ -15,7 +15,7 @@
     matchesPhoneQuery,
     normaliseNumber,
   } from './call-client.js';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import type { CallLogEntry, LiveCall } from '../../shared/api/calls.js';
   import type { Phone } from '../../shared/api/phones.js';
 

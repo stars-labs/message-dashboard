@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BalanceQueryPreflightResponse } from '../../../shared/api/balance-checks.js';
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { overlay } from '../overlay.js';
   import { capabilityLabels } from './presentation.js';
   import type { BalanceRow } from './types.js';

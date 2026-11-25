@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { api, errorMessage } from './api';
   import { getStatusMeta, hasOperationalIssue } from './device-status.js';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';
   import { groupByPrimary } from './group-by-primary.js';

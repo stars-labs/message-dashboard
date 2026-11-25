@@ -1,6 +1,6 @@
 <script lang="ts">
   import SignalStrength from './SignalStrength.svelte';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { getModemPosition } from './modem-position.js';
   import { getEffectiveDeviceStatus, getStatusMeta } from './device-status.js';
   import { formatBalanceMetric, getBalanceStatusMeta, getCashBalance } from './balance-query.js';

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { textOr } from '../../../shared/text.js';
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { overlay } from '../overlay.js';
   import {
     billActionLabel,

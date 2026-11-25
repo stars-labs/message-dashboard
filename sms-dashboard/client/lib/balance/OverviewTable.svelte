@@ -3,7 +3,7 @@
   import type { SummaryStatus } from '../../../shared/prepaid-health.js';
   import { BALANCE_HEALTH_META, isSummaryStatus } from '../balance-overview.js';
   import { formatBalanceMetric, getBalanceStatusMeta } from '../balance-query.js';
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { getCountryFlag } from '../countries.js';
   import { getSimServiceTypeLabel } from '../sim-service-type.js';
   import { formatThreshold, formatTime } from './presentation.js';

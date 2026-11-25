@@ -9,8 +9,8 @@ routes = [
   { pattern = "sexy.itoken.world", custom_domain = true }
 ]
 
-# Balance reply correlation and timeout reconciliation runs every five minutes.
-# The 04:17 UTC trigger also runs the heavier nightly retention and backfills.
+# Balance reply correlation, timeout reconciliation and the alert checks run every
+# five minutes. The 04:17 UTC trigger also runs the heavier nightly retention and backfills.
 [triggers]
 crons = ["*/5 * * * *", "17 4 * * *"]
 
@@ -25,6 +25,13 @@ migrations_dir = "migrations"
 [[kv_namespaces]]
 binding = "SESSIONS"
 id = "4d7e71fcf5c44a469aa63e28f60cb6d7"
+
+# Alert emails (server/utils/alerts.ts). alerts.itoken.world is onboarded to Cloudflare
+# Email Sending; on the Workers Free plan it delivers only to verified destination
+# addresses, which the ALERT_RECIPIENTS secret lists.
+[[send_email]]
+name = "EMAIL"
+allowed_sender_addresses = ["noreply@alerts.itoken.world"]
 
 [[durable_objects.bindings]]
 name = "CALL_STATE"
@@ -74,3 +81,4 @@ enabled = true
 # AUTH0_M2M_CLIENT_SECRET - Auth0 Management API machine-to-machine client secret
 # AUTH0_AUDIENCE - Required Auth0 API identifier used by web and Balance Agent tokens
 # API_KEY - API key for Orange Pi integration
+# ALERT_RECIPIENTS - comma-separated alert email addresses, each a verified destination

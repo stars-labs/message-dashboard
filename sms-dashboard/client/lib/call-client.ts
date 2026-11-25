@@ -9,7 +9,7 @@ import {
   type LiveCall,
 } from '../../shared/api/calls.js';
 import { contractApi } from './api.js';
-import { formatCardNumber } from './card-number.js';
+import { formatCardNumber } from '../../shared/card-number.js';
 import { toError } from './error-origin.js';
 import { formatClock, toEpochMilliseconds } from './time.js';
 

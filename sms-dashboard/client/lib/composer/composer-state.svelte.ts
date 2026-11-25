@@ -1,6 +1,6 @@
 import { SvelteDate, SvelteSet } from 'svelte/reactivity';
 import * as v from 'valibot';
-import { formatCardNumber } from '../card-number.js';
+import { formatCardNumber } from '../../../shared/card-number.js';
 import type { ApiMessage } from '../../../shared/api/messages.js';
 import type { Phone } from '../../../shared/api/phones.js';
 import { parseJson, type Parsed } from '../../../shared/parse-json.js';

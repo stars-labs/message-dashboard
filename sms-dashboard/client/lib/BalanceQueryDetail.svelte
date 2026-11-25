@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { swipeDismiss } from './swipe-dismiss.js';
   import {
     formatBalanceMetric,

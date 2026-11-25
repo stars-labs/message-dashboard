@@ -142,6 +142,7 @@ export async function startLocalStack(): Promise<LocalStack> {
         'AUTH0_M2M_CLIENT_ID=e2e-m2m',
         'AUTH0_M2M_CLIENT_SECRET=e2e-m2m-secret',
         `API_KEY=${API_KEY}`,
+        'ALERT_RECIPIENTS=e2e-ops@example.com',
         '',
       ].join('\n'),
     );
@@ -160,6 +161,7 @@ export async function startLocalStack(): Promise<LocalStack> {
         '--env-file',
         envFile,
         '--show-interactive-dev-session=false',
+        '--test-scheduled',
       ],
       { detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
     );

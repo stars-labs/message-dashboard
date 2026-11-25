@@ -27,6 +27,27 @@ bun run check:schema-drift
   production (two `d1 export` calls, which briefly hold other D1 requests).
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
 
+### Alert emails
+
+The five-minute cron (`server/utils/alerts.ts`) emails when the daemon has sent no
+heartbeat for 20 minutes, when assigned SIMs stay offline for 30 minutes (checked
+every 15), and when the check itself fails. It emails again every 6 hours while the
+condition holds, and once more when it clears. State lives in the `alert_state` table,
+written only when an alert opens, is emailed or clears.
+
+Where its configuration lives:
+
+- **Sender**: `alerts.itoken.world`, onboarded in the dashboard under Compute → Email
+  Service → Email Sending, which created the records on `cf-bounce.alerts.itoken.world`.
+  The `EMAIL` binding in `wrangler.toml` may only send as `noreply@alerts.itoken.world`.
+- **Recipients**: on the Workers Free plan only verified destination addresses receive
+  mail. Add an address under Email Routing → Destination addresses, have its owner
+  click the verification link, then list it in the secret:
+  `bunx wrangler secret put ALERT_RECIPIENTS` (comma-separated). Addresses stay out of
+  the repository.
+- Without `ALERT_RECIPIENTS` an alert stays open and unsent, and goes out on the first
+  run after the secret is set.
+
 ## D1 Backup and Account Move
 
 ```bash

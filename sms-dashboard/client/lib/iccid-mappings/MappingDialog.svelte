@@ -2,7 +2,7 @@
   import { overlay } from '../overlay.js';
   import { COUNTRIES } from '../countries.js';
   import { getStatusMeta } from '../device-status.js';
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { SIM_SERVICE_TYPES, SIM_SERVICE_TYPE_SOURCES } from '../sim-service-type.js';
   import { SIM_ROLES } from '../sim-role.js';
   import type { IccidMapping } from '../../../shared/api/iccid-mappings.js';
