@@ -706,8 +706,75 @@ fn test_decode_bcd_phone_with_hex_nibbles() {
     assert_eq!(result, "*#");
 }
 
+/// Real sysfs reports a ttyUSB port's interface as a `2-1.3.4.3.4:1.2` ancestor, so
+/// this exercises the interface lookup against a directory tree shaped like sysfs.
+fn sysfs_with_ports(ports: &[(u8, &str)]) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("at-discovery-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let class_dir = root.join("sys/class/tty");
+    for (interface, tty) in ports {
+        let device = root.join(format!(
+            "sys/devices/platform/usb/{}:1.{interface}",
+            tty.trim_start_matches("/dev/")
+        ));
+        std::fs::create_dir_all(&device).unwrap();
+        std::fs::write(device.join("idVendor"), b"2c7c").unwrap();
+        let link = class_dir
+            .join(tty.trim_start_matches("/dev/"))
+            .join("device");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&device, &link).unwrap();
+    }
+    root
+}
+
+#[test]
+fn at_probe_order_follows_interface_number_not_tty_number() {
+    // ttyUSB208 is interface 1.1 and 216 is 1.2 on this real device, so sorted
+    // position 2 would pick the NMEA port and leave SMS sending to a wrong interface.
+    let root = sysfs_with_ports(&[
+        (0, "/dev/ttyUSB138"),
+        (1, "/dev/ttyUSB208"),
+        (2, "/dev/ttyUSB216"),
+        (3, "/dev/ttyUSB224"),
+    ]);
+    let ports: Vec<String> = [
+        "/dev/ttyUSB138",
+        "/dev/ttyUSB208",
+        "/dev/ttyUSB216",
+        "/dev/ttyUSB224",
+    ]
+    .map(String::from)
+    .to_vec();
+    assert_eq!(
+        AtModemManager::at_probe_order_in(&root, &ports).first(),
+        Some(&"/dev/ttyUSB216".to_string())
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn usb_interface_for_port_reads_the_sysfs_ancestor() {
+    let root = sysfs_with_ports(&[(0, "/dev/ttyUSB1"), (2, "/dev/ttyUSB9")]);
+    assert_eq!(
+        AtModemManager::usb_interface_for_port_in(&root, "/dev/ttyUSB9"),
+        Some(2)
+    );
+    assert_eq!(
+        AtModemManager::usb_interface_for_port_in(&root, "/dev/ttyUSB1"),
+        Some(0)
+    );
+    assert_eq!(
+        AtModemManager::usb_interface_for_port_in(&root, "/dev/ttyUSB404"),
+        None
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn test_at_probe_order() {
+    // These paths do not exist, so interface lookup falls back to position: a 4-port
+    // device keeps slot 2 as the AT port, a shorter one keeps its own order.
     let p4: Vec<String> = (0..4).map(|n| format!("/dev/ttyUSB{n}")).collect();
     assert_eq!(
         AtModemManager::at_probe_order(&p4),
