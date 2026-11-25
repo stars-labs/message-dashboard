@@ -12,8 +12,8 @@
   `server/db/modems.ts` reads or writes `modems`; `bun run lint` enforces it.
 - `device_view` joins `sims.imei` to `modems.equipment_id`. The join key is IMEI,
   not ICCID.
-- Use `modems.detected_iccid`; `modems.current_iccid` is stale legacy data frozen
-  since migration `033` — never query it.
+- A modem's ICCID is `modems.detected_iccid`; migration `081` dropped the legacy
+  `current_iccid`.
 - `modem_state` was removed by migration `033`; signal fields live on `modems`.
 - The v8 daemon syncs through `/api/control/devices`. The pre-`033`
   `/api/control/phones` route was removed; do not reintroduce it.

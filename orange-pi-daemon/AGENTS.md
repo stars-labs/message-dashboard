@@ -9,8 +9,7 @@
 - Syncs through `/api/control/devices`. The pre-v8 `/api/control/phones` route is
   removed — do not reintroduce it.
 - Never writes `sims` inventory — only writes `modems` and `daemon_health`.
-- `modems.detected_iccid` is the live field. `modems.current_iccid` is dead legacy —
-  never read or write it.
+- A modem's ICCID is `modems.detected_iccid`.
 - Daemon health and SIM state are separate domains — do not infer one from the other.
 - `wire::PendingSms` and `PendingSmsResponse` define the shared pending-SMS
   payload. A missing `purpose` retains the established `user` default.
