@@ -2,7 +2,7 @@
 --   wrangler d1 export sms-dashboard --remote --no-data --output migrations/schema.sql
 -- then restore this header. Regenerate after applying a migration to production,
 -- and set `through` to that migration's number.
--- through: 082
+-- through: 083
 PRAGMA defer_foreign_keys=TRUE;
 CREATE TABLE audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -398,7 +398,7 @@ CREATE TABLE calls (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE alert_state (
-  alert TEXT PRIMARY KEY CHECK (alert IN ('daemon_offline', 'sims_offline')),
+  alert TEXT PRIMARY KEY CHECK (alert = 'daemon_offline'),
   first_seen_at TEXT NOT NULL,
   notified_at TEXT
 );
