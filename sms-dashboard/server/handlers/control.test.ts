@@ -1247,6 +1247,18 @@ describe('POST /api/control/heartbeat', () => {
     }
   });
 
+  test('answers 500, not success, when the snapshot cannot be stored', async () => {
+    const refused = await recordHeartbeat(heartbeatCall({}, untouchable), snapshot()).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(refused).toMatchObject({
+      status: 500,
+      message: 'Failed to process heartbeat: database must not be read',
+    });
+  });
+
   test('answers a body that is empty or not JSON as the route did before the contract', async () => {
     for (const body of ['', '{"schema_version":']) {
       const { response } = await callWorker('POST', '/api/control/heartbeat', {
