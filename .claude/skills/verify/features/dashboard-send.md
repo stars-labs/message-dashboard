@@ -32,10 +32,10 @@ const p = await page('desktop'); // 1440px: drawer
 await p.goto(`${stack.baseUrl}/#dashboard`);
 await p.getByRole('button', { name: '发送短信' }).first().click();
 const drawer = p.getByRole('button', { name: '关闭发送短信' }).locator('xpath=../..');
-await drawer.getByPlaceholder('卡号 / 号码 / 运营商 / ICCID').click();
+await drawer.getByLabel('发送卡').click();
 await drawer.getByRole('button', { name: /S02/ }).click();
-await drawer.getByPlaceholder('输入手机号或短号…').fill('91234567');
-await drawer.getByPlaceholder('输入短信内容…').fill('verify send');
+await drawer.getByLabel('接收号码').fill('91234567');
+await drawer.getByLabel('短信内容').fill('verify send');
 await drawer.getByRole('button', { name: '发送短信', exact: true }).click();
 await drawer.getByText('已提交，等待发送').waitFor();
 await evidence('sent', await stack.d1(
@@ -47,10 +47,6 @@ Proof: the 已提交 state, the 等待发送 feed row, and the D1 row.
 
 ## Gotchas
 
-- Scope everything to the drawer and select fields by placeholder. At 1440px two
-  composers are mounted (the drawer and the hidden 1536px column) with the same ids,
-  so `getByLabel('发送卡')` and `#sim-selection` resolve outside the drawer
-  ([GRA-227](https://linear.app/gray-arrow/issue/GRA-227)).
 - The drawer's backdrop covers the page and swallows clicks. Close it (`关闭发送短信`)
   before driving anything else. Nav buttons close it; `page.goto` does not.
 - Only S01 and S02 are offered: S03's modem is disconnected, so it is not `active`.

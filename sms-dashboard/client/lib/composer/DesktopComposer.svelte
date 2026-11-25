@@ -7,6 +7,7 @@
   }
 
   let { composer }: Props = $props();
+  const id = $props.id();
 </script>
 
 <div
@@ -18,11 +19,11 @@
   </div>
   <div class="flex-1 overflow-y-auto p-4">
     <div class="mb-4 relative sim-input-container">
-      <label for="sim-selection" class="block text-sm font-medium text-stone-600 mb-2">
+      <label for="{id}-sim-selection" class="block text-sm font-medium text-stone-600 mb-2">
         发送卡
       </label>
       <input
-        id="sim-selection"
+        id="{id}-sim-selection"
         type="text"
         value={composer.selectedSimDisplay}
         onfocus={() => {
@@ -79,7 +80,7 @@
       {/if}
     </div>
     <div class="mb-4 relative recipient-input-container">
-      <label for="recipient-number" class="block text-sm font-medium text-stone-600 mb-2">
+      <label for="{id}-recipient-number" class="block text-sm font-medium text-stone-600 mb-2">
         接收号码
       </label>
       <div class="flex gap-2">
@@ -128,7 +129,7 @@
           {/if}
         </div>
         <input
-          id="recipient-number"
+          id="{id}-recipient-number"
           type="text"
           bind:value={composer.recipientNumber}
           onfocus={() => (composer.showRecipientHistory = true)}
@@ -176,8 +177,10 @@
       {/if}
     </div>
     <div class="mb-4">
-      <div id="template-label" class="block text-sm font-medium text-stone-600 mb-2">快速模板</div>
-      <div class="flex flex-wrap gap-2" role="group" aria-labelledby="template-label">
+      <div id="{id}-template-label" class="block text-sm font-medium text-stone-600 mb-2">
+        快速模板
+      </div>
+      <div class="flex flex-wrap gap-2" role="group" aria-labelledby="{id}-template-label">
         {#each messageTemplates as template (template.name)}
           <button
             onclick={() => {
@@ -191,11 +194,11 @@
       </div>
     </div>
     <div class="mb-4">
-      <label for="message-content" class="block text-sm font-medium text-stone-600 mb-2">
+      <label for="{id}-message-content" class="block text-sm font-medium text-stone-600 mb-2">
         短信内容
       </label>
       <textarea
-        id="message-content"
+        id="{id}-message-content"
         bind:value={composer.messageContent}
         placeholder="输入短信内容…"
         rows="4"

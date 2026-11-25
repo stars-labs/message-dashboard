@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, test } from 'bun:test';
 import { tick } from 'svelte';
 import type { Phone } from '../../shared/api/phones.js';
@@ -39,6 +39,25 @@ function sendButton(page: HTMLElement): HTMLElement {
   if (!found) throw new Error('no send button rendered');
   return found;
 }
+
+test('each desktop composer labels its own controls when two are mounted', () => {
+  const first = render(MessageComposer).container;
+  const second = render(MessageComposer).container;
+  try {
+    for (const label of ['发送卡', '接收号码', '短信内容']) {
+      const original = within(first).getByLabelText(label);
+      const copy = within(second).getByLabelText(label);
+      expect(copy.id).not.toBe(original.id);
+      expect(document.getElementById(copy.id)).toBe(copy);
+    }
+    const groups = [first, second].map((node) =>
+      within(node).getByRole('group', { name: '快速模板' }).getAttribute('aria-labelledby'),
+    );
+    expect(new Set(groups).size).toBe(2);
+  } finally {
+    cleanup();
+  }
+});
 
 describe('MessageComposer mobile route', () => {
   test('renders as normal route content when enabled', () => {
