@@ -10,7 +10,6 @@ pub mod modem_manager;
 pub mod native_dbus;
 pub mod partial_sms;
 pub mod proxy_protocol;
-pub mod retry_manager;
 pub mod signal_cache;
 pub mod sms_assembler;
 pub mod sms_sender;
@@ -30,7 +29,6 @@ pub mod worker_pool;
 #[cfg(test)]
 mod tests {
     use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
-    use crate::retry_manager::RetryManager;
     use crate::signal_cache::SignalCache;
     use crate::sync_manager::SyncManager;
     use crate::types::*;
@@ -78,27 +76,6 @@ mod tests {
 
         assert!(sync_manager.needs_full_sync());
         assert_eq!(sync_manager.get_sync_mode(), SyncMode::Full);
-    }
-
-    #[test]
-    fn test_retry_manager_basic() {
-        let retry_manager = RetryManager::new(3, 1000);
-
-        assert!(retry_manager.should_retry());
-    }
-
-    #[test]
-    fn test_retry_manager_delays() {
-        let mut retry_manager = RetryManager::new(3, 1000);
-
-        let delay1 = retry_manager.next_delay();
-        assert_eq!(delay1, 1000);
-
-        let delay2 = retry_manager.next_delay();
-        assert_eq!(delay2, 2000);
-
-        let delay3 = retry_manager.next_delay();
-        assert_eq!(delay3, 4000);
     }
 
     #[test]

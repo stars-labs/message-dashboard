@@ -3,16 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, trace};
-
-#[expect(
-    clippy::as_conversions,
-    clippy::cast_precision_loss,
-    reason = "the standard library has no u64 to f64 conversion; counters stay far below 2^53"
-)]
-fn percent_of(part: u64, whole: u64) -> f64 {
-    (part as f64 / whole as f64) * 100.0
-}
+use tracing::trace;
 
 #[derive(Debug, Clone)]
 struct CacheEntry {
@@ -24,8 +15,6 @@ struct CacheEntry {
 pub struct SignalCache {
     cache: Arc<RwLock<HashMap<String, CacheEntry>>>,
     ttl: Duration,
-    hit_count: Arc<RwLock<u64>>,
-    miss_count: Arc<RwLock<u64>>,
 }
 
 impl SignalCache {
@@ -33,8 +22,6 @@ impl SignalCache {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             ttl: Duration::from_secs(ttl_seconds),
-            hit_count: Arc::new(RwLock::new(0)),
-            miss_count: Arc::new(RwLock::new(0)),
         }
     }
 
@@ -43,9 +30,6 @@ impl SignalCache {
 
         if let Some(entry) = cache.get(modem_id) {
             if entry.timestamp.elapsed() < self.ttl {
-                let mut hits = self.hit_count.write().await;
-                *hits += 1;
-
                 trace!(
                     "📊 Signal cache HIT for modem {}: {}% (age: {:?})",
                     modem_id,
@@ -61,9 +45,6 @@ impl SignalCache {
                 entry.timestamp.elapsed()
             );
         }
-
-        let mut misses = self.miss_count.write().await;
-        *misses += 1;
 
         trace!("📊 Signal cache MISS for modem {}", modem_id);
         None
@@ -85,81 +66,5 @@ impl SignalCache {
                 timestamp: Instant::now(),
             },
         );
-    }
-
-    pub async fn cleanup(&self) {
-        let mut cache = self.cache.write().await;
-        let now = Instant::now();
-
-        let before_count = cache.len();
-        cache.retain(|modem_id, entry| {
-            let keep = now.duration_since(entry.timestamp) < self.ttl;
-            if !keep {
-                trace!("🧹 Removing expired signal cache for modem {}", modem_id);
-            }
-            keep
-        });
-
-        let removed = before_count - cache.len();
-        if removed > 0 {
-            debug!(
-                "🧹 Signal cache cleanup: removed {} expired entries",
-                removed
-            );
-        }
-    }
-
-    pub async fn get_stats(&self) -> CacheStats {
-        let hits = *self.hit_count.read().await;
-        let misses = *self.miss_count.read().await;
-        let total = hits + misses;
-        let hit_rate = if total > 0 {
-            percent_of(hits, total)
-        } else {
-            0.0
-        };
-
-        let cache_size = self.cache.read().await.len();
-
-        CacheStats {
-            hits,
-            misses,
-            hit_rate,
-            cache_size,
-        }
-    }
-
-    pub async fn clear(&self) {
-        let mut cache = self.cache.write().await;
-        let count = cache.len();
-        cache.clear();
-
-        debug!("🧹 Cleared signal cache: removed {} entries", count);
-
-        *self.hit_count.write().await = 0;
-        *self.miss_count.write().await = 0;
-    }
-
-    pub fn set_ttl(&mut self, ttl_seconds: u64) {
-        self.ttl = Duration::from_secs(ttl_seconds);
-        debug!("⏱️  Signal cache TTL updated to {} seconds", ttl_seconds);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CacheStats {
-    pub hits: u64,
-    pub misses: u64,
-    pub hit_rate: f64,
-    pub cache_size: usize,
-}
-
-impl std::fmt::Display for CacheStats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Signal Cache: {} entries, {} hits, {} misses ({:.1}% hit rate)",
-            self.cache_size, self.hits, self.misses, self.hit_rate
-        )
     }
 }
