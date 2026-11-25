@@ -1,6 +1,6 @@
 <script lang="ts">
   import { formatClock } from './time.js';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { getCountryFlag } from './countries.js';
   import {
     getBalanceStatusMeta,

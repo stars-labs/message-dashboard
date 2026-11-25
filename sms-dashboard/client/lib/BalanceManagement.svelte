@@ -2,7 +2,7 @@
   import { confirmAction } from './confirm.svelte.js';
   import { onMount } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
   import { contractApi, errorMessage } from './api.js';
   import { getSimServiceTypeLabel } from './sim-service-type.js';

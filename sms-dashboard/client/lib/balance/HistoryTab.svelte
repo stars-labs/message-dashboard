@@ -7,7 +7,7 @@
     getBalanceTimestamp,
     getCashBalance,
   } from '../balance-query.js';
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { carrierKey } from '../carrier.js';
   import { checkCarrier, formatTime } from './presentation.js';
   import { compareHistoryChecks } from './sort.js';

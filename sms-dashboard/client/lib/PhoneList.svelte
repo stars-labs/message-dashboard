@@ -2,7 +2,7 @@
   import SignalStrength from './SignalStrength.svelte';
   import { inferCountryFromNumber } from './countries.js';
   import { getStatusMeta, isAnomalous } from './device-status.js';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import type { Phone } from '../../shared/api/phones.js';
   import { textOr } from '../../shared/text.js';
 

@@ -3,7 +3,7 @@
   import { textOr } from '../../shared/text.js';
   import type { View } from '../../shared/views.js';
   import { auth } from '../lib/auth.js';
-  import { formatCardNumber } from '../lib/card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { getDaemonStatusMeta, type DaemonView } from '../lib/daemon-status.js';
   import { formatTimeAgo } from '../lib/time.js';
   import type { CallController } from './call-controller.svelte.js';

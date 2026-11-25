@@ -2,7 +2,7 @@
   import { getModemPosition } from '../modem-position.js';
   import { getCountryFlag, getCarrierColor } from '../countries.js';
   import { getStatusMeta, isAnomalous } from '../device-status.js';
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { getSimServiceTypeLabel } from '../sim-service-type.js';
   import { getSimRoleLabel } from '../sim-role.js';
   import { getBalanceThreshold } from '../balance-overview.js';

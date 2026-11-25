@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { countryCodes, messageTemplates, type ComposerState } from './composer-state.svelte.js';
 
   interface Props {

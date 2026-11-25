@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CarrierBill } from '../../../shared/api/carrier-bills.js';
-  import { formatCardNumber } from '../card-number.js';
+  import { formatCardNumber } from '../../../shared/card-number.js';
   import { billActionLabel, billUrgencyMeta, formatBillAmount } from './presentation.js';
 
   interface Props {

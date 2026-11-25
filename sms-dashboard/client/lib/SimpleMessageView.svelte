@@ -5,7 +5,7 @@
   import MessageHighlight from './MessageHighlight.svelte';
   import { tagActions, keywords as keywordsStore } from './tag-store.js';
   import { copyCode } from './clipboard.js';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { getCountryFlag } from './countries.js';
   import { getOutboundStatusMeta } from './message-status.js';
   import BalanceConversationRow from './BalanceConversationRow.svelte';

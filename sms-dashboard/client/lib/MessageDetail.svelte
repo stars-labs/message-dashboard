@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import { fly } from 'svelte/transition';
   import MessageHighlight from './MessageHighlight.svelte';
-  import { formatCardNumber } from './card-number.js';
+  import { formatCardNumber } from '../../shared/card-number.js';
   import { getCountryFlag } from './countries.js';
   import { getOutboundStatusMeta } from './message-status.js';
   import { copyCode } from './clipboard.js';
