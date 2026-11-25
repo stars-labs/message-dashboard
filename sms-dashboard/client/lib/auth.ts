@@ -3,7 +3,6 @@
 
 import { ORPCError } from '@orpc/client';
 import { ValidationError } from '@orpc/contract';
-import { textOr } from '../../shared/text.js';
 import type { MeResponse } from '../../shared/api/auth.js';
 import { contractClient } from './contract-link.js';
 
@@ -21,10 +20,7 @@ class Auth0Service {
   );
 
   constructor() {
-    this.baseUrl = textOr(
-      import.meta.env.VITE_API_BASE_URL,
-      typeof window !== 'undefined' ? window.location.origin : '',
-    );
+    this.baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     this.user = null;
   }
 

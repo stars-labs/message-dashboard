@@ -29,9 +29,9 @@ references below predate the TypeScript migration: `*.js` files are now `*.ts`,
 `config/auth0-roles.ts`, keyword colours are normalized in `shared/keyword-color.ts`,
 and recipient validation on the daemon is in `orange-pi-daemon/src/at_modem/sms_send.rs`.
 [OAuth `state`](#fixed-follow-up-oauth-state-is-generated-but-never-validated) is fixed
-(GRA-240). Still open: the [Pi firewall and fail2ban](#unresolved--needs-on-device-confirmation)
-(GRA-241; the Pi now also serves the voice bridge and NetBird on 443), and the CORS
-tidy-up under [Discarded findings](#discarded-findings) (GRA-242).
+(GRA-240), and the CORS headers under [Discarded findings](#discarded-findings) are gone
+(GRA-242). Still open: the [Pi firewall and fail2ban](#unresolved--needs-on-device-confirmation)
+(GRA-241; the Pi now also serves the voice bridge and NetBird on 443).
 
 ## Follow-up: admin/viewer split (done)
 
@@ -540,6 +540,10 @@ Recorded because each was raised during review and did **not** survive verificat
   cookie-authenticated route (`index.js:381`, `GET /`) is unreachable this way because
   browsers refuse credentialed requests against `Access-Control-Allow-Origin: *`, and it
   returns only the HTML shell or a redirect to `/login`. Worth tidying; not a breach path.
+  **Removed 2026-11-25 (GRA-242):** no caller is a cross-origin browser page (the
+  dashboard is same-origin, the daemon and the Balance Agent's main process are not
+  browsers), so the Worker now sends no `Access-Control-*` header and answers no
+  preflight.
 * **SQL injection in the messages count query** (`handlers/messages.js:45,66-69`) —
   **false positive.** `conditions.push('phone_iccid = ?')` pushes a literal `?`; the user
   value goes to `scopeParams` and is applied by `.bind(...scopeParams)`. The only

@@ -19,15 +19,14 @@ async function bodyOf(response: Response | null | undefined): Promise<string | n
 }
 
 describe('Router', () => {
-  test('dispatches on the method and the first matching path', async () => {
+  test('answers GET on the first matching path, and no other method', async () => {
     const router = new Router<TestRequest>();
     router.get('/login', reply('login'));
     router.get('*', reply('shell'));
-    router.options('*', reply('preflight'));
 
     expect(await bodyOf(await router.handle(request('GET', '/login')))).toBe('login');
     expect(await bodyOf(await router.handle(request('GET', '/login/x')))).toBe('shell');
-    expect(await bodyOf(await router.handle(request('OPTIONS', '/login')))).toBe('preflight');
+    expect(await router.handle(request('OPTIONS', '/login'))).toBeNull();
     expect(await router.handle(request('POST', '/login'))).toBeNull();
   });
 
@@ -47,16 +46,14 @@ describe('Router', () => {
     expect(await router.handle(request('GET', '/x'))).toBeUndefined();
   });
 
-  test('lists its routes by method, each method in registration order', () => {
+  test('lists its routes in registration order', () => {
     const router = new Router<TestRequest>();
-    router.options('*', reply('preflight'));
     router.get('/login', reply('login'));
     router.get('*', reply('shell'));
 
     expect(router.routes()).toEqual([
       { method: 'GET', path: '/login' },
       { method: 'GET', path: '*' },
-      { method: 'OPTIONS', path: '*' },
     ]);
   });
 });

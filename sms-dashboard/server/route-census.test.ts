@@ -79,7 +79,6 @@ const EXPECTED = [
   ['GET', '/callback'],
   ['GET', '/logout'],
   ['GET', '*'],
-  ['OPTIONS', '*'],
 ] as const;
 
 describe('route census', () => {

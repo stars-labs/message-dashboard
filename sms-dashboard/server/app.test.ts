@@ -41,6 +41,30 @@ describe('the whole Worker, from a request to its response', () => {
     );
   });
 
+  test('shares no response with another origin, and answers no CORS preflight', async () => {
+    const origin = { Origin: 'https://elsewhere.example' };
+    const answered = [];
+    for (const [method, path, headers] of [
+      ['GET', '/api/live', origin],
+      ['GET', '/login', origin],
+      ['GET', '/', origin],
+      ['OPTIONS', '/api/messages', { ...origin, 'Access-Control-Request-Method': 'POST' }],
+    ] as const) {
+      const { response } = await callWorker(method, path, { headers });
+      answered.push({
+        request: `${method} ${path}`,
+        status: response.status,
+        cors: [...response.headers.keys()].filter((name) => name.startsWith('access-control-')),
+      });
+    }
+    expect(answered).toEqual([
+      { request: 'GET /api/live', status: 200, cors: [] },
+      { request: 'GET /login', status: 302, cors: [] },
+      { request: 'GET /', status: 302, cors: [] },
+      { request: 'OPTIONS /api/messages', status: 404, cors: [] },
+    ]);
+  });
+
   test('still serves the app shell for a page outside the API', async () => {
     const { response } = await callWorker('GET', '/apis-are-pages-too');
 
