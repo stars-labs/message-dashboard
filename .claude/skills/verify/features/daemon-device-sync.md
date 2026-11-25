@@ -41,4 +41,4 @@ Checked in: `scripts/verify/journeys/daemon-contract.ts` (offline) and
 - Use the seeded `session_id` `e2e-session`; it matches `daemon_health`.
 - Bringing a seeded SIM online this way is the production path; never write `modems`
   with `d1()`.
-- `modems.current_iccid` is dead legacy; the live field is `detected_iccid`.
+- A modem's ICCID is `modems.detected_iccid`.

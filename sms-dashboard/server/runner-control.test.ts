@@ -1,4 +1,4 @@
-// What the Balance Agent's and the ops scripts' /api/control/ routes answer on
+// What the Balance Agent's /api/control/ routes answer on
 // the wire: who each route admits, and the exact bytes of every refusal. The
 // move onto the contract must leave all of it as it is.
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
@@ -563,93 +563,5 @@ describe('runner refusals on the wire', () => {
     expect(await send('GET', `${otp}?runner_id=runner-1`, { database: offline })).toEqual(
       answer(500, INTERNAL),
     );
-  });
-});
-
-describe('ops balance-check refusals on the wire', () => {
-  const ROUTES = [
-    '/api/control/balance-checks',
-    '/api/control/balance-checks/continue',
-    '/api/control/balance-checks/retry',
-    '/api/control/balance-checks/stop',
-  ];
-
-  test('every route refuses a caller without the API key, before the body or D1', async () => {
-    verifySpy.mockResolvedValue({
-      sub: ALICE,
-      scope: 'balance:runners:heartbeat balance:skills:run balance:browser:run',
-    });
-    for (const path of ROUTES) {
-      for (const headers of [{}, { 'X-API-Key': 'wrong' }, BEARER]) {
-        expect([
-          path,
-          await send('POST', path, { headers, body: '{', database: untouchable }),
-        ]).toEqual([path, answer(401, UNAUTHORIZED)]);
-      }
-    }
-  });
-
-  test('every route refuses a body it cannot read', async () => {
-    const required: Record<string, string> = {
-      '/api/control/balance-checks': 'phone_iccid and profile_id are required',
-      '/api/control/balance-checks/continue': 'check_id is required',
-      '/api/control/balance-checks/retry': 'check_id is required',
-      '/api/control/balance-checks/stop': 'check_id is required',
-    };
-    for (const path of ROUTES) {
-      const missing = answer(400, JSON.stringify({ success: false, error: required[path] }));
-      for (const [body, expected] of [
-        ['', answer(400, '{"success":false,"error":"Invalid JSON body"}')],
-        ['{', answer(400, '{"success":false,"error":"Invalid JSON body"}')],
-        ['[]', missing],
-        ['{}', missing],
-        ['{"phone_iccid":5,"profile_id":5,"check_id":5}', missing],
-      ] as const) {
-        expect([path, body, await send('POST', path, { body, database: untouchable })]).toEqual([
-          path,
-          body,
-          expected,
-        ]);
-      }
-    }
-  });
-
-  test('each route refuses a check or profile it cannot act on', async () => {
-    const cases: [string, string, ReturnType<typeof answer>][] = [
-      [
-        '/api/control/balance-checks',
-        '{"phone_iccid":"iccid-1","profile_id":"nope"}',
-        answer(404, '{"success":false,"error":"Balance profile is not enabled"}'),
-      ],
-      [
-        '/api/control/balance-checks/continue',
-        '{"check_id":"nope"}',
-        answer(404, '{"success":false,"error":"Balance check not found"}'),
-      ],
-      [
-        '/api/control/balance-checks/stop',
-        '{"check_id":"nope"}',
-        answer(404, '{"success":false,"error":"Balance check not found"}'),
-      ],
-      [
-        '/api/control/balance-checks/stop',
-        '{"check_id":"check-w"}',
-        answer(409, '{"success":false,"error":"Balance check is not stoppable"}'),
-      ],
-    ];
-    for (const [path, body, expected] of cases) {
-      expect([path, body, await send('POST', path, { body })]).toEqual([path, body, expected]);
-    }
-  });
-
-  test('a D1 failure escapes to the Worker 500', async () => {
-    for (const path of ROUTES) {
-      const body =
-        '{"phone_iccid":"iccid-1","profile_id":"cn-mobile-sms-menu-v1","check_id":"check-s"}';
-      expect([path, await send('POST', path, { body, database: offline })]).toEqual([
-        path,
-        answer(500, INTERNAL),
-      ]);
-    }
   });
 });

@@ -6,9 +6,8 @@ use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
-use crate::identifiers::Iccid;
 use crate::modem_manager::ModemManager;
-use crate::types::{Message, MessageWithPath};
+use crate::types::MessageWithPath;
 use crate::wire::{ModemReport, ModemStatus};
 
 #[derive(Debug, Clone)]
@@ -54,9 +53,7 @@ impl WorkerPoolStats {
 #[derive(Debug)]
 pub struct ModemResult {
     pub modem_id: String,
-    pub iccid: Option<Iccid>,
     pub report: Option<ModemReport>,
-    pub messages: Vec<Message>,
     pub messages_with_paths: Vec<MessageWithPath>,
     pub error: Option<String>,
 }
@@ -65,9 +62,7 @@ impl ModemResult {
     fn failed(modem_id: String, error: String) -> Self {
         Self {
             modem_id,
-            iccid: None,
             report: None,
-            messages: vec![],
             messages_with_paths: vec![],
             error: Some(error),
         }
@@ -286,7 +281,7 @@ impl WorkerPool {
         let operator = modem_manager.get_operator(&modem_id).await.unwrap_or(None);
 
         // Messages are keyed by ICCID, so without one there is nothing to read.
-        let (phone_number, messages, messages_with_paths) = if let Some(ref iccid_val) = iccid {
+        let (phone_number, messages_with_paths) = if let Some(ref iccid_val) = iccid {
             let phone_number = modem_manager
                 .get_phone_number(&modem_id)
                 .await
@@ -306,11 +301,9 @@ impl WorkerPool {
                 }
             };
 
-            let msgs: Vec<Message> = msgs_with_paths.iter().map(|m| m.message.clone()).collect();
-
-            (phone_number, msgs, msgs_with_paths)
+            (phone_number, msgs_with_paths)
         } else {
-            (None, vec![], vec![])
+            (None, vec![])
         };
 
         let usb_path = modem_manager.get_usb_path(&modem_id).await;
@@ -322,7 +315,7 @@ impl WorkerPool {
             firmware_revision: firmware,
             hardware_revision: hardware,
             status: ModemStatus::Active,
-            detected_iccid: iccid.clone(),
+            detected_iccid: iccid,
             detected_phone_number: phone_number,
             detected_operator: operator,
             signal_percent: Some(signal_data.percent),
@@ -334,58 +327,10 @@ impl WorkerPool {
 
         Ok(ModemResult {
             modem_id,
-            iccid,
             report: Some(report),
-            messages,
             messages_with_paths,
             error: None,
         })
-    }
-
-    pub async fn get_stats(&self) -> WorkerPoolStats {
-        self.stats.read().await.clone()
-    }
-
-    pub fn is_using_native_dbus(&self) -> bool {
-        self.modem_manager.is_using_native_dbus()
-    }
-
-    pub fn update_config(&mut self, config: WorkerPoolConfig) {
-        let num_workers = config.num_workers;
-        let batch_size = config.batch_size;
-
-        self.config = config;
-        self.semaphore = Arc::new(Semaphore::new(num_workers));
-
-        info!(
-            "🔧 Worker pool config updated: {} workers, batch size {}",
-            num_workers, batch_size
-        );
-    }
-
-    pub async fn process_with_progress<F>(
-        &self,
-        modem_ids: Vec<String>,
-        mut progress_callback: F,
-    ) -> Result<Vec<ModemResult>>
-    where
-        F: FnMut(usize, usize) + Send,
-    {
-        let total = modem_ids.len();
-        let mut processed = 0;
-
-        let chunk_size = std::cmp::min(10, self.config.batch_size);
-        let mut all_results = Vec::new();
-
-        for chunk in modem_ids.chunks(chunk_size) {
-            let results = self.process_modems(chunk.to_vec()).await?;
-            all_results.extend(results);
-
-            processed += chunk.len();
-            progress_callback(processed, total);
-        }
-
-        Ok(all_results)
     }
 }
 

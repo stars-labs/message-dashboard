@@ -4,15 +4,15 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use orange_pi_daemon_rust::api_client::ApiClient;
-use orange_pi_daemon_rust::identifiers::Iccid;
-use orange_pi_daemon_rust::message_store::MessageStore;
-use orange_pi_daemon_rust::modem_manager::ModemManager;
-use orange_pi_daemon_rust::sms_sender::SmsSender;
-use orange_pi_daemon_rust::sync_manager::{device_delta, DeviceDelta, SyncManager};
-use orange_pi_daemon_rust::types::ApiKey;
-use orange_pi_daemon_rust::voice_bridge::{VoiceBridge, VoiceBridgeConfig};
-use orange_pi_daemon_rust::wire::{ModemReport, SyncMode};
+use crate::api_client::ApiClient;
+use crate::identifiers::Iccid;
+use crate::message_store::MessageStore;
+use crate::modem_manager::ModemManager;
+use crate::sms_sender::SmsSender;
+use crate::sync_manager::{device_delta, DeviceDelta, SyncManager};
+use crate::types::ApiKey;
+use crate::voice_bridge::{VoiceBridge, VoiceBridgeConfig};
+use crate::wire::{ModemReport, QueueHealthSnapshot, SyncMode};
 
 use crate::{SharedDevices, SharedHealth};
 
@@ -226,14 +226,13 @@ pub(crate) fn spawn_health_heartbeat(
         loop {
             let queue_stats = store.get_queue_stats().unwrap_or_default();
             let snapshot = {
-                let health = health.read().await;
-                let queue = health.queue_snapshot(
-                    queue_stats.pending,
-                    queue_stats.dead_letter,
-                    queue_stats.in_flight,
-                    queue_stats.oldest_unacknowledged_age_seconds,
-                );
-                health.snapshot(queue)
+                health.read().await.snapshot(QueueHealthSnapshot {
+                    pending: queue_stats.pending,
+                    in_flight: queue_stats.in_flight,
+                    dead_letter: queue_stats.dead_letter,
+                    oldest_unacknowledged_age_seconds: queue_stats
+                        .oldest_unacknowledged_age_seconds,
+                })
             };
             if let Err(e) = client.send_health_snapshot(&snapshot).await {
                 warn!(

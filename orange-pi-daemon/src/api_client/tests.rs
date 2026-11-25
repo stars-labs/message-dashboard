@@ -1,16 +1,13 @@
 // Integration tests for ApiClient - HTTP communication layer
-mod support;
-
-use orange_pi_daemon_rust::api_client::ApiClient;
-use orange_pi_daemon_rust::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
-use orange_pi_daemon_rust::message_store::{MessageStatus, StoredMessage};
-use orange_pi_daemon_rust::types::{Config, Message, Modem, Sim, SimReadStatus, SimStatus};
-use orange_pi_daemon_rust::wire::{
-    CallEndReason, Direction, HealthSnapshot, ModemReport, ModemStatus, QueueHealthSnapshot,
-    SyncMode,
+use super::ApiClient;
+use crate::identifiers::{Iccid, Imei, SmsAddress};
+use crate::message_store::StoredMessage;
+use crate::test_support::serve;
+use crate::types::{Config, Message};
+use crate::wire::{
+    CallEndReason, Direction, HealthSnapshot, ModemReport, QueueHealthSnapshot, SyncMode,
 };
 use serde_json::Value;
-use support::serve;
 
 const API_KEY: &str = "test_api_key_12345";
 
@@ -19,28 +16,18 @@ fn create_test_config() -> Config {
     Config {
         api_url: "http://localhost:8787".to_string(),
         api_key: API_KEY.into(),
-        check_interval_secs: 1,
     }
 }
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
 fn client_for(api_url: String) -> ApiClient {
     ApiClient::new(Config {
         api_url,
         api_key: API_KEY.into(),
-        check_interval_secs: 1,
     })
     .unwrap()
 }
 
 // Helper function to create test message
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
 fn create_test_message(iccid: &str, content: &str) -> Message {
     Message {
         phone_iccid: Iccid::try_from(iccid).unwrap(),
@@ -53,58 +40,10 @@ fn create_test_message(iccid: &str, content: &str) -> Message {
 
 fn create_stored_test_message(iccid: &str, content: &str) -> StoredMessage {
     StoredMessage {
-        id: 1,
         source_message_id: "018c1a55-73a0-7b9b-8c06-123456789abc".to_string(),
         message: create_test_message(iccid, content),
-        modem_id: "modem-1".to_string(),
-        sms_path: "ME:1".to_string(),
-        status: MessageStatus::Pending,
         attempts: 0,
         lease_token: "lease-1".to_string(),
-    }
-}
-
-// Helper function to create test modem
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
-fn create_test_modem(equipment_id: &str) -> Modem {
-    Modem {
-        equipment_id: Imei::try_from(equipment_id).unwrap(),
-        manufacturer: Some("Quectel".to_string()),
-        model: Some("EC20".to_string()),
-        firmware_revision: Some("EC20CEFAG".to_string()),
-        hardware_revision: None,
-        status: ModemStatus::Active,
-        signal: Some(75),
-        rssi: Some(-60),
-        rsrq: None,
-        rsrp: None,
-        snr: None,
-        modem_index: Some(0),
-        usb_port: Some(2),
-        connection_status: Some("connected".to_string()),
-        network_type: Some("LTE".to_string()),
-        access_tech: Some("LTE".to_string()),
-        sim_read_status: Some(SimReadStatus::Ok),
-    }
-}
-
-// Helper function to create test SIM
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
-fn create_test_sim(iccid: &str) -> Sim {
-    Sim {
-        iccid: Iccid::try_from(iccid).unwrap(),
-        phone_number: Some(SimNumber::try_from("+1234567890").unwrap()),
-        current_modem_id: Some(Imei::try_from("123456789012345").unwrap()),
-        operator_name: Some("TestOp".to_string()),
-        operator_id: None,
-        status: SimStatus::Active,
-        sim_index: None,
     }
 }
 
@@ -348,26 +287,6 @@ async fn upload_refuses_an_answer_it_cannot_read() {
 }
 
 // ============================================================================
-// Get Pending SMS Tests
-// ============================================================================
-
-#[tokio::test]
-async fn pending_sms_error_keeps_the_status() {
-    let (result, requests) = serve(
-        &[("503 Service Unavailable", String::new())],
-        |url| async move { client_for(url).get_pending_sms().await },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(requests[0].path, "/api/control/pending-sms");
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "API returned error: 503 Service Unavailable"
-    );
-}
-
-// ============================================================================
 // Call Event Tests
 // ============================================================================
 
@@ -425,12 +344,10 @@ fn test_config_structure() {
     let config = Config {
         api_url: "https://api.example.com".to_string(),
         api_key: "secret_key".into(),
-        check_interval_secs: 30,
     };
 
     assert_eq!(config.api_url, "https://api.example.com");
     assert_eq!(config.api_key.expose(), "secret_key");
-    assert_eq!(config.check_interval_secs, 30);
 }
 
 #[test]
@@ -440,23 +357,6 @@ fn test_message_structure() {
     assert_eq!(msg.phone_iccid.as_str(), "89860000000000000001");
     assert_eq!(msg.content, "Hello");
     assert_eq!(msg.direction, Direction::Received);
-}
-
-#[test]
-fn test_modem_structure() {
-    let modem = create_test_modem("123456789012345");
-
-    assert_eq!(modem.equipment_id.as_str(), "123456789012345");
-    assert_eq!(modem.status, ModemStatus::Active);
-    assert_eq!(modem.signal, Some(75));
-}
-
-#[test]
-fn test_sim_structure() {
-    let sim = create_test_sim("89860121750097854321");
-
-    assert_eq!(sim.iccid.as_str(), "89860121750097854321");
-    assert_eq!(sim.status, SimStatus::Active);
 }
 
 // ============================================================================
@@ -508,7 +408,6 @@ fn test_config_with_custom_url() {
     let config = Config {
         api_url: "https://custom.api.com:8443".to_string(),
         api_key: "key".into(),
-        check_interval_secs: 60,
     };
 
     let client = ApiClient::new(config).unwrap();
@@ -521,7 +420,6 @@ fn test_config_with_long_api_key() {
     let config = Config {
         api_url: "http://localhost".to_string(),
         api_key: long_key.into(),
-        check_interval_secs: 1,
     };
 
     let client = ApiClient::new(config).unwrap();

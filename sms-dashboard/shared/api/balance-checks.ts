@@ -246,52 +246,6 @@ export const QueuedBalanceCheck = v.union([
 
 export type QueuedBalanceCheck = v.InferOutput<typeof QueuedBalanceCheck>;
 
-// The ops scripts' /api/control/balance-checks routes: their messages are recorded in
-// shared/control-fixtures/ops/.
-const INVALID_JSON = 'Invalid JSON body';
-const CHECK_REQUIRED = 'phone_iccid and profile_id are required';
-const CHECK_ID_REQUIRED = 'check_id is required';
-
-export const BalanceCheckCreateBody = bodyObject(
-  { phone_iccid: v.string(CHECK_REQUIRED), profile_id: v.string(CHECK_REQUIRED) },
-  { phone_iccid: CHECK_REQUIRED, profile_id: CHECK_REQUIRED },
-  CHECK_REQUIRED,
-  INVALID_JSON,
-);
-
-export const BalanceCheckCreateResponse = v.object({
-  success: v.literal(true),
-  check: QueuedBalanceCheck,
-});
-
-export type BalanceCheckCreateResponse = v.InferOutput<typeof BalanceCheckCreateResponse>;
-
-export const BalanceCheckIdBody = bodyObject(
-  { check_id: v.string(CHECK_ID_REQUIRED) },
-  { check_id: CHECK_ID_REQUIRED },
-  CHECK_ID_REQUIRED,
-  INVALID_JSON,
-);
-
-export const BalanceCheckStepResponse = v.object({
-  success: v.literal(true),
-  check: v.object({
-    id: v.string(),
-    status: v.literal('queued'),
-    step_index: v.number(),
-    outbound_message_id: v.string(),
-  }),
-});
-
-export type BalanceCheckStepResponse = v.InferOutput<typeof BalanceCheckStepResponse>;
-
-export const BalanceCheckStopResponse = v.object({
-  success: v.literal(true),
-  check: v.object({ id: v.string(), status: v.picklist(['timed_out', 'unparsed']) }),
-});
-
-export type BalanceCheckStopResponse = v.InferOutput<typeof BalanceCheckStopResponse>;
-
 export const BalanceQueryResponse = v.object({
   success: v.literal(true),
   check: BalanceCheck,

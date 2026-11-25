@@ -34,17 +34,6 @@ const BillingStreamRow = v.object({
 
 export type BillingStream = v.InferOutput<typeof BillingStreamRow>;
 
-const BillableAccountRow = v.object({
-  id: v.string(),
-  display_name: v.string(),
-  account_ref_digest: v.string(),
-  account_ref_last4: v.string(),
-  notification_sim_iccid: v.string(),
-  status: v.picklist(['pending_verification', 'active', 'inactive']),
-  version: v.number(),
-  notification_sim_index: v.nullable(v.number()),
-});
-
 const ScanMessageRow = v.object({
   id: v.string(),
   phone_iccid: v.string(),
@@ -55,11 +44,6 @@ const ScanMessageRow = v.object({
 });
 
 export type ScanMessage = v.InferOutput<typeof ScanMessageRow>;
-
-const PriorExecutionRow = v.object({
-  billing_account_id: v.string(),
-  metadata_json: v.string(),
-});
 
 export function listBillingAccounts(db: D1<'all'>) {
   return queryAll(
@@ -255,98 +239,4 @@ export function listUnprocessedBillMessages(
       .bind(billPrefix, limit),
     ScanMessageRow,
   );
-}
-
-export function findBillableAccount(db: D1<'first'>, accountId: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-    SELECT
-      a.id, a.display_name, a.account_ref_digest, a.account_ref_last4,
-      a.notification_sim_iccid, a.status, a.version,
-      d.sim_index AS notification_sim_index
-    FROM carrier_billing_accounts a
-    INNER JOIN device_view d
-      ON d.iccid = a.notification_sim_iccid
-      AND d.country = 'SG'
-      AND d.carrier = 'Singtel'
-      AND d.service_type = 'postpaid'
-    WHERE a.id = ?
-      AND a.status = 'active'
-      AND a.country_code = 'SG'
-      AND a.carrier = 'Singtel'
-      AND EXISTS (
-        SELECT 1 FROM carrier_billing_account_sims s
-        WHERE s.billing_account_id = a.id
-          AND s.sim_iccid = a.notification_sim_iccid
-          AND s.removed_at IS NULL
-      )
-  `,
-      )
-      .bind(accountId),
-    BillableAccountRow,
-  );
-}
-
-export function listBackfillMessages(
-  db: D1<'all'>,
-  simIccid: string,
-  billPrefix: string,
-  fragmentSuffix: string,
-): Promise<ScanMessage[]> {
-  return queryAll(
-    db
-      .prepare(
-        `
-    SELECT id, phone_iccid, phone_number, content, timestamp, type
-    FROM messages
-    WHERE phone_iccid = ?
-      AND phone_number = 'Singtel'
-      AND type = 'received'
-      AND (instr(content, ?) = 1 OR trim(content) = ?)
-    ORDER BY timestamp, id
-  `,
-      )
-      .bind(simIccid, billPrefix, fragmentSuffix),
-    ScanMessageRow,
-  );
-}
-
-export function findPriorBackfillExecution(db: D1<'first'>, actor: string, idempotencyKey: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-      SELECT billing_account_id, metadata_json
-      FROM carrier_billing_account_events
-      WHERE actor_subject = ? AND idempotency_key = ?
-    `,
-      )
-      .bind(actor, idempotencyKey),
-    PriorExecutionRow,
-  );
-}
-
-export function insertBackfillExecutedEvent(
-  db: D1<'run'>,
-  event: {
-    id: string;
-    billingAccountId: string;
-    actor: string;
-    idempotencyKey: string;
-    metadata: string;
-  },
-): Promise<D1RunResult> {
-  return db
-    .prepare(
-      `
-      INSERT INTO carrier_billing_account_events (
-        id, billing_account_id, event_type, actor_subject,
-        idempotency_key, metadata_json
-      ) VALUES (?, ?, 'backfill_executed', ?, ?, ?)
-    `,
-    )
-    .bind(event.id, event.billingAccountId, event.actor, event.idempotencyKey, event.metadata)
-    .run();
 }

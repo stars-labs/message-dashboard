@@ -1,6 +1,7 @@
 use super::discovery::retain_present_cached_modems;
 use super::queries::signal_from_percent;
 use super::{CachedPort, ModemManager};
+use crate::identifiers::Iccid;
 use crate::types::SmsStorage;
 use std::collections::{BTreeMap, HashMap};
 
@@ -127,4 +128,126 @@ fn a_cached_port_that_moved_to_another_device_is_dropped() {
     retain_present_cached_modems(&mut cache, &groups);
 
     assert!(cache.is_empty());
+}
+
+// ============================================================================
+// List Modems Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_list_modems_signature() {
+    let manager = ModemManager::new();
+
+    // Will fail without real hardware, but tests signature
+    let result = manager.list_modems().await;
+
+    // Linux without modems returns an empty list; macOS has no sysfs tree.
+    match result {
+        Ok(modems) => assert!(modems.is_empty()),
+        Err(error) => assert!(error.to_string().contains("Failed to read /sys/class/tty")),
+    }
+}
+
+// ============================================================================
+// ICCID Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_get_iccid_signature() {
+    let manager = ModemManager::new();
+
+    // Test with invalid modem ID
+    let result = manager.get_iccid("invalid_modem").await;
+
+    // Should return Ok(None) or Err depending on implementation
+    assert!(result.is_ok() || result.is_err());
+}
+
+// ============================================================================
+// Signal Quality Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_get_signal_quality_signature() {
+    let manager = ModemManager::new();
+
+    // Test with invalid modem
+    let result = manager.get_signal_quality("invalid_modem").await;
+
+    // Should error or return default signal
+    assert!(result.is_ok() || result.is_err());
+}
+
+// ============================================================================
+// Device Details Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_get_device_details_signature() {
+    let manager = ModemManager::new();
+
+    // Test with invalid modem
+    let result = manager.get_device_details("invalid_modem").await;
+
+    // Should return Ok(None) or Err
+    // Ok(None) and Err are expected; Ok(Some(_)) is unlikely without real hardware
+    match result {
+        Ok(None | Some(_)) | Err(_) => {}
+    }
+}
+
+#[tokio::test]
+async fn test_get_phone_number_signature() {
+    let manager = ModemManager::new();
+
+    let result = manager.get_phone_number("invalid_modem").await;
+
+    match result {
+        Ok(None | Some(_)) | Err(_) => {}
+    }
+}
+
+#[tokio::test]
+async fn test_get_operator_signature() {
+    let manager = ModemManager::new();
+
+    let result = manager.get_operator("invalid_modem").await;
+
+    match result {
+        Ok(None | Some(_)) | Err(_) => {}
+    }
+}
+
+// ============================================================================
+// Message Operations Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_get_new_messages_with_paths_signature() {
+    use crate::message_store::MessageStore;
+
+    let manager = ModemManager::new();
+
+    let store = MessageStore::new(":memory:").unwrap();
+
+    let result = manager
+        .get_new_messages_with_paths(
+            "invalid_modem",
+            &Iccid::try_from("89860000000000000001").unwrap(),
+            &store,
+        )
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_delete_sms_signature() {
+    let manager = ModemManager::new();
+
+    // Test with invalid path
+    let result = manager.delete_sms("invalid_modem", "at:999").await;
+
+    // Should error without real hardware
+    assert!(result.is_err() || result.is_ok());
 }

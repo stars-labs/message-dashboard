@@ -12,7 +12,7 @@ import type { D1, D1Batch } from '../lib/d1.js';
 import type { AppEnv } from '../worker-context.js';
 import { unansweredOutcome } from './call-history.js';
 import { adapterEndpoint, missingConfig } from './call-media.js';
-import { validNumber } from './calls.js';
+import { PhoneNumber } from '../../shared/api/calls.js';
 
 const SESSION_TOKEN = 'session-token';
 const ICCID = '8965012306052373985';
@@ -290,14 +290,15 @@ const HistoryBody = v.object({
 
 describe('number validation', () => {
   test('accepts E.164 and rejects everything else', () => {
-    expect(validNumber('+6597817169')).toBe(true);
-    expect(validNumber('+8613520607015')).toBe(true);
-    expect(validNumber('6597817169')).toBe(false);
-    expect(validNumber('+0597817169')).toBe(false);
-    expect(validNumber('+65 9781 7169')).toBe(false);
-    expect(validNumber('10086')).toBe(false);
-    expect(validNumber('')).toBe(false);
-    expect(validNumber(null)).toBe(false);
+    const valid = (value: unknown) => v.is(PhoneNumber, value);
+    expect(valid('+6597817169')).toBe(true);
+    expect(valid('+8613520607015')).toBe(true);
+    expect(valid('6597817169')).toBe(false);
+    expect(valid('+0597817169')).toBe(false);
+    expect(valid('+65 9781 7169')).toBe(false);
+    expect(valid('10086')).toBe(false);
+    expect(valid('')).toBe(false);
+    expect(valid(null)).toBe(false);
   });
 });
 

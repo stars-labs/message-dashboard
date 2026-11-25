@@ -11,7 +11,6 @@ import {
   CHECK_STATUSES,
   SKILL_JOB_STATUSES,
   WEB_JOB_STATUSES,
-  type CheckStatus,
 } from '../../shared/balance-status.js';
 import {
   BalanceConversationMessage,
@@ -74,32 +73,6 @@ const StatusRow = v.object({
 });
 
 const IdRow = v.object({ id: v.string() });
-
-const ContinueRow = v.object({
-  id: v.string(),
-  status: CheckStatusSchema,
-  step_index: v.number(),
-  response_message_id: v.nullable(v.string()),
-  response_sender: v.nullable(v.string()),
-  raw_response: v.nullable(v.string()),
-  destination: v.nullable(v.string()),
-  conversation_steps: v.string(),
-  sim_number: v.nullable(v.string()),
-});
-
-const RetryRow = v.object({
-  id: v.string(),
-  status: CheckStatusSchema,
-  step_index: v.number(),
-  destination: v.nullable(v.string()),
-  conversation_steps: v.string(),
-  message_id: v.string(),
-  message_content: v.string(),
-  message_recipient: v.nullable(v.string()),
-  message_status: v.nullable(v.string()),
-});
-
-const StopRow = v.object({ id: v.string(), status: CheckStatusSchema });
 
 /** A batch statement that changed no row lost a race with another writer. */
 export function changed(result: D1RunResult | undefined): boolean {
@@ -340,129 +313,4 @@ export function listBalanceCheckWebEvents(db: D1<'all'>, checkId: string) {
       .bind(checkId),
     BalanceWebEvent,
   );
-}
-
-export function findBalanceCheckToContinue(db: D1<'first'>, checkId: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-      SELECT
-        c.id, c.status, c.step_index, c.response_message_id,
-        c.response_sender, c.raw_response,
-        p.destination, p.conversation_steps,
-        dv.number AS sim_number
-      FROM sim_balance_checks c
-      JOIN sim_balance_profiles p ON p.id = c.profile_id
-      LEFT JOIN device_view dv ON dv.iccid = c.sim_iccid
-      WHERE c.id = ?
-    `,
-      )
-      .bind(checkId),
-    ContinueRow,
-  );
-}
-
-export function findBalanceCheckToRetry(db: D1<'first'>, checkId: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-      SELECT
-        c.id, c.status, c.step_index,
-        p.destination, p.conversation_steps,
-        m.id AS message_id, m.content AS message_content,
-        m.recipient AS message_recipient, m.status AS message_status
-      FROM sim_balance_checks c
-      JOIN sim_balance_profiles p ON p.id = c.profile_id
-      JOIN messages m ON m.id = (
-        SELECT latest.id
-        FROM messages latest
-        WHERE latest.balance_check_id = c.id
-          AND latest.type = 'sent'
-          AND latest.purpose = 'balance_maintenance'
-        ORDER BY datetime(latest.timestamp) DESC, latest.rowid DESC
-        LIMIT 1
-      )
-      WHERE c.id = ?
-    `,
-      )
-      .bind(checkId),
-    RetryRow,
-  );
-}
-
-export async function requeueBalanceCheck(
-  db: D1Batch<'run'> & D1<'run'>,
-  check: { id: string; step_index: number; message_id: string },
-): Promise<boolean> {
-  const [message, requeued] = await db.batch([
-    db
-      .prepare(
-        `
-        UPDATE messages
-        SET status = 'sending', error_message = NULL,
-            processing_session_id = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'failed'
-          AND purpose = 'balance_maintenance'
-      `,
-      )
-      .bind(check.message_id),
-    db
-      .prepare(
-        `
-        UPDATE sim_balance_checks
-        SET status = 'queued', completed_at = NULL, deadline_at = NULL, error = NULL,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'failed' AND step_index = ?
-      `,
-      )
-      .bind(check.id, check.step_index),
-  ]);
-  return changed(message) && changed(requeued);
-}
-
-export function findBalanceCheckToStop(db: D1<'first'>, checkId: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-      SELECT id, status FROM sim_balance_checks WHERE id = ?
-    `,
-      )
-      .bind(checkId),
-    StopRow,
-  );
-}
-
-export async function stopBalanceCheck(
-  db: D1Batch<'run'> & D1<'run'>,
-  check: { id: string; status: CheckStatus },
-  finalStatus: 'timed_out' | 'unparsed',
-): Promise<boolean> {
-  const [stopped] = await db.batch([
-    db
-      .prepare(
-        `
-        UPDATE sim_balance_checks
-        SET status = ?, completed_at = CURRENT_TIMESTAMP,
-            error = CASE WHEN ? = 'timed_out' THEN 'Stopped by operator' ELSE error END,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = ?
-      `,
-      )
-      .bind(finalStatus, finalStatus, check.id, check.status),
-    db
-      .prepare(
-        `
-        UPDATE sim_balance_skill_jobs
-        SET status = 'stopped', lease_owner = NULL, lease_expires_at = NULL,
-            last_error = COALESCE(last_error, 'Stopped by operator'),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE check_id = ? AND status IN ('pending', 'leased')
-      `,
-      )
-      .bind(check.id),
-  ]);
-  return changed(stopped);
 }

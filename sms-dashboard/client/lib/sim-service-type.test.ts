@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getSimServiceTypeLabel, getSimServiceTypeSourceLabel } from './sim-service-type.js';
+import { getSimServiceTypeLabel } from './sim-service-type.js';
 
 describe('SIM service type presentation', () => {
   test('labels confirmed and unknown values', () => {
@@ -9,10 +9,5 @@ describe('SIM service type presentation', () => {
     expect(getSimServiceTypeLabel('n/a')).toBe('待确认');
     expect(getSimServiceTypeLabel('unknown')).toBe('待确认');
     expect(getSimServiceTypeLabel(null)).toBe('待确认');
-  });
-
-  test('labels controlled verification sources', () => {
-    expect(getSimServiceTypeSourceLabel('carrier_account')).toBe('运营商 App / 门户');
-    expect(getSimServiceTypeSourceLabel('invalid')).toBe('—');
   });
 });

@@ -54,10 +54,6 @@ impl Pacer {
         self.ready = ready;
     }
 
-    pub fn is_ready(&self) -> bool {
-        self.ready
-    }
-
     /// The frame to write on this tick, if the module may receive one and a
     /// whole frame is queued. A partial frame waits for the next tick instead
     /// of being padded, so the modem never plays silence in the middle of speech.
@@ -115,7 +111,6 @@ mod tests {
         let mut pacer = Pacer::default();
         pacer.push(&bytes(HOST_FRAME, 7));
         pacer.set_ready(false);
-        assert!(!pacer.is_ready());
         assert_eq!(pacer.next_frame(), None);
         assert_eq!(pacer.buffered(), HOST_FRAME);
         pacer.set_ready(true);
@@ -142,6 +137,8 @@ mod tests {
 
     #[test]
     fn starts_ready_because_the_module_never_announces_it() {
-        assert!(Pacer::default().is_ready());
+        let mut pacer = Pacer::default();
+        pacer.push(&bytes(HOST_FRAME, 1));
+        assert_eq!(pacer.next_frame(), Some(bytes(HOST_FRAME, 1)));
     }
 }

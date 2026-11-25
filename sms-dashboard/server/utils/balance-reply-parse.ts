@@ -4,7 +4,6 @@ import type { BalanceMetric } from '../../shared/api/balance-checks.js';
 import { senderMatches } from './spam-filter.js';
 
 const ConversationStep = v.object({ command: v.string(), response_contains: v.string() });
-const AttemptedStep = v.object({ command: v.string() });
 
 /**
  * The cash balance patterns of each SMS parser, in order of preference.
@@ -41,14 +40,6 @@ export function matchingNextStep(
 ): { command: string } | null {
   const step = stepAt(check.conversation_steps, check.step_index, ConversationStep);
   return step && content.includes(step.response_contains) ? step : null;
-}
-
-export function attemptedStep(check: {
-  conversation_steps: string;
-  step_index: number;
-}): { command: string } | null {
-  const stepIndex = check.step_index - 1;
-  return stepIndex < 0 ? null : stepAt(check.conversation_steps, stepIndex, AttemptedStep);
 }
 
 export function parseBalanceMetrics(parserVersion: string, content: string): BalanceMetric[] {

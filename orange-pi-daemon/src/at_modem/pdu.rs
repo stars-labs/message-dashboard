@@ -121,7 +121,6 @@ impl AtModemManager {
         Ok(AtSms {
             storage: None,
             index,
-            part_indices: vec![index],
             sender: SmsAddress::from(sender),
             timestamp,
             text,

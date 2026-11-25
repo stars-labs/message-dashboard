@@ -3,12 +3,9 @@ import type * as v from 'valibot';
 import type { HistoryRequestBody, KeywordHistoryPage } from '../../shared/api/history.js';
 import {
   type KeywordWithUsage,
-  type BatchTagsBody,
-  type BatchTagsResponse,
   type CreateKeywordBody,
   type KeywordResponse,
   type KeywordsResponse,
-  type MessageTagsResponse,
   type UpdateKeywordBody,
 } from '../../shared/api/keywords.js';
 import type { SuccessResponse } from '../../shared/api/success.js';
@@ -23,15 +20,11 @@ import {
   getKeyword,
   insertKeyword,
   isKeywordReferenced,
-  listActiveTagsForMessages,
   listKeywordsWithUsage,
-  listMessageTags,
   updateKeyword,
 } from '../db/keywords.js';
 import type { D1, D1Batch } from '../lib/d1.js';
 import { processKeywordHistoryPage } from '../utils/keyword-history.js';
-
-const MAX_BATCH_MESSAGES = 100;
 
 const IMMUTABLE_MESSAGE =
   'Keyword and matching options are immutable; create a new keyword instead';
@@ -157,38 +150,6 @@ export const keywordsHandler = {
     }
   },
 
-  async batchTags(
-    { env }: KeywordsCall,
-    { messageIds }: v.InferOutput<typeof BatchTagsBody>,
-  ): Promise<BatchTagsResponse> {
-    if (messageIds.length === 0) return { success: true, data: {} };
-
-    try {
-      const limitedIds = messageIds.slice(0, MAX_BATCH_MESSAGES);
-
-      const rows = await listActiveTagsForMessages(env.DB, limitedIds);
-
-      const tagsByMessage = new Map<string, BatchTagsResponse['data'][string]>();
-      for (const row of rows) {
-        const tags = tagsByMessage.get(row.message_id) ?? [];
-        tags.push({
-          id: row.id,
-          keyword: row.keyword,
-          tag: row.tag,
-          color: row.color,
-          priority: row.priority,
-          position: row.position,
-          length: row.length,
-        });
-        tagsByMessage.set(row.message_id, tags);
-      }
-
-      return { success: true, data: Object.fromEntries(tagsByMessage) };
-    } catch (error) {
-      fail(error, 'Error batch fetching message tags', 'Failed to fetch message tags');
-    }
-  },
-
   // One bounded page per operator action.
   async history(
     { env }: KeywordsCall,
@@ -216,15 +177,6 @@ export const keywordsHandler = {
       );
     } catch (error) {
       fail(error, 'Error processing keyword history', 'Failed to process keyword history');
-    }
-  },
-
-  async messageTags({ env }: KeywordsCall, id: string): Promise<MessageTagsResponse> {
-    try {
-      const tags = await listMessageTags(env.DB, id);
-      return { tags };
-    } catch (error) {
-      fail(error, 'Error fetching message tags', 'Failed to fetch message tags');
     }
   },
 };

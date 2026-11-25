@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
-use orange_pi_daemon_rust::identifiers::Iccid;
-use orange_pi_daemon_rust::message_store::MessageStore;
-use orange_pi_daemon_rust::modem_manager::ModemManager;
-use orange_pi_daemon_rust::types::ApiKey;
-use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
+use crate::identifiers::Iccid;
+use crate::message_store::MessageStore;
+use crate::modem_manager::ModemManager;
+use crate::types::ApiKey;
+use crate::worker_pool::{WorkerPool, WorkerPoolConfig};
 
 #[expect(clippy::print_stdout, reason = "--help writes its text to stdout")]
 pub(crate) fn print_help(program: &str) {
@@ -20,7 +20,6 @@ pub(crate) fn print_help(program: &str) {
     println!("    {program} [OPTIONS] [COMMAND]");
     println!();
     println!("COMMANDS:");
-    println!("    benchmark    Run performance benchmark");
     println!("    cleanup      Run database cleanup and exit");
     println!();
     println!("OPTIONS:");
@@ -33,7 +32,6 @@ pub(crate) fn print_help(program: &str) {
     println!("    MESSAGE_DB_PATH     SQLite database path (overridden by --db-path)");
     println!("    SMS_API_URL         API endpoint URL (required)");
     println!("    SMS_API_KEY         API authentication key (required)");
-    println!("    USE_DBUS            Set to '1' to use ModemManager D-Bus (default: AT commands)");
     println!("    RUST_LOG            Log level (e.g., orange_pi_daemon_rust=debug)");
 }
 

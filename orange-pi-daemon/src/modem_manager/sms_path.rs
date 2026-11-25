@@ -44,20 +44,4 @@ impl ModemManager {
             })
             .collect()
     }
-
-    pub(super) fn normalize_timestamp(raw: &str) -> String {
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
-            return dt
-                .with_timezone(&chrono::Utc)
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string();
-        }
-        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S") {
-            let dt = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive, chrono::Utc);
-            return dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-        }
-        chrono::Utc::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-            .to_string()
-    }
 }

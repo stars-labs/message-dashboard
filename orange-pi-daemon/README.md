@@ -11,7 +11,7 @@ Rust daemon for managing 100+ USB modems on Orange Pi hardware. Reads SMS via di
 
 ## Key Design Decisions
 
-- **AT over D-Bus**: Direct serial AT commands bypass ModemManager overhead. D-Bus is opt-in (`USE_DBUS=1`).
+- **AT commands, no ModemManager**: the daemon owns each modem's serial ports and talks AT directly; ModemManager stays off so it cannot open them.
 - **Local SQLite queue**: Messages survive network outages. WAL mode for concurrent read/write. Deduplication via `(phone_iccid, timestamp, content)` unique constraint.
 - **Prompt hardware deletion**: a message is deleted from the modem or SIM as soon as it is stored locally, because a full SIM makes the carrier drop new SMS.
 - **Signal caching**: a TTL cache avoids redundant modem queries during polling cycles.

@@ -1,6 +1,6 @@
-use super::{BackendMode, CachedPort, ModemManager};
+use super::{CachedPort, ModemManager};
 use crate::at_modem::AtModemManager;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use tracing::{debug, info, warn};
 
@@ -24,32 +24,21 @@ pub(super) fn retain_present_cached_modems(
 
 impl ModemManager {
     pub async fn list_modems(&self) -> Result<Vec<String>> {
-        match self.mode {
-            BackendMode::AtCommand => {
-                let ports = self.at_modem.discover_modems().await?;
-                let mut cache = self.port_cache.write().await;
-                cache.clear();
+        let ports = self.at_modem.discover_modems().await?;
+        let mut cache = self.port_cache.write().await;
+        cache.clear();
 
-                let modem_ids: Vec<String> = ports
-                    .iter()
-                    .map(|port| {
-                        let id = AtModemManager::port_to_modem_id(port);
-                        cache.insert(id.clone(), CachedPort::discovered(port.clone()));
-                        id
-                    })
-                    .collect();
+        let modem_ids: Vec<String> = ports
+            .iter()
+            .map(|port| {
+                let id = AtModemManager::port_to_modem_id(port);
+                cache.insert(id.clone(), CachedPort::discovered(port.clone()));
+                id
+            })
+            .collect();
 
-                debug!("Listed {} modems via AT commands", modem_ids.len());
-                Ok(modem_ids)
-            }
-            BackendMode::DBus => {
-                let client = self
-                    .dbus_client
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
-                client.list_modems().await
-            }
-        }
+        debug!("Listed {} modems via AT commands", modem_ids.len());
+        Ok(modem_ids)
     }
 
     /// Bring modems that are not already active online, merging them into the port
@@ -59,13 +48,7 @@ impl ModemManager {
     /// Modems already in `known` or the cache are skipped: re-probing a busy modem could
     /// collide with the reader loop on the serial port and trigger a needless reset.
     /// Serial probes run without the cache lock so the reader's `get_port` never blocks.
-    ///
-    /// AT-command mode only; in D-Bus mode `ModemManager` handles its own hotplug.
     pub async fn rediscover_and_merge(&self, known: &HashSet<String>) -> Result<Vec<String>> {
-        if self.mode != BackendMode::AtCommand {
-            return Ok(Vec::new());
-        }
-
         let active_ports: HashSet<String> = {
             let cache = self.port_cache.read().await;
             cache.values().map(|cached| cached.port.clone()).collect()
@@ -139,10 +122,6 @@ impl ModemManager {
     /// newly enumerated devices. Existing devices are never re-probed here, so
     /// this cannot collide with the reader's normal AT traffic.
     pub async fn reconcile_modems(&self) -> Result<Vec<String>> {
-        if self.mode == BackendMode::DBus {
-            return self.list_modems().await;
-        }
-
         let groups = AtModemManager::ttyusb_by_usb_device()?;
         {
             let mut cache = self.port_cache.write().await;

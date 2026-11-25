@@ -1,23 +1,11 @@
-use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
-use crate::wire::{Direction, ModemStatus};
+use crate::identifiers::{Iccid, SmsAddress};
+use crate::wire::Direction;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// A submitted SMS; submission failures are returned through `Result::Err`.
-///
-/// ```
-/// use orange_pi_daemon_rust::types::SmsSubmission;
-/// let submission: Result<SmsSubmission, &str> = Ok(SmsSubmission::Confirmed);
-/// assert_eq!(submission, Ok(SmsSubmission::Confirmed));
-/// ```
-///
-/// A failed send cannot be constructed as a successful submission:
-///
-/// ```compile_fail,E0599
-/// use orange_pi_daemon_rust::types::SmsSubmission;
-/// let submission: Result<SmsSubmission, &str> = Ok(SmsSubmission::Failed);
-/// ```
+/// A submitted SMS; submission failures are returned through `Result::Err`, so
+/// there is no failed variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmsSubmission {
     Confirmed,
@@ -81,92 +69,10 @@ impl FromSql for SmsStorage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SimStatus {
-    Active,
-    Inactive,
-    Removed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PhoneStatus {
-    Active,
-    Offline,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SimReadStatus {
-    Ok,
-    Failed,
-}
-
-/// `ModemManager`'s `MMModemState`, as reported over D-Bus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModemState {
-    Failed,
-    Locked,
-    Disabled,
-    Disabling,
-    Enabling,
-    Enabled,
-    Searching,
-    Registered,
-    Disconnecting,
-    Connecting,
-    Connected,
-    Unknown,
-}
-
-impl ModemState {
-    pub fn from_code(code: i32) -> Self {
-        match code {
-            0 => Self::Failed,
-            2 => Self::Locked,
-            3 => Self::Disabled,
-            4 => Self::Disabling,
-            5 => Self::Enabling,
-            6 => Self::Enabled,
-            7 => Self::Searching,
-            8 => Self::Registered,
-            9 => Self::Disconnecting,
-            10 => Self::Connecting,
-            11 => Self::Connected,
-            _ => Self::Unknown,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Failed => "failed",
-            Self::Locked => "locked",
-            Self::Disabled => "disabled",
-            Self::Disabling => "disabling",
-            Self::Enabling => "enabling",
-            Self::Enabled => "enabled",
-            Self::Searching => "searching",
-            Self::Registered => "registered",
-            Self::Disconnecting => "disconnecting",
-            Self::Connecting => "connecting",
-            Self::Connected => "connected",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
-impl fmt::Display for ModemState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Config {
     pub api_url: String,
     pub api_key: ApiKey,
-    pub check_interval_secs: u64,
 }
 
 /// The daemon's credential for the Worker; `Debug` never shows it.
@@ -213,83 +119,6 @@ pub struct MessageWithPath {
     pub sms_path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Modem {
-    pub equipment_id: Imei,
-    pub manufacturer: Option<String>,
-    pub model: Option<String>,
-    pub firmware_revision: Option<String>,
-    pub hardware_revision: Option<String>,
-    pub status: ModemStatus,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signal: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rssi: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rsrq: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rsrp: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snr: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub modem_index: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usb_port: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connection_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub network_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub access_tech: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sim_read_status: Option<SimReadStatus>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Sim {
-    pub iccid: Iccid,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub phone_number: Option<SimNumber>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_modem_id: Option<Imei>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub operator_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub operator_id: Option<String>,
-    pub status: SimStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sim_index: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Phone {
-    pub iccid: Iccid,
-    pub number: Option<SimNumber>,
-    pub signal: Option<i32>,
-    pub operator_name: Option<String>,
-    pub status: PhoneStatus,
-    pub manufacturer: Option<String>,
-    pub model: Option<String>,
-    pub firmware_revision: Option<String>,
-    pub hardware_revision: Option<String>,
-    pub imei: Option<Imei>,
-    pub country: Option<String>,
-    pub flag: Option<String>,
-    pub carrier: Option<String>,
-    pub rssi: Option<i32>,
-    pub rsrq: Option<i32>,
-    pub rsrp: Option<i32>,
-    pub snr: Option<i32>,
-    pub operator_id: Option<String>,
-    pub access_tech: Option<String>,
-    pub modem_index: Option<i32>,
-    pub sim_index: Option<i32>,
-    pub device_path: Option<String>,
-    pub usb_port: Option<String>,
-    pub sim_read_status: Option<SimReadStatus>,
-}
-
 #[derive(Debug, Clone)]
 pub struct SignalData {
     pub percent: i32,
@@ -308,6 +137,7 @@ impl Default for SignalData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::ModemStatus;
     use rusqlite::Connection;
     use serde_json::json;
 
@@ -383,56 +213,6 @@ mod tests {
                 status
             );
         }
-        for (status, text) in [
-            (SimStatus::Active, "active"),
-            (SimStatus::Inactive, "inactive"),
-            (SimStatus::Removed, "removed"),
-        ] {
-            assert_eq!(wire(&status), json!(text));
-            assert_eq!(
-                serde_json::from_value::<SimStatus>(json!(text)).unwrap(),
-                status
-            );
-        }
-        for (status, text) in [
-            (PhoneStatus::Active, "active"),
-            (PhoneStatus::Offline, "offline"),
-        ] {
-            assert_eq!(wire(&status), json!(text));
-            assert_eq!(
-                serde_json::from_value::<PhoneStatus>(json!(text)).unwrap(),
-                status
-            );
-        }
-        for (status, text) in [(SimReadStatus::Ok, "ok"), (SimReadStatus::Failed, "failed")] {
-            assert_eq!(wire(&status), json!(text));
-            assert_eq!(
-                serde_json::from_value::<SimReadStatus>(json!(text)).unwrap(),
-                status
-            );
-        }
         assert!(serde_json::from_value::<ModemStatus>(json!("error")).is_err());
-    }
-
-    #[test]
-    fn modem_state_codes_keep_their_names() {
-        for (code, text) in [
-            (0, "failed"),
-            (2, "locked"),
-            (3, "disabled"),
-            (4, "disabling"),
-            (5, "enabling"),
-            (6, "enabled"),
-            (7, "searching"),
-            (8, "registered"),
-            (9, "disconnecting"),
-            (10, "connecting"),
-            (11, "connected"),
-            (1, "unknown"),
-            (12, "unknown"),
-            (-1, "unknown"),
-        ] {
-            assert_eq!(ModemState::from_code(code).to_string(), text);
-        }
     }
 }

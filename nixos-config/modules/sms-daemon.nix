@@ -13,18 +13,12 @@ let
 in
 {
   options.services.sms-daemon = {
-    enable = mkEnableOption "SMS Dashboard Daemon for collecting and uploading SMS messages from USB modems (uses direct AT commands with D-Bus fallback)";
+    enable = mkEnableOption "SMS Dashboard Daemon for collecting and uploading SMS messages from USB modems (uses direct AT commands)";
 
     apiUrl = mkOption {
       type = types.str;
       default = "https://sexy.itoken.world";
       description = "API URL for the SMS dashboard server";
-    };
-
-    deviceId = mkOption {
-      type = types.str;
-      default = "orange-pi-001";
-      description = "Device ID for this daemon instance";
     };
 
     apiKey = mkOption {
@@ -40,47 +34,10 @@ in
       description = "Path to file containing API key (recommended)";
     };
 
-    phoneUpdateIntervalSeconds = mkOption {
-      type = types.int;
-      default = 30;
-      description = ''
-        How often to update phone status (in seconds).
-        Default: 30 seconds
-      '';
-    };
-
-    messageCheckIntervalMs = mkOption {
-      type = types.int;
-      default = 100;
-      description = ''
-        How often to check for new messages (in milliseconds).
-        Default: 100ms (10 Hz)
-      '';
-    };
-
-    signalCheckIntervalSeconds = mkOption {
-      type = types.int;
-      default = 60;
-      description = ''
-        How often to check signal quality (in seconds).
-        Default: 60 seconds (1 minute)
-      '';
-    };
-
     debugBuild = mkOption {
       type = types.bool;
       default = false;
       description = "Use debug build with verbose logging (otherwise uses release build with info level logging)";
-    };
-
-    useDBus = mkOption {
-      type = types.bool;
-      default = false;
-      description = ''
-        Use D-Bus/ModemManager backend instead of direct AT commands.
-        When false (default): Uses direct AT commands, ModemManager is disabled.
-        When true: Uses D-Bus/ModemManager (legacy mode).
-      '';
     };
 
     voiceBridgeDomain = mkOption {
@@ -165,14 +122,9 @@ in
     ];
 
     systemd.services.sms-daemon = {
-      description =
-        if cfg.useDBus then
-          "SMS Dashboard Daemon (D-Bus/ModemManager mode)"
-        else
-          "SMS Dashboard Daemon (Direct AT commands mode)";
-      after = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else [ ]);
-      wants = [ "network-online.target" ] ++ (if cfg.useDBus then [ "ModemManager.service" ] else [ ]);
-      requires = if cfg.useDBus then [ "ModemManager.service" ] else [ ];
+      description = "SMS Dashboard Daemon";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
 
       # systemd reads start limits from [Unit]; NixOS renders these top-level options there.
@@ -181,13 +133,6 @@ in
 
       environment = {
         SMS_API_URL = cfg.apiUrl;
-        CHECK_INTERVAL_SECS = toString cfg.phoneUpdateIntervalSeconds;
-        SMS_CHECK_INTERVAL = toString cfg.phoneUpdateIntervalSeconds;
-        SMS_MESSAGE_CHECK_INTERVAL = toString cfg.messageCheckIntervalMs;
-        SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
-        SMS_DEVICE_ID = cfg.deviceId;
-
-        USE_DBUS = if cfg.useDBus then "1" else "0";
 
         RUST_LOG = if cfg.debugBuild then "orange_pi_daemon_rust=debug" else "orange_pi_daemon_rust=info";
 
@@ -348,7 +293,6 @@ in
       ];
 
       path = with pkgs; [
-        modemmanager
         coreutils
         findutils
         gnugrep
@@ -357,50 +301,37 @@ in
         util-linux
       ];
 
-      preStart =
-        if cfg.useDBus then
-          ''
-            # D-Bus mode: verify ModemManager is running
-            if ! systemctl is-active ModemManager.service >/dev/null 2>&1; then
-              echo "Error: ModemManager is not running (required for D-Bus mode)" >&2
-              exit 1
-            fi
-            modem_count=$(mmcli -L 2>/dev/null | grep -c "Modem/" || echo "0")
-            echo "ModemManager mode: $modem_count modem(s) detected"
-            logger -t sms-daemon "Starting SMS daemon (D-Bus mode: $modem_count modems)"
-          ''
-        else
-          ''
-            # AT command mode: wait for USB enumeration to settle before starting.
-            #
-            # The daemon builds its modem cache ONCE at startup. On boot (or after a
-            # USB topology change) the kernel keeps enumerating ttyUSB ports for tens
-            # of seconds; starting before that finishes freezes the cache at a low
-            # count (observed: 10 instead of 60). We poll until the port count stays
-            # unchanged for several consecutive checks, with a hard timeout fallback.
-            poll_interval=5      # seconds between polls
-            settle_target=4      # consecutive stable polls required (~20s steady)
-            max_wait=180         # hard cap so boot never hangs
-            last=-1
+      preStart = ''
+        # Wait for USB enumeration to settle before starting.
+        #
+        # The daemon builds its modem cache ONCE at startup. On boot (or after a
+        # USB topology change) the kernel keeps enumerating ttyUSB ports for tens
+        # of seconds; starting before that finishes freezes the cache at a low
+        # count (observed: 10 instead of 60). We poll until the port count stays
+        # unchanged for several consecutive checks, with a hard timeout fallback.
+        poll_interval=5      # seconds between polls
+        settle_target=4      # consecutive stable polls required (~20s steady)
+        max_wait=180         # hard cap so boot never hangs
+        last=-1
+        stable=0
+        elapsed=0
+        while [ "$elapsed" -lt "$max_wait" ]; do
+          count=$(ls /dev/ttyUSB* 2>/dev/null | wc -l)
+          if [ "$count" -gt 0 ] && [ "$count" -eq "$last" ]; then
+            stable=$((stable + 1))
+          else
             stable=0
-            elapsed=0
-            while [ "$elapsed" -lt "$max_wait" ]; do
-              count=$(ls /dev/ttyUSB* 2>/dev/null | wc -l)
-              if [ "$count" -gt 0 ] && [ "$count" -eq "$last" ]; then
-                stable=$((stable + 1))
-              else
-                stable=0
-              fi
-              last=$count
-              [ "$stable" -ge "$settle_target" ] && break
-              sleep "$poll_interval"
-              elapsed=$((elapsed + poll_interval))
-            done
-            usb_ports=$last
-            at_ports=$((usb_ports / 4))  # Each modem exposes ~4 ports
-            echo "AT command mode: USB settled at $usb_ports ports ($at_ports modems) after ''${elapsed}s"
-            logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems, USB settled in ''${elapsed}s)"
-          '';
+          fi
+          last=$count
+          [ "$stable" -ge "$settle_target" ] && break
+          sleep "$poll_interval"
+          elapsed=$((elapsed + poll_interval))
+        done
+        usb_ports=$last
+        at_ports=$((usb_ports / 4))  # Each modem exposes ~4 ports
+        echo "AT command mode: USB settled at $usb_ports ports ($at_ports modems) after ''${elapsed}s"
+        logger -t sms-daemon "Starting SMS daemon (AT mode: $at_ports modems, USB settled in ''${elapsed}s)"
+      '';
 
       postStop = ''
         # Log service stop
@@ -411,11 +342,13 @@ in
       '';
     };
 
-    networking.modemmanager.enable = cfg.useDBus;
+    # NetworkManager turns ModemManager on by default, and it would open the
+    # modems' AT ports that the daemon owns.
+    networking.modemmanager.enable = false;
 
     # Lets the dialout daemon issue USBDEVFS_RESET on Quectel (vendor 2c7c) device
     # nodes to recover wedged modems, without opening other USB devices.
-    services.udev.extraRules = mkIf (!cfg.useDBus) ''
+    services.udev.extraRules = ''
       SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2c7c", GROUP="dialout", MODE="0664"
     '';
 

@@ -29,7 +29,6 @@ import {
 
 type TestDb = D1 & D1Batch<'run'>;
 
-const API_KEY = 'secret';
 const USER = 'auth0|dashboard-user';
 const MOBILE_PROFILE = 'cn-mobile-sms-menu-v1';
 const UNICOM_BROWSER_PROFILE = 'cn-unicom-browser-random-password-v1';
@@ -48,7 +47,6 @@ const AI_SKILL = JSON.stringify({
   allowed_currencies: ['CNY'],
 });
 
-const ErrorBody = v.object({ success: v.optional(v.literal(false)), error: v.string() });
 const Row = v.record(v.string(), v.unknown());
 const CountRow = v.object({ count: v.number() });
 
@@ -244,10 +242,6 @@ async function read<T>(response: { json(): Promise<unknown> }, schema: Schema<T>
   return v.parse(schema, await response.json());
 }
 
-async function errorOf(response: { json(): Promise<unknown> }): Promise<string> {
-  return (await read(response, ErrorBody)).error;
-}
-
 const Problem = v.looseObject({
   type: v.string(),
   title: v.string(),
@@ -304,32 +298,6 @@ async function call(
     },
     ...(text === undefined ? {} : { body: text }),
     bindings: { DB: database, SESSIONS },
-  });
-  return response;
-}
-
-interface ControlOptions {
-  rawBody?: string;
-  apiKey?: string;
-  database?: TestDb;
-}
-
-const CONTROL_PATHS = {
-  create: '/api/control/balance-checks',
-  continue: '/api/control/balance-checks/continue',
-  retry: '/api/control/balance-checks/retry',
-  stop: '/api/control/balance-checks/stop',
-};
-
-async function control(
-  action: keyof typeof CONTROL_PATHS,
-  body: unknown,
-  { rawBody, apiKey = API_KEY, database = db }: ControlOptions = {},
-): Promise<Response> {
-  const { response } = await callWorker('POST', CONTROL_PATHS[action], {
-    headers: { 'X-API-Key': apiKey },
-    body: rawBody ?? JSON.stringify(body),
-    bindings: { DB: database, API_KEY },
   });
   return response;
 }
@@ -610,13 +578,15 @@ const PreviewBody = v.object({
 });
 
 describe('/api/balance-checks/query-preview', () => {
-  test('plans every SIM on a GET', async () => {
+  test('plans every SIM in the scope', async () => {
     enableDirectMobileProfile();
     insertSim({ iccid: 'sim-1', index: 1 });
     insertSim({ iccid: 'sim-2', index: 2, online: false });
     insertSim({ iccid: 'sim-3', index: 3, carrier: 'Singtel', country: 'SG' });
 
-    const response = await call('GET', '/api/balance-checks/query-preview');
+    const response = await call('POST', '/api/balance-checks/query-preview', {
+      body: { phone_iccids: ['sim-1', 'sim-2', 'sim-3'] },
+    });
     const body = await read(response, PreviewBody);
 
     expect(response.status).toBe(200);
@@ -683,7 +653,8 @@ describe('/api/balance-checks/query-preview', () => {
   });
 
   test('requires a signed-in user', async () => {
-    const response = await call('GET', '/api/balance-checks/query-preview', {
+    const response = await call('POST', '/api/balance-checks/query-preview', {
+      body: { phone_iccids: ['sim-1'] },
       token: null,
       database: untouchable,
     });
@@ -773,20 +744,6 @@ describe('GET /api/balance-checks/query-preflight', () => {
     expect(await detailOf(unknown)).toBe('SIM not found');
   });
 });
-
-const QueuedCheck = v.object({
-  id: v.string(),
-  sim_iccid: v.string(),
-  profile_id: v.string(),
-  status: v.literal('queued'),
-  requested_at: v.string(),
-  method: v.string(),
-  profile_carrier: v.string(),
-  outbound_message_id: v.optional(v.string()),
-  web_job_id: v.optional(v.string()),
-});
-
-const QueryBody = v.object({ success: v.literal(true), check: QueuedCheck });
 
 const ListedQueryBody = v.object({ success: v.literal(true), check: BalanceCheck });
 
@@ -1095,134 +1052,6 @@ describe('POST /api/balance-checks/query-batch', () => {
     expect(
       every(v.object({ sim_iccid: v.string() }), `SELECT sim_iccid FROM sim_balance_checks`),
     ).toEqual([{ sim_iccid: 'sim-1' }]);
-  });
-});
-
-describe('POST /api/control/balance-checks', () => {
-  test('rejects an invalid API key before reading the body', async () => {
-    const response = await control('create', null, {
-      rawBody: '{',
-      apiKey: 'wrong',
-      database: untouchable,
-    });
-    expect(response.status).toBe(401);
-    expect(await errorOf(response)).toBe('Unauthorized');
-  });
-
-  test('requires a SIM and a profile', async () => {
-    for (const body of [{}, { phone_iccid: ICCID }, { phone_iccid: ICCID, profile_id: 1 }, []]) {
-      const response = await control('create', body, { database: untouchable });
-      expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('phone_iccid and profile_id are required');
-    }
-    const notJson = await control('create', null, { rawBody: '{', database: untouchable });
-    expect(await errorOf(notJson)).toBe('Invalid JSON body');
-  });
-
-  test('queues only the allowlisted destination and command', async () => {
-    insertSim({ iccid: ICCID, index: 1, number: NUMBER });
-
-    const response = await control('create', {
-      phone_iccid: ICCID,
-      profile_id: MOBILE_PROFILE,
-      destination: '+6599999999',
-      command: 'SUBSCRIBE',
-    });
-    const { check } = await read(response, QueryBody);
-
-    expect(response.status).toBe(202);
-    expect(
-      one(CheckRow, `SELECT * FROM sim_balance_checks WHERE id = ?`, check.id).requested_by_subject,
-    ).toBeNull();
-    expect(
-      one(
-        OutboundRow,
-        `SELECT ${OUTBOUND_COLUMNS} FROM messages WHERE id = ?`,
-        check.outbound_message_id ?? '',
-      ),
-    ).toMatchObject({ phone_number: NUMBER, content: '10086', recipient: '10086' });
-  });
-
-  test('creates a browser job without queueing an outbound SMS', async () => {
-    insertSim({ iccid: ICCID, index: 1, carrier: '联通' });
-
-    const response = await control('create', {
-      phone_iccid: ICCID,
-      profile_id: UNICOM_BROWSER_PROFILE,
-    });
-    const { check } = await read(response, QueryBody);
-
-    expect(response.status).toBe(202);
-    expect(
-      count(`SELECT COUNT(*) AS count FROM sim_balance_web_jobs WHERE check_id = ?`, check.id),
-    ).toBe(1);
-    expect(count(`SELECT COUNT(*) AS count FROM messages`)).toBe(0);
-  });
-
-  test('rejects an offline SIM, an unknown SIM and a SIM from a different carrier', async () => {
-    insertSim({ iccid: 'offline', index: 1, online: false });
-    insertSim({ iccid: 'unicom', index: 2, carrier: '联通' });
-
-    for (const [iccid, error] of [
-      ['offline', 'SIM is not active'],
-      ['nope', 'SIM is not active'],
-      ['unicom', 'SIM does not match the carrier profile'],
-    ] as const) {
-      const response = await control('create', { phone_iccid: iccid, profile_id: MOBILE_PROFILE });
-      expect(response.status).toBe(409);
-      expect(await errorOf(response)).toBe(error);
-    }
-    expect(count(`SELECT COUNT(*) AS count FROM sim_balance_checks`)).toBe(0);
-  });
-
-  test('enforces the per-SIM 24-hour limit', async () => {
-    insertSim({ iccid: ICCID, index: 1 });
-    insertCheck({
-      id: 'bal-previous',
-      status: 'awaiting_response',
-      requestedAt: '2026-08-14 01:00:00',
-    });
-
-    const response = await control('create', { phone_iccid: ICCID, profile_id: MOBILE_PROFILE });
-
-    expect(response.status).toBe(429);
-    expect(await response.json()).toEqual({
-      success: false,
-      error: 'This SIM has already been queried in the last 24 hours',
-      previous_check: {
-        id: 'bal-previous',
-        status: 'awaiting_response',
-        requested_at: '2026-08-14 01:00:00',
-      },
-    });
-  });
-
-  test('does not count failed, timed-out or day-old attempts against the daily limit', async () => {
-    insertSim({ iccid: ICCID, index: 1 });
-    insertCheck({ id: 'bal-failed', status: 'failed' });
-    insertCheck({ id: 'bal-timed-out', status: 'timed_out' });
-    insertCheck({ id: 'bal-old', status: 'parsed', requestedAt: now('-25 hours') });
-
-    const response = await control('create', { phone_iccid: ICCID, profile_id: MOBILE_PROFILE });
-    expect(response.status).toBe(202);
-  });
-
-  test('accepts only an enabled or discovery profile with an implemented method', async () => {
-    insertSim({ iccid: ICCID, index: 1 });
-    sqlite.run(`
-      UPDATE sim_balance_profiles SET discovery_enabled = 0 WHERE id = '${MOBILE_PROFILE}';
-      INSERT INTO sim_balance_profiles (
-        id, country_code, carrier, method, command, parser_version, discovery_enabled
-      ) VALUES ('cn-mobile-ussd', 'CN', 'China Mobile', 'ussd', '*100#', 'ussd-v1', 1);
-    `);
-
-    const disabled = await control('create', { phone_iccid: ICCID, profile_id: MOBILE_PROFILE });
-    expect(disabled.status).toBe(404);
-    expect(await errorOf(disabled)).toBe('Balance profile is not enabled');
-
-    const ussd = await control('create', { phone_iccid: ICCID, profile_id: 'cn-mobile-ussd' });
-    expect(ussd.status).toBe(400);
-    expect(await errorOf(ussd)).toBe('Profile method is not implemented');
   });
 });
 
@@ -2042,251 +1871,6 @@ describe('balance timeout maintenance', () => {
   });
 });
 
-const ContinuedBody = v.object({
-  success: v.literal(true),
-  check: v.object({
-    id: v.string(),
-    status: v.literal('queued'),
-    step_index: v.number(),
-    outbound_message_id: v.nullable(v.string()),
-  }),
-});
-
-describe('POST /api/control/balance-checks/continue', () => {
-  beforeEach(() => {
-    insertSim({ iccid: ICCID, index: 1, number: NUMBER });
-    sqlite
-      .query(`UPDATE sim_balance_profiles SET conversation_steps = ? WHERE id = ?`)
-      .run(MENU_STEPS, MOBILE_PROFILE);
-    insertMessage({ id: 'msg-menu', type: 'received', content: '1.话费与AI豆', number: '10086' });
-  });
-
-  test('continues an existing menu-stage check without creating a new check', async () => {
-    insertCheck({
-      id: 'bal-existing',
-      status: 'response_received',
-      responseMessageId: 'msg-menu',
-      responseSender: '10086',
-      rawResponse: '1.话费与AI豆',
-    });
-
-    const response = await control('continue', { check_id: 'bal-existing' });
-    const { check } = await read(response, ContinuedBody);
-
-    const sent = every(OutboundRow, `SELECT ${OUTBOUND_COLUMNS} FROM messages WHERE type = 'sent'`);
-    expect(response.status).toBe(202);
-    expect(check).toEqual({
-      id: 'bal-existing',
-      status: 'queued',
-      step_index: 1,
-      outbound_message_id: sent[0]?.id ?? null,
-    });
-    expect(count(`SELECT COUNT(*) AS count FROM sim_balance_checks`)).toBe(1);
-    expect(sent).toMatchObject([
-      { content: '1', recipient: '10086', phone_number: NUMBER, balance_check_id: 'bal-existing' },
-    ]);
-  });
-
-  test('rejects a check with no recorded reply', async () => {
-    insertSim({ iccid: 'sim-2', index: 2 });
-    insertCheck({ id: 'no-message', status: 'unparsed', rawResponse: '1.话费与AI豆' });
-    insertCheck({ id: 'no-text', status: 'unparsed', sim: 'sim-2', responseMessageId: 'msg-menu' });
-    sqlite
-      .query(`UPDATE sim_balance_profiles SET conversation_steps = ? WHERE id = ?`)
-      .run('[{"response_contains":"","command":"1"}]', MOBILE_PROFILE);
-
-    for (const id of ['no-message', 'no-text']) {
-      const response = await control('continue', { check_id: id });
-      expect(response.status).toBe(409);
-      expect(await errorOf(response)).toBe('Balance check cannot be continued');
-    }
-    expect(count(`SELECT COUNT(*) AS count FROM messages WHERE type = 'sent'`)).toBe(0);
-  });
-
-  test('rejects a reply that has no configured next step, or a check in another state', async () => {
-    insertCheck({
-      id: 'bal-other',
-      status: 'response_received',
-      responseMessageId: 'msg-menu',
-      rawResponse: '欢迎使用中国移动',
-    });
-    insertSim({ iccid: 'sim-2', index: 2 });
-    insertCheck({ id: 'bal-waiting', status: 'awaiting_response', sim: 'sim-2' });
-
-    const other = await control('continue', { check_id: 'bal-other' });
-    expect(other.status).toBe(409);
-    expect(await errorOf(other)).toBe('No allowlisted next step matches the reply');
-
-    const waiting = await control('continue', { check_id: 'bal-waiting' });
-    expect(waiting.status).toBe(409);
-    expect(await errorOf(waiting)).toBe('Balance check cannot be continued');
-
-    const missing = await control('continue', { check_id: 'nope' });
-    expect(missing.status).toBe(404);
-    expect(await errorOf(missing)).toBe('Balance check not found');
-  });
-
-  test('requires the API key and a check_id', async () => {
-    const unauthorized = await control(
-      'continue',
-      { check_id: 'x' },
-      { apiKey: 'wrong', database: untouchable },
-    );
-    expect(unauthorized.status).toBe(401);
-
-    for (const body of [{}, { check_id: 1 }, []]) {
-      const response = await control('continue', body, { database: untouchable });
-      expect(response.status).toBe(400);
-      expect(await errorOf(response)).toBe('check_id is required');
-    }
-  });
-});
-
-describe('POST /api/control/balance-checks/retry', () => {
-  beforeEach(() => {
-    insertSim({ iccid: ICCID, index: 1, number: NUMBER });
-    sqlite
-      .query(`UPDATE sim_balance_profiles SET conversation_steps = ? WHERE id = ?`)
-      .run(MENU_STEPS, MOBILE_PROFILE);
-  });
-
-  function failedStep(content: string): void {
-    insertCheck({ id: 'bal-failed', status: 'failed', step: 1 });
-    insertMessage({
-      id: 'msg-start',
-      type: 'sent',
-      content: '10086',
-      recipient: '10086',
-      status: 'sent',
-      timestamp: '2026-09-01 10:00:00',
-      checkId: 'bal-failed',
-    });
-    insertMessage({
-      id: 'msg-option-1',
-      type: 'sent',
-      content,
-      recipient: '10086',
-      status: 'failed',
-      timestamp: '2026-09-01 10:01:00',
-      checkId: 'bal-failed',
-    });
-    sqlite.run(
-      `UPDATE messages SET error_message = 'modem error', processing_session_id = 's1' WHERE id = 'msg-option-1'`,
-    );
-  }
-
-  test('requeues only the last failed allowlisted maintenance step', async () => {
-    failedStep('1');
-
-    const response = await control('retry', { check_id: 'bal-failed' });
-    const { check } = await read(response, ContinuedBody);
-
-    expect(response.status).toBe(202);
-    expect(check).toEqual({
-      id: 'bal-failed',
-      status: 'queued',
-      step_index: 1,
-      outbound_message_id: 'msg-option-1',
-    });
-    expect(
-      one(
-        Row,
-        `SELECT status, error_message, processing_session_id FROM messages WHERE id = 'msg-option-1'`,
-      ),
-    ).toEqual({ status: 'sending', error_message: null, processing_session_id: null });
-    expect(checkState('bal-failed')).toMatchObject({
-      status: 'queued',
-      error: null,
-      completed_at: null,
-    });
-  });
-
-  test('rejects a failed message whose content differs from the configured step', async () => {
-    failedStep('2');
-
-    const response = await control('retry', { check_id: 'bal-failed' });
-
-    expect(response.status).toBe(409);
-    expect(await errorOf(response)).toBe('No allowlisted failed step can be retried');
-    expect(checkState('bal-failed').status).toBe('failed');
-  });
-
-  test('rejects a check that has no failed step', async () => {
-    insertCheck({ id: 'bal-start', status: 'failed' });
-    insertMessage({
-      id: 'msg-start',
-      type: 'sent',
-      content: '10086',
-      recipient: '10086',
-      status: 'failed',
-      checkId: 'bal-start',
-    });
-
-    for (const id of ['bal-start', 'nope']) {
-      const response = await control('retry', { check_id: id });
-      expect(response.status).toBe(409);
-      expect(await errorOf(response)).toBe('No allowlisted failed step can be retried');
-    }
-  });
-});
-
-describe('POST /api/control/balance-checks/stop', () => {
-  beforeEach(() => {
-    insertSim({ iccid: ICCID, index: 1 });
-  });
-
-  test('terminalizes an awaiting reply as timed out', async () => {
-    insertCheck({ id: 'bal-waiting', status: 'awaiting_response' });
-
-    const response = await control('stop', { check_id: 'bal-waiting' });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      success: true,
-      check: { id: 'bal-waiting', status: 'timed_out' },
-    });
-    expect(checkState('bal-waiting')).toMatchObject({
-      status: 'timed_out',
-      error: 'Stopped by operator',
-    });
-  });
-
-  test('terminalizes an unresolved received reply as unparsed and stops its skill job', async () => {
-    insertCheck({ id: 'bal-unresolved', status: 'response_received', responseMessageId: 'reply' });
-    insertMessage({ id: 'reply', type: 'received', content: 'menu' });
-    sqlite.run(`
-      UPDATE sim_balance_checks SET error = 'kept' WHERE id = 'bal-unresolved';
-      INSERT INTO sim_balance_skill_jobs (id, check_id, response_message_id, step_index, status)
-      VALUES ('job', 'bal-unresolved', 'reply', 0, 'leased');
-    `);
-
-    const response = await control('stop', { check_id: 'bal-unresolved' });
-
-    expect(await response.json()).toEqual({
-      success: true,
-      check: { id: 'bal-unresolved', status: 'unparsed' },
-    });
-    expect(checkState('bal-unresolved')).toMatchObject({ status: 'unparsed', error: 'kept' });
-    expect(
-      one(
-        Row,
-        `SELECT status, lease_owner, last_error FROM sim_balance_skill_jobs WHERE id = 'job'`,
-      ),
-    ).toEqual({ status: 'stopped', lease_owner: null, last_error: 'Stopped by operator' });
-  });
-
-  test('refuses a check that is not stoppable', async () => {
-    insertCheck({ id: 'bal-parsed', status: 'parsed' });
-
-    const parsed = await control('stop', { check_id: 'bal-parsed' });
-    expect(parsed.status).toBe(409);
-    expect(await errorOf(parsed)).toBe('Balance check is not stoppable');
-
-    const missing = await control('stop', { check_id: 'nope' });
-    expect(missing.status).toBe(404);
-  });
-});
-
 describe('row schemas', () => {
   test('a row that drifts from its schema fails the request instead of leaking', async () => {
     enableDirectMobileProfile();
@@ -2295,7 +1879,9 @@ describe('row schemas', () => {
 
     const errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      const response = await call('GET', '/api/balance-checks/query-preview');
+      const response = await call('POST', '/api/balance-checks/query-preview', {
+        body: { phone_iccids: [ICCID] },
+      });
       expect(response.status).toBe(500);
     } finally {
       errorSpy.mockRestore();

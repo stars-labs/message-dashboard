@@ -3,15 +3,15 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use orange_pi_daemon_rust::health::HealthTask;
-use orange_pi_daemon_rust::message_store::MessageStore;
-use orange_pi_daemon_rust::modem_manager::ModemManager;
-use orange_pi_daemon_rust::stall_watchdog::Heartbeat;
-use orange_pi_daemon_rust::sync_manager::merge_device_reports;
-use orange_pi_daemon_rust::timeout_tracker::TimeoutTracker;
-use orange_pi_daemon_rust::types::MessageWithPath;
-use orange_pi_daemon_rust::wire::ModemReport;
-use orange_pi_daemon_rust::worker_pool::{ModemResult, WorkerPool};
+use crate::health::HealthTask;
+use crate::message_store::MessageStore;
+use crate::modem_manager::ModemManager;
+use crate::stall_watchdog::Heartbeat;
+use crate::sync_manager::merge_device_reports;
+use crate::timeout_tracker::TimeoutTracker;
+use crate::types::MessageWithPath;
+use crate::wire::ModemReport;
+use crate::worker_pool::{ModemResult, WorkerPool};
 
 use crate::{SharedDevices, SharedHealth};
 
