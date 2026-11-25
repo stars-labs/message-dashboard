@@ -832,15 +832,6 @@ describe('POST /api/balance-checks/query', () => {
 
   test('routes an explicit China Unicom query to the browser profile', async () => {
     insertSim({ iccid: ICCID, index: 1, carrier: '联通' });
-    sqlite.run(`
-      INSERT INTO sim_balance_profiles (
-        id, country_code, carrier, method, command, destination, expected_senders,
-        parser_version, discovery_enabled, enabled
-      ) VALUES (
-        'cn-unicom-sms-cxye-v1', 'CN', 'China Unicom', 'sms', 'CXYE', '10010', '["10010"]',
-        'cn-unicom-balance-v1', 1, 0
-      );
-    `);
 
     const response = await call('POST', '/api/balance-checks/query', {
       body: { phone_iccid: ICCID },
