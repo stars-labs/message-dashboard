@@ -267,7 +267,10 @@
               git
               rustfmt
             ];
+            # Git exports GIT_DIR to hooks; in a linked worktree it makes every git
+            # call below a subdirectory treat that subdirectory as the work tree root.
             text = ''
+              unset GIT_DIR GIT_WORK_TREE
               project="$1"
               shift
               cd "$(git rev-parse --show-toplevel)/$project"
@@ -310,7 +313,9 @@
               LLVM_COV = "${pkgs.rustc.llvm}/bin/llvm-cov";
               LLVM_PROFDATA = "${pkgs.rustc.llvm}/bin/llvm-profdata";
             };
+            # See in-project: a hook's GIT_DIR would misplace check-daemon-wire's root.
             text = ''
+              unset GIT_DIR GIT_WORK_TREE
               cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
               too_long="$(find src -name '*.rs' ! -name tests.rs -exec awk 'END { if (NR > 600) print FILENAME ": " NR " lines" }' {} \;)"
               if [ -n "$too_long" ]; then
