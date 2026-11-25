@@ -1,4 +1,5 @@
-use anyhow::Context;
+mod support;
+
 use orange_pi_daemon_rust::types::Config;
 use orange_pi_daemon_rust::types::SmsSubmission;
 use orange_pi_daemon_rust::wire::{PendingSms, Purpose};
@@ -6,11 +7,8 @@ use orange_pi_daemon_rust::{
     api_client::ApiClient, modem_manager::ModemManager, sms_sender::SmsSender,
 };
 use serde_json::json;
-use std::{future::Future, sync::Arc, time::Duration};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-};
+use std::{future::Future, sync::Arc};
+use support::serve;
 
 fn pending_payload() -> serde_json::Value {
     json!({
@@ -23,7 +21,6 @@ fn pending_payload() -> serde_json::Value {
     })
 }
 
-// One bounded, in-process HTTP exchange; no server task outlives the test.
 async fn with_pending_response<F, Fut>(
     status: &str,
     body: serde_json::Value,
@@ -34,56 +31,25 @@ where
     F: FnOnce(ApiClient) -> Fut,
     Fut: Future<Output = anyhow::Result<Vec<PendingSms>>>,
 {
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let address = listener.local_addr()?;
-    let client = ApiClient::new(Config {
-        api_url: format!("http://{address}"),
-        api_key: "fixture-api-key".into(),
-        check_interval_secs: 1,
-    })?;
-    let serve = async {
-        let (mut stream, _) = listener.accept().await?;
-        let mut request = Vec::new();
-        while !request.ends_with(b"\r\n\r\n") {
-            let mut chunk = [0; 1024];
-            let count = stream.read(&mut chunk).await?;
-            assert!(
-                count > 0,
-                "connection closed before request headers arrived"
-            );
-            request.extend_from_slice(
-                chunk
-                    .get(..count)
-                    .context("read more bytes than the buffer holds")?,
-            );
-            assert!(
-                request.len() <= 8192,
-                "request headers exceeded fixture limit"
-            );
-        }
-        let request = String::from_utf8(request)?.to_ascii_lowercase();
-        assert!(request.starts_with("get /api/control/pending-sms http/1.1\r\n"));
-        assert!(request.contains("x-api-key: fixture-api-key\r\n"));
-        match expected_session {
-            Some(session) => {
-                assert!(request.contains(&format!("x-daemon-session-id: {session}\r\n")));
-            }
-            None => assert!(!request.contains("x-daemon-session-id:")),
-        }
-        let body = body.to_string();
-        let response = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        stream.write_all(response.as_bytes()).await?;
-        anyhow::Ok(())
-    };
-    let (served, result) = tokio::time::timeout(Duration::from_secs(3), async {
-        tokio::join!(serve, fetch(client))
+    let (result, requests) = serve(&[(status, body.to_string())], |api_url| async move {
+        fetch(ApiClient::new(Config {
+            api_url,
+            api_key: "fixture-api-key".into(),
+            check_interval_secs: 1,
+        })?)
+        .await
     })
-    .await
-    .context("fixture HTTP exchange timed out")?;
-    served?;
+    .await?;
+    let [request] = requests.as_slice() else {
+        anyhow::bail!("expected one request, got {requests:?}");
+    };
+    assert_eq!(
+        (request.method.as_str(), request.path.as_str()),
+        ("GET", "/api/control/pending-sms")
+    );
+    assert_eq!(request.header("x-api-key"), Some("fixture-api-key"));
+    assert_eq!(request.header("x-daemon-session-id"), expected_session);
+    assert!(request.body.is_empty());
     result
 }
 

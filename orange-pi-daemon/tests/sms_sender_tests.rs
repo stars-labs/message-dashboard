@@ -1,17 +1,25 @@
 // Integration tests for SmsSender - Outbound SMS handling
+mod support;
+
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 use orange_pi_daemon_rust::sms_sender::SmsSender;
-use orange_pi_daemon_rust::types::Config;
+use orange_pi_daemon_rust::types::{Config, SmsSubmission};
 use orange_pi_daemon_rust::wire::{PendingSms, Purpose};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
+use support::{serve, Request};
 
-// Helper function to create test SMS sender (async version)
+// For tests that never reach the network.
 async fn create_test_sender() -> anyhow::Result<SmsSender> {
+    sender_at("http://localhost:8787".to_string()).await
+}
+
+async fn sender_at(api_url: String) -> anyhow::Result<SmsSender> {
     let config = Config {
-        api_url: "http://localhost:8787".to_string(),
+        api_url,
         api_key: "test_key".into(),
         check_interval_secs: 1,
     };
@@ -247,48 +255,149 @@ fn test_pending_sms_debug() {
 // Send SMS Tests (Signature Testing)
 // ============================================================================
 
+const REPORTED: &str = r#"{"success": true}"#;
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
+)]
+fn reported(request: &Request) -> Value {
+    assert_eq!(
+        (request.method.as_str(), request.path.as_str()),
+        ("POST", "/api/control/sms-result")
+    );
+    assert_eq!(request.header("x-api-key"), Some("test_key"));
+    serde_json::from_str(&request.body).unwrap()
+}
+
 #[tokio::test]
-async fn test_send_sms_signature() {
-    let sender = create_test_sender().await.unwrap();
+async fn send_without_a_modem_for_the_iccid_reports_the_failure() {
     let sms = create_test_sms("msg_001", "89860000000000000001", "+1234567890", "Test");
+    let (result, requests) = serve(&[("200 OK", REPORTED.into())], |url| async move {
+        sender_at(url).await.unwrap().send_sms(&sms).await
+    })
+    .await
+    .unwrap();
 
-    // Try to send (will fail without real hardware, but tests signature)
-    let result = sender.send_sms(&sms).await;
-
-    // Should error (no modem found for ICCID)
-    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().to_string(), "ModemNotFound");
+    assert_eq!(
+        reported(&requests[0]),
+        json!({"message_id": "msg_001", "outcome": "failed", "error_message": "No modem found for ICCID"})
+    );
 }
 
 #[tokio::test]
 async fn test_send_sms_for_an_iccid_no_modem_can_hold_is_a_modem_not_found_error() {
-    let mut sender = create_test_sender().await.unwrap();
-    let mut cache = HashMap::new();
-    cache.insert(iccid("89860000000000000011"), "modem_0".to_string());
-    sender.update_modem_cache(cache);
+    let phone_iccids = ["fixture-iccid", "", "8986 0000", "89860000000000000011\n"];
+    let replies = phone_iccids.map(|_| ("200 OK", REPORTED.to_string()));
+    let (errors, requests) = serve(&replies, |url| async move {
+        let mut sender = sender_at(url).await.unwrap();
+        sender.update_modem_cache(HashMap::from([(
+            iccid("89860000000000000011"),
+            "modem_0".to_string(),
+        )]));
+        let mut errors = Vec::new();
+        for phone_iccid in phone_iccids {
+            let sms = create_test_sms("msg_001", phone_iccid, "+1234567890", "Test");
+            errors.push(sender.send_sms(&sms).await.unwrap_err().to_string());
+        }
+        errors
+    })
+    .await
+    .unwrap();
 
-    for phone_iccid in ["fixture-iccid", "", "8986 0000", "89860000000000000011\n"] {
-        let sms = create_test_sms("msg_001", phone_iccid, "+1234567890", "Test");
-        let error = sender.send_sms(&sms).await.unwrap_err();
-        assert_eq!(error.to_string(), "ModemNotFound", "{phone_iccid:?}");
+    assert_eq!(errors, phone_iccids.map(|_| "ModemNotFound"));
+    for request in &requests {
+        assert_eq!(reported(request)["outcome"], "failed");
     }
 }
 
 #[tokio::test]
-async fn test_send_sms_with_cached_modem() {
-    let mut sender = create_test_sender().await.unwrap();
-
-    // Populate cache with modem
-    let mut cache = HashMap::new();
-    cache.insert(iccid("89860000000000000011"), "modem_0".to_string());
-    sender.update_modem_cache(cache);
-
+async fn send_that_the_modem_refuses_reports_the_modem_error() {
     let sms = create_test_sms("msg_001", "89860000000000000011", "+1234567890", "Test");
+    let (result, requests) = serve(&[("200 OK", REPORTED.into())], |url| async move {
+        let mut sender = sender_at(url).await.unwrap();
+        sender.update_modem_cache(HashMap::from([(
+            iccid("89860000000000000011"),
+            "modem_0".to_string(),
+        )]));
+        sender.send_sms(&sms).await
+    })
+    .await
+    .unwrap();
 
-    // Try to send (will fail without real modem_0, but finds modem ID)
-    let result = sender.send_sms(&sms).await;
+    let error = result.unwrap_err().to_string();
+    assert!(error.starts_with("Failed to send SMS: "), "{error}");
+    let body = reported(&requests[0]);
+    assert_eq!(body["outcome"], "failed");
+    assert_eq!(body["error_message"], error);
+}
 
-    // Should error at send stage (not at modem lookup stage)
-    assert_ne!(result.unwrap_err().to_string(), "ModemNotFound");
+#[tokio::test]
+async fn a_rejected_result_report_keeps_the_status_and_body() {
+    let (result, requests) = serve(
+        &[("500 Internal Server Error", "boom".into())],
+        |url| async move {
+            sender_at(url)
+                .await
+                .unwrap()
+                .report_sms_result("msg_001", Ok(SmsSubmission::Confirmed))
+                .await
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(reported(&requests[0])["outcome"], "confirmed");
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Failed to report SMS result: 500 Internal Server Error - boom"
+    );
+}
+
+#[tokio::test]
+async fn processing_sends_each_pending_message_and_reports_it() {
+    let pending = json!({"pending_messages": [{
+        "id": "msg_001",
+        "recipient": "+1234567890",
+        "phone_iccid": "89860000000000000001",
+        "content": "Test",
+        "purpose": "user",
+        "created_at": "2026-11-25T00:00:00.000Z"
+    }]});
+    let replies = [
+        ("200 OK", pending.to_string()),
+        ("200 OK", REPORTED.to_string()),
+    ];
+    let (result, requests) = serve(&replies, |url| async move {
+        sender_at(url).await.unwrap().process_pending_sms().await
+    })
+    .await
+    .unwrap();
+
+    result.unwrap();
+    assert_eq!(
+        (requests[0].method.as_str(), requests[0].path.as_str()),
+        ("GET", "/api/control/pending-sms")
+    );
+    assert_eq!(
+        requests[0].header("x-daemon-session-id"),
+        Some("test-session")
+    );
+    assert_eq!(reported(&requests[1])["message_id"], "msg_001");
+}
+
+#[tokio::test]
+async fn processing_nothing_pending_sends_nothing_else() {
+    let (result, requests) = serve(
+        &[("200 OK", r#"{"pending_messages": []}"#.into())],
+        |url| async move { sender_at(url).await.unwrap().process_pending_sms().await },
+    )
+    .await
+    .unwrap();
+
+    result.unwrap();
+    assert_eq!(requests.len(), 1);
 }
 
 // ============================================================================

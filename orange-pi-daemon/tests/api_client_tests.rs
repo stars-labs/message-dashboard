@@ -1,17 +1,39 @@
 // Integration tests for ApiClient - HTTP communication layer
+mod support;
+
 use orange_pi_daemon_rust::api_client::ApiClient;
 use orange_pi_daemon_rust::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
 use orange_pi_daemon_rust::message_store::{MessageStatus, StoredMessage};
 use orange_pi_daemon_rust::types::{Config, Message, Modem, Sim, SimReadStatus, SimStatus};
-use orange_pi_daemon_rust::wire::{Direction, ModemReport, ModemStatus, SyncMode};
+use orange_pi_daemon_rust::wire::{
+    CallEndReason, Direction, HealthSnapshot, ModemReport, ModemStatus, QueueHealthSnapshot,
+    SyncMode,
+};
+use serde_json::Value;
+use support::serve;
+
+const API_KEY: &str = "test_api_key_12345";
 
 // Helper function to create test config
 fn create_test_config() -> Config {
     Config {
         api_url: "http://localhost:8787".to_string(),
-        api_key: "test_api_key_12345".into(),
+        api_key: API_KEY.into(),
         check_interval_secs: 1,
     }
+}
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
+)]
+fn client_for(api_url: String) -> ApiClient {
+    ApiClient::new(Config {
+        api_url,
+        api_key: API_KEY.into(),
+        check_interval_secs: 1,
+    })
+    .unwrap()
 }
 
 // Helper function to create test message
@@ -127,15 +149,109 @@ async fn test_empty_incremental_device_delta_is_a_noop() {
 
 #[tokio::test]
 async fn test_empty_full_device_snapshot_reaches_the_reconciliation_endpoint() {
-    let client = ApiClient::new(create_test_config()).unwrap();
-    let reports: Vec<ModemReport> = Vec::new();
-    let removed: Vec<Imei> = Vec::new();
+    let (result, requests) = serve(&[("200 OK", "{}".into())], |url| async move {
+        client_for(url)
+            .upload_modem_reports(&[], &[], SyncMode::Full, "session")
+            .await
+    })
+    .await
+    .unwrap();
 
-    let result = client
-        .upload_modem_reports(&reports, &removed, SyncMode::Full, "session")
-        .await;
+    result.unwrap();
+    let [request] = requests.as_slice() else {
+        panic!("expected one request, got {requests:?}")
+    };
+    assert_eq!(
+        (request.method.as_str(), request.path.as_str()),
+        ("POST", "/api/control/devices")
+    );
+    assert_eq!(request.header("x-api-key"), Some(API_KEY));
+    let body: Value = serde_json::from_str(&request.body).unwrap();
+    assert_eq!(body["sync_mode"], "full");
+    assert_eq!(body["modem_reports"], Value::Array(vec![]));
+}
 
-    assert!(result.is_err());
+#[tokio::test]
+async fn device_upload_error_keeps_the_status_and_body() {
+    let (result, _) = serve(
+        &[("500 Internal Server Error", "boom".into())],
+        |url| async move {
+            client_for(url)
+                .upload_modem_reports(&[], &[], SyncMode::Full, "session")
+                .await
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "API returned error: 500 Internal Server Error - boom"
+    );
+}
+
+// ============================================================================
+// Heartbeat Tests
+// ============================================================================
+
+fn health_snapshot() -> HealthSnapshot {
+    HealthSnapshot {
+        schema_version: 3,
+        session_id: "daemon-session-1".to_string(),
+        version: "8.0.1".to_string(),
+        uptime_seconds: 3600,
+        last_message_read_success_age_seconds: Some(5),
+        last_upload_success_age_seconds: Some(10),
+        queue: QueueHealthSnapshot {
+            pending: 0,
+            in_flight: 0,
+            dead_letter: 0,
+            oldest_unacknowledged_age_seconds: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn health_snapshot_carries_the_key_and_the_daemon_version() {
+    let (result, requests) = serve(&[("200 OK", "{}".into())], |url| async move {
+        client_for(url)
+            .send_health_snapshot(&health_snapshot())
+            .await
+    })
+    .await
+    .unwrap();
+
+    result.unwrap();
+    let [request] = requests.as_slice() else {
+        panic!("expected one request, got {requests:?}")
+    };
+    assert_eq!(
+        (request.method.as_str(), request.path.as_str()),
+        ("POST", "/api/control/heartbeat")
+    );
+    assert_eq!(request.header("x-api-key"), Some(API_KEY));
+    assert_eq!(
+        request.header("x-daemon-version"),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+    let body: Value = serde_json::from_str(&request.body).unwrap();
+    assert_eq!(body["schema_version"], 3);
+}
+
+#[tokio::test]
+async fn health_snapshot_error_keeps_the_status_and_body() {
+    let (result, _) = serve(&[("401 Unauthorized", "no key".into())], |url| async move {
+        client_for(url)
+            .send_health_snapshot(&health_snapshot())
+            .await
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Health endpoint returned 401 Unauthorized: no key"
+    );
 }
 
 // ============================================================================
@@ -155,41 +271,80 @@ async fn test_upload_messages_empty() {
     assert!(result.is_ok());
 }
 
-#[tokio::test]
-async fn test_upload_messages_single() {
-    let config = create_test_config();
-    let client = ApiClient::new(config).unwrap();
+fn stored_messages(count: usize) -> Vec<StoredMessage> {
+    (0..count)
+        .map(|i| create_stored_test_message("89860000000000000001", &format!("Message {i}")))
+        .collect()
+}
 
-    let messages = vec![create_stored_test_message(
-        "89860000000000000001",
-        "Test message",
-    )];
-
-    // Will fail without real API server
-    let result = client.upload_messages(&messages).await;
-
-    assert!(result.is_err());
+fn stored(id: &str) -> String {
+    format!(r#"{{"results": [{{"id": "{id}", "status": "stored"}}]}}"#)
 }
 
 #[tokio::test]
-async fn test_upload_messages_batch_size() {
-    let config = create_test_config();
-    let client = ApiClient::new(config).unwrap();
+async fn upload_sends_batches_of_fifty_and_collects_every_result() {
+    let messages = stored_messages(120);
+    let replies = [
+        ("200 OK", stored("a")),
+        ("200 OK", stored("b")),
+        ("200 OK", stored("c")),
+    ];
+    let (results, requests) = serve(&replies, |url| async move {
+        client_for(url).upload_messages(&messages).await
+    })
+    .await
+    .unwrap();
 
-    // Create 150 messages (should be split into 3 batches of 50)
-    let mut messages = Vec::new();
-    for i in 0..150 {
-        messages.push(create_stored_test_message(
-            &format!("8986000000000000{i:04}"),
-            &format!("Message {i}"),
-        ));
-    }
+    let ids: Vec<String> = results.unwrap().into_iter().map(|r| r.id).collect();
+    assert_eq!(ids, ["a", "b", "c"]);
+    let sizes: Vec<usize> = requests
+        .iter()
+        .map(|request| {
+            assert_eq!(
+                (request.method.as_str(), request.path.as_str()),
+                ("POST", "/api/control/messages")
+            );
+            assert_eq!(request.header("x-api-key"), Some(API_KEY));
+            let body: Value = serde_json::from_str(&request.body).unwrap();
+            body["messages"].as_array().unwrap().len()
+        })
+        .collect();
+    assert_eq!(sizes, [50, 50, 20]);
+}
 
-    // Will fail without real API, but tests batching logic
-    let result = client.upload_messages(&messages).await;
+#[tokio::test]
+async fn upload_error_names_the_failing_batch() {
+    let messages = stored_messages(60);
+    let replies = [
+        ("200 OK", stored("a")),
+        ("500 Internal Server Error", "boom".to_string()),
+    ];
+    let (result, requests) = serve(&replies, |url| async move {
+        client_for(url).upload_messages(&messages).await
+    })
+    .await
+    .unwrap();
 
-    // Should error at first batch attempt
-    assert!(result.is_err());
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "API returned error for batch 2: 500 Internal Server Error - boom"
+    );
+}
+
+#[tokio::test]
+async fn upload_refuses_an_answer_it_cannot_read() {
+    let messages = stored_messages(1);
+    let (result, _) = serve(&[("200 OK", "not json".into())], |url| async move {
+        client_for(url).upload_messages(&messages).await
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Invalid message upload response"
+    );
 }
 
 // ============================================================================
@@ -197,14 +352,68 @@ async fn test_upload_messages_batch_size() {
 // ============================================================================
 
 #[tokio::test]
-async fn test_get_pending_sms_signature() {
-    let config = create_test_config();
-    let client = ApiClient::new(config).unwrap();
+async fn pending_sms_error_keeps_the_status() {
+    let (result, requests) = serve(
+        &[("503 Service Unavailable", String::new())],
+        |url| async move { client_for(url).get_pending_sms().await },
+    )
+    .await
+    .unwrap();
 
-    // Will fail without real API server
-    let result = client.get_pending_sms().await;
+    assert_eq!(requests[0].path, "/api/control/pending-sms");
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "API returned error: 503 Service Unavailable"
+    );
+}
 
-    assert!(result.is_err());
+// ============================================================================
+// Call Event Tests
+// ============================================================================
+
+#[tokio::test]
+async fn incoming_call_accepts_success_and_a_busy_line() {
+    let iccid = Iccid::try_from("89860000000000000001").unwrap();
+    let replies = [("200 OK", "{}".into()), ("409 Conflict", "{}".into())];
+    let (results, requests) = serve(&replies, |url| async move {
+        let client = client_for(url);
+        (
+            client
+                .report_incoming_call(&iccid, Some("+6590000000"))
+                .await,
+            client.report_incoming_call(&iccid, None).await,
+        )
+    })
+    .await
+    .unwrap();
+
+    results.0.unwrap();
+    results.1.unwrap();
+    assert_eq!(requests[0].path, "/api/control/calls/incoming");
+    let body: Value = serde_json::from_str(&requests[0].body).unwrap();
+    assert_eq!(body["from"], "+6590000000");
+    assert_eq!(body["iccid"], "89860000000000000001");
+}
+
+#[tokio::test]
+async fn ended_call_error_names_the_event() {
+    let iccid = Iccid::try_from("89860000000000000001").unwrap();
+    let (result, requests) = serve(
+        &[("500 Internal Server Error", "boom".into())],
+        |url| async move {
+            client_for(url)
+                .report_call_ended(Some("call-1"), &iccid, CallEndReason::RemoteHangup)
+                .await
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(requests[0].path, "/api/control/calls/ended");
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "calls/ended returned 500 Internal Server Error: boom"
+    );
 }
 
 // ============================================================================
