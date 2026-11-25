@@ -142,12 +142,7 @@
             };
 
             nativeBuildInputs = with pkgs; [
-              pkg-config
               rustfmt
-            ];
-            buildInputs = with pkgs; [
-              openssl
-              dbus
             ];
 
             # Formatting is a deployment gate: an unformatted tree fails the build.
@@ -162,11 +157,9 @@
             meta = with lib; {
               description = "High-performance Rust SMS daemon with direct AT commands for 100+ modems";
               longDescription = ''
-                A multi-threaded async Rust daemon optimized for 100+ USB modems. Uses direct
-                AT commands via serial ports as primary backend, with D-Bus/ModemManager fallback.
-                Collects SMS messages and phone status, forwarding to SMS Dashboard API in real-time.
-                Features: Direct AT commands (~1-5ms/op), worker pool architecture, signal caching,
-                and automatic backend selection based on availability.
+                A multi-threaded async Rust daemon optimized for 100+ USB modems. Talks to each
+                modem with direct AT commands over its serial ports. Collects SMS messages and
+                phone status, forwarding them to the SMS Dashboard API in real time.
               '';
               homepage = "https://github.com/hecoinfo/message-dashboard";
               license = licenses.mit;

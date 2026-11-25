@@ -80,7 +80,7 @@ async fn sender_uses_the_shared_pending_sms_model_and_claiming_session() {
         |client| async move {
             let sender = SmsSender::new(
                 client,
-                Arc::new(ModemManager::new().await),
+                Arc::new(ModemManager::new()),
                 "fixture-session".into(),
             );
             sender.get_pending_sms().await
@@ -195,7 +195,7 @@ async fn sender_keeps_the_entire_claimed_batch_when_one_purpose_is_missing() {
         |client| async move {
             let sender = SmsSender::new(
                 client,
-                Arc::new(ModemManager::new().await),
+                Arc::new(ModemManager::new()),
                 "fixture-session".into(),
             );
             sender.get_pending_sms().await
@@ -223,7 +223,7 @@ async fn sender_keeps_http_error_status_and_response_body() {
         |client| async move {
             let sender = SmsSender::new(
                 client,
-                Arc::new(ModemManager::new().await),
+                Arc::new(ModemManager::new()),
                 "fixture-session".into(),
             );
             sender.get_pending_sms().await

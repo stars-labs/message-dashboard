@@ -1,10 +1,10 @@
-use super::{BackendMode, ModemManager};
+use super::ModemManager;
 use crate::identifiers::{Iccid, SmsAddress};
 use crate::message_store::{Segment, StoredSegment};
 use crate::partial_sms;
 use crate::types::{Message, MessageWithPath, SmsStorage};
 use crate::wire::Direction;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
@@ -21,18 +21,6 @@ impl ModemManager {
     /// Multipart messages are assembled across polling cycles from segments buffered in
     /// the message store.
     pub async fn get_new_messages_with_paths(
-        &self,
-        modem_id: &str,
-        iccid: &Iccid,
-        message_store: &crate::message_store::MessageStore,
-    ) -> Result<Vec<MessageWithPath>> {
-        match self.mode {
-            BackendMode::AtCommand => self.get_at_messages(modem_id, iccid, message_store).await,
-            BackendMode::DBus => self.get_dbus_messages(modem_id, iccid).await,
-        }
-    }
-
-    async fn get_at_messages(
         &self,
         modem_id: &str,
         iccid: &Iccid,
@@ -246,38 +234,6 @@ impl ModemManager {
             modem_id: group.modem_id.to_string(),
             sms_path: Self::format_at_sms_path(&locations),
         }
-    }
-
-    async fn get_dbus_messages(
-        &self,
-        modem_id: &str,
-        iccid: &Iccid,
-    ) -> Result<Vec<MessageWithPath>> {
-        let client = self
-            .dbus_client
-            .as_ref()
-            .ok_or_else(|| anyhow!("D-Bus not initialized"))?;
-        let native = client
-            .native_client()
-            .ok_or_else(|| anyhow!("Native D-Bus not available"))?;
-        let sms_messages = native.list_sms(modem_id).await?;
-
-        let messages: Vec<MessageWithPath> = sms_messages
-            .into_iter()
-            .map(|sms| MessageWithPath {
-                message: Message {
-                    phone_iccid: iccid.clone(),
-                    phone_number: sms.number,
-                    content: sms.text,
-                    timestamp: Self::normalize_timestamp(&sms.timestamp),
-                    direction: Direction::Received,
-                },
-                modem_id: modem_id.to_string(),
-                sms_path: sms.path,
-            })
-            .collect();
-
-        Ok(messages)
     }
 
     pub async fn get_new_messages(

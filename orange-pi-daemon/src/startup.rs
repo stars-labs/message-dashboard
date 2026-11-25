@@ -20,7 +20,6 @@ pub(crate) fn print_help(program: &str) {
     println!("    {program} [OPTIONS] [COMMAND]");
     println!();
     println!("COMMANDS:");
-    println!("    benchmark    Run performance benchmark");
     println!("    cleanup      Run database cleanup and exit");
     println!();
     println!("OPTIONS:");
@@ -33,7 +32,6 @@ pub(crate) fn print_help(program: &str) {
     println!("    MESSAGE_DB_PATH     SQLite database path (overridden by --db-path)");
     println!("    SMS_API_URL         API endpoint URL (required)");
     println!("    SMS_API_KEY         API authentication key (required)");
-    println!("    USE_DBUS            Set to '1' to use ModemManager D-Bus (default: AT commands)");
     println!("    RUST_LOG            Log level (e.g., orange_pi_daemon_rust=debug)");
 }
 

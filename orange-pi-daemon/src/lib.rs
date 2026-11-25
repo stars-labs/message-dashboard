@@ -1,13 +1,10 @@
 pub mod api_client;
 pub mod at_modem;
-pub mod benchmark;
-pub mod dbus_client;
 pub mod health;
 pub mod identifiers;
 pub mod logging;
 pub mod message_store;
 pub mod modem_manager;
-pub mod native_dbus;
 pub mod partial_sms;
 pub mod proxy_protocol;
 pub mod signal_cache;
@@ -232,18 +229,6 @@ mod tests {
         assert_eq!(SyncMode::Incremental.as_str(), "incremental");
     }
 
-    #[tokio::test]
-    async fn test_dbus_client_creation() {
-        use crate::dbus_client::DBusClient;
-        let _client = DBusClient::new().await;
-    }
-
-    #[tokio::test]
-    async fn test_modem_manager_creation() {
-        use crate::modem_manager::ModemManager;
-        let _manager = ModemManager::new().await;
-    }
-
     #[test]
     fn test_api_client_creation() {
         use crate::api_client::ApiClient;
@@ -271,7 +256,7 @@ mod tests {
             check_interval_secs: 30,
         };
         let api_client = ApiClient::new(config).unwrap();
-        let modem_manager = Arc::new(ModemManager::new().await);
+        let modem_manager = Arc::new(ModemManager::new());
         let mut sender = SmsSender::new(api_client, modem_manager, "test-session".to_string());
 
         let mut cache = std::collections::HashMap::new();

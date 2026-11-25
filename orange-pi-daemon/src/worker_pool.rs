@@ -346,10 +346,6 @@ impl WorkerPool {
         self.stats.read().await.clone()
     }
 
-    pub fn is_using_native_dbus(&self) -> bool {
-        self.modem_manager.is_using_native_dbus()
-    }
-
     pub fn update_config(&mut self, config: WorkerPoolConfig) {
         let num_workers = config.num_workers;
         let batch_size = config.batch_size;

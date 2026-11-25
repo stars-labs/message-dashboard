@@ -32,6 +32,6 @@ shell; the Pi has no sqlite3).
 
 - Production. No restarts, no config edits, no AT commands, no test SMS, no writes to
   the store, unless the user explicitly asks for that specific action.
-- The diagnostic binaries (`at_debug`, `modem_health`, `test_sms_delete`) talk to real
-  modems; `test_sms_delete` deletes SMS from SIM storage. Never run them for a check.
+- The diagnostic binaries (`at_debug`, `modem_health`) talk to real modems. Never run
+  them for a check.
 - SIMs move between ports across reboots: identify a SIM by ICCID, never by port.

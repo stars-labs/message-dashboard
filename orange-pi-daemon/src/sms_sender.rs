@@ -77,14 +77,14 @@ impl SmsSender {
         }
 
         info!(
-            "📱 ICCID {} not in cache, searching via D-Bus...",
+            "📱 ICCID {} not in cache, searching the modems...",
             target_iccid
         );
 
         let modem_ids = match self.modem_manager.list_modems().await {
             Ok(ids) => ids,
             Err(e) => {
-                error!("❌ Failed to list modems via D-Bus: {}", e);
+                error!("❌ Failed to list modems: {}", e);
                 return None;
             }
         };

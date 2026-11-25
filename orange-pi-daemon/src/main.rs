@@ -11,7 +11,6 @@ use tokio::sync::RwLock;
 use tracing::{error, info};
 
 use orange_pi_daemon_rust::api_client::ApiClient;
-use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
 use orange_pi_daemon_rust::health::HealthTracker;
 use orange_pi_daemon_rust::logging;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
@@ -46,11 +45,6 @@ async fn main() -> Result<()> {
 
     let db_path = resolve_db_path(&args);
 
-    if args.iter().any(|a| a == "benchmark") {
-        info!("🏁 Running performance benchmark...");
-        return PerformanceBenchmark::run_benchmark().await;
-    }
-
     let (api_url, api_key) = api_settings(|name| std::env::var(name).ok())?;
 
     let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
@@ -64,7 +58,7 @@ async fn main() -> Result<()> {
 
     let message_store = open_message_store(&db_path)?;
 
-    let modem_manager = Arc::new(ModemManager::new().await);
+    let modem_manager = Arc::new(ModemManager::new());
     let config = Config {
         api_url: api_url.clone(),
         api_key: api_key.clone(),

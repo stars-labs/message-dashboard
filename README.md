@@ -7,7 +7,7 @@ A distributed SMS management system for 100+ USB modems running on Orange Pi har
 ![System architecture](docs/architecture/message-dashboard.svg)
 
 **Daemon** (Rust, Tokio) reads SMS from USB modems with direct AT commands.
-ModemManager over D-Bus is opt-in with `USE_DBUS=1`. It buffers messages in local
+It buffers messages in local
 SQLite, uploads them to the Worker, syncs device status and heartbeats, and polls
 for outbound SMS to send. An optional voice bridge carries call audio between the
 modems and Cloudflare Realtime.
