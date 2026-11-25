@@ -1,16 +1,9 @@
 import * as v from 'valibot';
-import { queryAll, queryFirst, type D1 } from '../lib/d1.js';
+import { queryFirst, type D1 } from '../lib/d1.js';
 
-export const AlertName = v.picklist(['daemon_offline', 'sims_offline']);
-export type AlertName = v.InferOutput<typeof AlertName>;
+type AlertName = 'daemon_offline';
 
 const HeartbeatRow = v.object({ last_heartbeat: v.string() });
-
-const OfflineSimRow = v.object({
-  sim_index: v.number(),
-  sim_status: v.picklist(['no_modem', 'offline', 'sim_error', 'iccid_mismatch']),
-});
-export type OfflineSim = v.InferOutput<typeof OfflineSimRow>;
 
 const AlertStateRow = v.object({
   first_seen_at: v.string(),
@@ -24,19 +17,6 @@ export async function readLastHeartbeat(db: D1<'first'>): Promise<string | null>
     HeartbeatRow,
   );
   return row?.last_heartbeat ?? null;
-}
-
-/** SIMs given a modem in the inventory (imei set) that the modem is not serving. */
-export function listOfflineAssignedSims(db: D1<'all'>): Promise<OfflineSim[]> {
-  return queryAll(
-    db.prepare(`
-      SELECT sim_index, sim_status
-      FROM device_view
-      WHERE imei IS NOT NULL AND sim_status != 'active'
-      ORDER BY sim_index
-    `),
-    OfflineSimRow,
-  );
 }
 
 export function readAlertState(db: D1<'first'>, alert: AlertName): Promise<AlertState | null> {

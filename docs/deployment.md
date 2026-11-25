@@ -30,10 +30,11 @@ bun run check:schema-drift
 ### Alert emails
 
 The five-minute cron (`server/utils/alerts.ts`) emails when the daemon has sent no
-heartbeat for 20 minutes, when assigned SIMs stay offline for 30 minutes (checked
-every 15), and when the check itself fails. It emails again every 6 hours while the
-condition holds, and once more when it clears. State lives in the `alert_state` table,
-written only when an alert opens, is emailed or clears.
+heartbeat for 20 minutes, and when the check itself fails. It emails again every 6
+hours while the daemon stays silent, and once more when it reports again. State lives
+in the `alert_state` table, written only when an alert opens, is emailed or clears.
+Offline SIMs send no email by decision: they are not urgent, and the dashboard shows
+them.
 
 Where its configuration lives:
 
