@@ -180,9 +180,11 @@
           # on any difference from the checked-in files.
           check-daemon-wire = pkgs.writeShellApplication {
             name = "check-daemon-wire";
+            # cargo runs whichever rustc is on PATH; pin it to the one clippy uses.
             runtimeInputs = with pkgs; [
               cargo
               git
+              rustc
             ];
             text = ''
               root="$(git rev-parse --show-toplevel)"
@@ -310,6 +312,7 @@
               findutils
               gawk
               git
+              rustc
               rustfmt
             ];
             # llvm-cov reads the profiles rustc writes, so it comes from rustc's own LLVM.
