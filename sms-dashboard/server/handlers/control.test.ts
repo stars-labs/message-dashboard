@@ -52,7 +52,6 @@ interface RequestOptions {
 const ROUTES = {
   updateDevices: ['POST', '/api/control/devices'],
   uploadMessages: ['POST', '/api/control/messages'],
-  clearMessages: ['DELETE', '/api/control/messages'],
   getPendingSMS: ['GET', '/api/control/pending-sms'],
   updateSMSResult: ['POST', '/api/control/sms-result'],
 } as const;
@@ -101,7 +100,6 @@ describe('every control route', () => {
       'uploadMessages',
       'getPendingSMS',
       'updateSMSResult',
-      'clearMessages',
     ] as const) {
       const response = await send(route, route === 'getPendingSMS' ? undefined : {}, {
         apiKey: 'wrong',
@@ -962,18 +960,6 @@ describe('POST /api/control/sms-result', () => {
   });
 });
 
-describe('DELETE /api/control/messages', () => {
-  test('deletes every message', async () => {
-    insertOutbound('msg-1');
-    insertOutbound('msg-2');
-
-    const response = await send('clearMessages', undefined);
-
-    expect(await response.json()).toEqual({ success: true, message: 'Cleared 2 messages' });
-    expect(count(`SELECT COUNT(*) AS count FROM messages`)).toBe(0);
-  });
-});
-
 describe('control error answers on the wire', () => {
   const JSON_TYPE = 'application/json;charset=utf-8';
 
@@ -1116,13 +1102,6 @@ describe('control error answers on the wire', () => {
     }
   });
 
-  test('DELETE messages answers a D1 failure with 500 and the failure text', async () => {
-    const response = await send('clearMessages', undefined, { database: offline });
-    expect(await wire(response)).toEqual(
-      answer(500, '{"success":false,"error":"Failed to clear messages: D1 offline"}'),
-    );
-  });
-
   test('an empty body answers that the body must be JSON', async () => {
     const answers: [Route, string][] = [
       ['updateDevices', '{"error":"Body must be JSON"}'],
@@ -1245,6 +1224,18 @@ describe('POST /api/control/heartbeat', () => {
       );
       expect(refused).toMatchObject({ status: 400, message: error });
     }
+  });
+
+  test('answers 500, not success, when the snapshot cannot be stored', async () => {
+    const refused = await recordHeartbeat(heartbeatCall({}, untouchable), snapshot()).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(refused).toMatchObject({
+      status: 500,
+      message: 'Failed to process heartbeat: database must not be read',
+    });
   });
 
   test('answers a body that is empty or not JSON as the route did before the contract', async () => {

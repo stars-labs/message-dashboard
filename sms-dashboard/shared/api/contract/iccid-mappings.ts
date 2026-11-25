@@ -1,7 +1,5 @@
 import * as v from 'valibot';
 import {
-  BulkIccidMappingsBody,
-  BulkIccidMappingsResponse,
   CreateIccidMappingBody,
   CreateIccidMappingResponse,
   DeleteIccidMappingResponse,
@@ -24,14 +22,6 @@ export const iccidMappings = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ params: Id }))
     .output(IccidMappingDetailResponse),
-  byIccid: route(
-    { kind: 'user', permission: 'phones.read' },
-    'GET',
-    '/api/iccid-mappings/by-iccid/{iccid}',
-  )
-    .route({ inputStructure: 'detailed' })
-    .input(v.object({ params: v.object({ iccid: v.string() }) }))
-    .output(IccidMappingDetailResponse),
   // 201 when the SIM is new, 200 when the write updated one that existed.
   create: route({ kind: 'user', permission: 'phones.write' }, 'POST', '/api/iccid-mappings')
     .route({ outputStructure: 'detailed' })
@@ -50,7 +40,4 @@ export const iccidMappings = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ params: Id }))
     .output(DeleteIccidMappingResponse),
-  bulk: route({ kind: 'user', permission: 'phones.write' }, 'POST', '/api/iccid-mappings/bulk')
-    .input(BulkIccidMappingsBody)
-    .output(BulkIccidMappingsResponse),
 };

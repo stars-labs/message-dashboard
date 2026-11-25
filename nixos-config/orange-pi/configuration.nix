@@ -475,7 +475,6 @@
     usbutils
     ldns
     claude-code
-    modemmanager
   ];
 
   system.stateVersion = "25.11";

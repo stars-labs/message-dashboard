@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { Keyword, KeywordWithUsage, MessageTag } from '../../shared/api/keywords.js';
+import { Keyword, KeywordWithUsage } from '../../shared/api/keywords.js';
 import { queryAll, queryFirst, queryOne, type D1, type D1Batch } from '../lib/d1.js';
 
 const KEYWORD_COLUMNS =
@@ -19,20 +19,6 @@ const MatcherRow = v.object({
   case_sensitive: v.nullable(v.number()),
   whole_word: v.nullable(v.number()),
 });
-
-const BatchTagRow = v.object({
-  message_id: v.string(),
-  id: v.number(),
-  keyword: v.string(),
-  tag: v.string(),
-  color: v.nullable(v.string()),
-  priority: v.nullable(v.number()),
-  position: v.number(),
-  matched_text: v.string(),
-  length: v.number(),
-});
-
-type BatchTagRow = v.InferOutput<typeof BatchTagRow>;
 
 const KeywordHistoryRow = v.object({
   id: v.string(),
@@ -191,65 +177,6 @@ export async function isKeywordReferenced(db: D1<'first'>, id: string): Promise<
 
 export async function deleteKeyword(db: D1<'run'>, id: string): Promise<void> {
   await db.prepare('DELETE FROM keyword_tags WHERE id = ?').bind(id).run();
-}
-
-export function listActiveTagsForMessages(
-  db: D1<'all'>,
-  messageIds: string[],
-): Promise<BatchTagRow[]> {
-  const placeholders = messageIds.map(() => '?').join(',');
-  return queryAll(
-    db
-      .prepare(
-        `
-                SELECT
-                    mt.message_id,
-                    kt.id,
-                    kt.keyword,
-                    kt.tag,
-                    kt.color,
-                    kt.priority,
-                    mt.position,
-                    mt.matched_text,
-                    LENGTH(mt.matched_text) as length
-                FROM message_tags mt
-                JOIN keyword_tags kt ON mt.keyword_tag_id = kt.id
-                WHERE mt.message_id IN (${placeholders})
-                  AND kt.is_active = TRUE
-                ORDER BY mt.message_id, mt.position ASC
-            `,
-      )
-      .bind(...messageIds),
-    BatchTagRow,
-  );
-}
-
-export function listMessageTags(
-  db: D1<'all'>,
-  messageId: string,
-): Promise<v.InferOutput<typeof MessageTag>[]> {
-  return queryAll(
-    db
-      .prepare(
-        `
-                SELECT
-                    mt.message_id,
-                    mt.keyword_tag_id,
-                    mt.matched_text,
-                    mt.position,
-                    mt.created_at,
-                    kt.keyword,
-                    kt.tag,
-                    kt.color
-                FROM message_tags mt
-                JOIN keyword_tags kt ON mt.keyword_tag_id = kt.id
-                WHERE mt.message_id = ? AND kt.is_active = TRUE
-                ORDER BY mt.position ASC
-            `,
-      )
-      .bind(messageId),
-    MessageTag,
-  );
 }
 
 export function listHistoryMessages(

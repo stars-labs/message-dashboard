@@ -1,31 +1,39 @@
 // Integration tests for SmsSender - Outbound SMS handling
-mod support;
-
-use orange_pi_daemon_rust::api_client::ApiClient;
-use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
-use orange_pi_daemon_rust::modem_manager::ModemManager;
-use orange_pi_daemon_rust::sms_sender::SmsSender;
-use orange_pi_daemon_rust::types::{Config, SmsSubmission};
-use orange_pi_daemon_rust::wire::{PendingSms, Purpose};
+use super::{is_short_code, SmsSender};
+use crate::api_client::ApiClient;
+use crate::identifiers::{Iccid, SmsAddress};
+use crate::modem_manager::ModemManager;
+use crate::test_support::{serve, Request};
+use crate::types::{Config, SmsSubmission};
+use crate::wire::{PendingSms, Purpose};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
-use support::{serve, Request};
 
-// For tests that never reach the network.
-async fn create_test_sender() -> anyhow::Result<SmsSender> {
-    sender_at("http://localhost:8787".to_string()).await
+#[test]
+fn recognizes_only_plain_ascii_short_codes() {
+    assert!(is_short_code(&SmsAddress::from("100")));
+    assert!(is_short_code(&SmsAddress::from("10010")));
+    assert!(!is_short_code(&SmsAddress::from("12")));
+    assert!(!is_short_code(&SmsAddress::from("+10010")));
+    assert!(!is_short_code(&SmsAddress::from("1001A")));
+    assert!(!is_short_code(&SmsAddress::from("6512345678")));
 }
 
-async fn sender_at(api_url: String) -> anyhow::Result<SmsSender> {
+// For tests that never reach the network.
+fn create_test_sender() -> anyhow::Result<SmsSender> {
+    sender_at("http://localhost:8787".to_string())
+}
+
+fn sender_at(api_url: String) -> anyhow::Result<SmsSender> {
     let config = Config {
         api_url,
         api_key: "test_key".into(),
-        check_interval_secs: 1,
     };
 
     let api_client = ApiClient::new(config)?;
-    let modem_manager = Arc::new(ModemManager::new().await);
+    let modem_manager = Arc::new(ModemManager::new());
 
     Ok(SmsSender::new(
         api_client,
@@ -34,10 +42,6 @@ async fn sender_at(api_url: String) -> anyhow::Result<SmsSender> {
     ))
 }
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
 fn iccid(text: &str) -> Iccid {
     Iccid::try_from(text).unwrap()
 }
@@ -60,7 +64,7 @@ fn create_test_sms(id: &str, iccid: &str, recipient: &str, content: &str) -> Pen
 
 #[tokio::test]
 async fn test_sms_sender_new() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
     sender.update_modem_cache(HashMap::from([(
         iccid("89860000000000000010"),
         "modem".to_string(),
@@ -80,7 +84,7 @@ async fn test_sms_sender_new() {
 
 #[tokio::test]
 async fn test_update_modem_cache() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
 
     let mut cache = HashMap::new();
     cache.insert(iccid("89860000000000000001"), "modem_0".to_string());
@@ -106,7 +110,7 @@ async fn test_update_modem_cache() {
 
 #[tokio::test]
 async fn test_update_modem_cache_empty() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
 
     sender.update_modem_cache(HashMap::from([(
         iccid("89860000000000000010"),
@@ -130,7 +134,7 @@ async fn test_update_modem_cache_empty() {
 
 #[tokio::test]
 async fn test_update_modem_cache_multiple_times() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
 
     // First update
     let mut cache1 = HashMap::new();
@@ -163,7 +167,7 @@ async fn test_update_modem_cache_multiple_times() {
 
 #[tokio::test]
 async fn test_find_modem_for_iccid_from_cache() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
 
     // Populate cache
     let mut cache = HashMap::new();
@@ -181,7 +185,7 @@ async fn test_find_modem_for_iccid_from_cache() {
 
 #[tokio::test]
 async fn test_find_modem_for_iccid_not_in_cache() {
-    let sender = create_test_sender().await.unwrap();
+    let sender = create_test_sender().unwrap();
 
     // Try to find modem not in cache (will search via modem manager)
     let result = sender
@@ -194,7 +198,7 @@ async fn test_find_modem_for_iccid_not_in_cache() {
 
 #[tokio::test]
 async fn test_find_modem_for_iccid_cache_hit_vs_miss() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
 
     // Populate cache with one ICCID
     let mut cache = HashMap::new();
@@ -257,10 +261,6 @@ fn test_pending_sms_debug() {
 
 const REPORTED: &str = r#"{"success": true}"#;
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
 fn reported(request: &Request) -> Value {
     assert_eq!(
         (request.method.as_str(), request.path.as_str()),
@@ -274,7 +274,7 @@ fn reported(request: &Request) -> Value {
 async fn send_without_a_modem_for_the_iccid_reports_the_failure() {
     let sms = create_test_sms("msg_001", "89860000000000000001", "+1234567890", "Test");
     let (result, requests) = serve(&[("200 OK", REPORTED.into())], |url| async move {
-        sender_at(url).await.unwrap().send_sms(&sms).await
+        sender_at(url).unwrap().send_sms(&sms).await
     })
     .await
     .unwrap();
@@ -291,7 +291,7 @@ async fn test_send_sms_for_an_iccid_no_modem_can_hold_is_a_modem_not_found_error
     let phone_iccids = ["fixture-iccid", "", "8986 0000", "89860000000000000011\n"];
     let replies = phone_iccids.map(|_| ("200 OK", REPORTED.to_string()));
     let (errors, requests) = serve(&replies, |url| async move {
-        let mut sender = sender_at(url).await.unwrap();
+        let mut sender = sender_at(url).unwrap();
         sender.update_modem_cache(HashMap::from([(
             iccid("89860000000000000011"),
             "modem_0".to_string(),
@@ -316,7 +316,7 @@ async fn test_send_sms_for_an_iccid_no_modem_can_hold_is_a_modem_not_found_error
 async fn send_that_the_modem_refuses_reports_the_modem_error() {
     let sms = create_test_sms("msg_001", "89860000000000000011", "+1234567890", "Test");
     let (result, requests) = serve(&[("200 OK", REPORTED.into())], |url| async move {
-        let mut sender = sender_at(url).await.unwrap();
+        let mut sender = sender_at(url).unwrap();
         sender.update_modem_cache(HashMap::from([(
             iccid("89860000000000000011"),
             "modem_0".to_string(),
@@ -339,7 +339,6 @@ async fn a_rejected_result_report_keeps_the_status_and_body() {
         &[("500 Internal Server Error", "boom".into())],
         |url| async move {
             sender_at(url)
-                .await
                 .unwrap()
                 .report_sms_result("msg_001", Ok(SmsSubmission::Confirmed))
                 .await
@@ -370,7 +369,7 @@ async fn processing_sends_each_pending_message_and_reports_it() {
         ("200 OK", REPORTED.to_string()),
     ];
     let (result, requests) = serve(&replies, |url| async move {
-        sender_at(url).await.unwrap().process_pending_sms().await
+        sender_at(url).unwrap().process_pending_sms().await
     })
     .await
     .unwrap();
@@ -391,7 +390,7 @@ async fn processing_sends_each_pending_message_and_reports_it() {
 async fn processing_nothing_pending_sends_nothing_else() {
     let (result, requests) = serve(
         &[("200 OK", r#"{"pending_messages": []}"#.into())],
-        |url| async move { sender_at(url).await.unwrap().process_pending_sms().await },
+        |url| async move { sender_at(url).unwrap().process_pending_sms().await },
     )
     .await
     .unwrap();
@@ -451,7 +450,7 @@ fn test_pending_sms_with_international_number() {
 
 #[tokio::test]
 async fn test_modem_cache_large_scale() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
 
     // Create cache with 100+ modems (simulating production)
     let mut cache = HashMap::new();
@@ -476,7 +475,7 @@ async fn test_modem_cache_large_scale() {
 
 #[tokio::test]
 async fn test_find_modem_multiple_lookups() {
-    let mut sender = create_test_sender().await.unwrap();
+    let mut sender = create_test_sender().unwrap();
 
     let mut cache = HashMap::new();
     cache.insert(iccid("89860000000000000001"), "modem_0".to_string());
@@ -509,4 +508,219 @@ async fn test_find_modem_multiple_lookups() {
             .await,
         None
     );
+}
+
+fn pending_payload() -> Value {
+    json!({
+        "id": "09d64494-669b-47ee-9bd3-d2ea5de0f157",
+        "recipient": "10010",
+        "phone_iccid": "89860121750097854321",
+        "content": "CXLL",
+        "purpose": "balance_maintenance",
+        "created_at": "2026-11-12T12:00:00.000Z"
+    })
+}
+
+async fn with_pending_response<F, Fut>(
+    status: &str,
+    body: Value,
+    expected_session: Option<&str>,
+    fetch: F,
+) -> anyhow::Result<Vec<PendingSms>>
+where
+    F: FnOnce(ApiClient) -> Fut,
+    Fut: Future<Output = anyhow::Result<Vec<PendingSms>>>,
+{
+    let (result, requests) = serve(&[(status, body.to_string())], |api_url| async move {
+        fetch(ApiClient::new(Config {
+            api_url,
+            api_key: "fixture-api-key".into(),
+        })?)
+        .await
+    })
+    .await?;
+    let [request] = requests.as_slice() else {
+        anyhow::bail!("expected one request, got {requests:?}");
+    };
+    assert_eq!(
+        (request.method.as_str(), request.path.as_str()),
+        ("GET", "/api/control/pending-sms")
+    );
+    assert_eq!(request.header("x-api-key"), Some("fixture-api-key"));
+    assert_eq!(request.header("x-daemon-session-id"), expected_session);
+    assert!(request.body.is_empty());
+    result
+}
+
+#[tokio::test]
+async fn sender_uses_the_shared_pending_sms_model_and_claiming_session() {
+    let messages = with_pending_response(
+        "200 OK",
+        json!({"pending_messages": [pending_payload()]}),
+        Some("fixture-session"),
+        |client| async move {
+            let sender = SmsSender::new(
+                client,
+                Arc::new(ModemManager::new()),
+                "fixture-session".into(),
+            );
+            sender.get_pending_sms().await
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&messages[0]).unwrap(),
+        pending_payload()
+    );
+}
+
+#[test]
+fn pending_sms_recipient_and_iccid_keep_any_text_the_worker_sends() {
+    for recipient in ["10010", "+6591234567", "Singtel", "DBS", "", "你好"] {
+        let mut payload = pending_payload();
+        payload["recipient"] = json!(recipient);
+        payload["phone_iccid"] = json!("not-a-hex-iccid");
+        let sms: PendingSms = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(sms.recipient.as_str(), recipient);
+        assert_eq!(sms.phone_iccid, "not-a-hex-iccid");
+        assert_eq!(serde_json::to_value(&sms).unwrap(), payload);
+    }
+}
+
+#[test]
+fn submission_success_has_only_two_states() {
+    fn describe(submission: SmsSubmission) -> &'static str {
+        match submission {
+            SmsSubmission::Confirmed => "confirmed",
+            SmsSubmission::SubmittedUnconfirmed => "submitted_unconfirmed",
+        }
+    }
+
+    assert_eq!(describe(SmsSubmission::Confirmed), "confirmed");
+    assert_eq!(
+        describe(SmsSubmission::SubmittedUnconfirmed),
+        "submitted_unconfirmed"
+    );
+}
+
+#[test]
+fn pending_sms_accepts_the_workers_string_id_and_content_fields() {
+    let sms: PendingSms = serde_json::from_value(pending_payload()).unwrap();
+
+    assert_eq!(sms.recipient.as_str(), "10010");
+    assert_eq!(sms.id, "09d64494-669b-47ee-9bd3-d2ea5de0f157");
+    assert_eq!(sms.content, "CXLL");
+    assert_eq!(sms.purpose, Purpose::BalanceMaintenance);
+}
+
+#[test]
+fn pending_sms_requires_the_current_payload_fields() {
+    for field in ["id", "recipient", "phone_iccid", "content", "created_at"] {
+        let mut payload = pending_payload();
+        payload.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<PendingSms>(payload).is_err(),
+            "missing {field} must fail"
+        );
+    }
+}
+
+#[test]
+fn missing_purpose_keeps_the_original_user_default() {
+    let mut payload = pending_payload();
+    payload.as_object_mut().unwrap().remove("purpose");
+    let sms: PendingSms = serde_json::from_value(payload.clone()).unwrap();
+    assert_eq!(sms.purpose, Purpose::User);
+    payload["purpose"] = json!("user");
+    assert_eq!(serde_json::to_value(sms).unwrap(), payload);
+}
+
+#[test]
+fn explicit_null_purpose_is_still_rejected() {
+    let mut payload = pending_payload();
+    payload["purpose"] = Value::Null;
+    assert!(serde_json::from_value::<PendingSms>(payload).is_err());
+}
+
+#[tokio::test]
+async fn sender_keeps_the_entire_claimed_batch_when_one_purpose_is_missing() {
+    let mut user = pending_payload();
+    user["id"] = json!("ordinary-message");
+    user["recipient"] = json!("+8613800138000");
+    user["content"] = json!("Hello");
+    user.as_object_mut().unwrap().remove("purpose");
+
+    let messages = with_pending_response(
+        "200 OK",
+        json!({"pending_messages": [user, pending_payload()]}),
+        Some("fixture-session"),
+        |client| async move {
+            let sender = SmsSender::new(
+                client,
+                Arc::new(ModemManager::new()),
+                "fixture-session".into(),
+            );
+            sender.get_pending_sms().await
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].id, "ordinary-message");
+    assert_eq!(messages[0].purpose, Purpose::User);
+    assert_eq!(messages[0].recipient.as_str(), "+8613800138000");
+    assert_eq!(messages[0].content, "Hello");
+    assert_eq!(messages[1].purpose, Purpose::BalanceMaintenance);
+    assert_eq!(messages[1].recipient.as_str(), "10010");
+    assert_eq!(messages[1].content, "CXLL");
+}
+
+#[tokio::test]
+async fn sender_keeps_http_error_status_and_response_body() {
+    let error = with_pending_response(
+        "403 Forbidden",
+        json!({"error": "fixture access denied"}),
+        Some("fixture-session"),
+        |client| async move {
+            let sender = SmsSender::new(
+                client,
+                Arc::new(ModemManager::new()),
+                "fixture-session".into(),
+            );
+            sender.get_pending_sms().await
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Failed to fetch pending SMS: 403 Forbidden - {\"error\":\"fixture access denied\"}"
+    );
+}
+
+#[test]
+fn pending_sms_rejects_the_obsolete_numeric_id_and_message_fields() {
+    let result = serde_json::from_value::<PendingSms>(json!({
+        "id": 42,
+        "recipient": "10010",
+        "phone_iccid": "89860121750097854321",
+        "message": "CXLL"
+    }));
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn debug_output_never_contains_the_api_key() {
+    let config = Config {
+        api_url: "https://dashboard.example".into(),
+        api_key: "fixture-api-key".into(),
+    };
+
+    assert!(!format!("{config:?}").contains("fixture-api-key"));
 }

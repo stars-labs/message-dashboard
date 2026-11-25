@@ -1,11 +1,6 @@
 import * as v from 'valibot';
-import { D1_MAX_BOUND_PARAMETERS, queryAll, queryFirst, type D1 } from '../lib/d1.js';
-import { CHECK_STATUSES } from '../../shared/balance-status.js';
-import {
-  PROFILE_METHODS,
-  QUERY_METHODS,
-  RecentBalanceCheck,
-} from '../../shared/api/balance-checks.js';
+import { D1_MAX_BOUND_PARAMETERS, queryAll, type D1 } from '../lib/d1.js';
+import { QUERY_METHODS, RecentBalanceCheck } from '../../shared/api/balance-checks.js';
 
 export const Flag = v.picklist([0, 1]);
 
@@ -41,8 +36,6 @@ const profileColumns = {
   skill_config: v.string(),
 };
 
-const ProfileRow = v.object({ ...profileColumns, method: v.picklist(PROFILE_METHODS) });
-
 const QueryProfileRow = v.object({ ...profileColumns, method: v.picklist(QUERY_METHODS) });
 
 export type BalanceProfile = v.InferOutput<typeof QueryProfileRow>;
@@ -57,31 +50,14 @@ const BALANCE_COOLDOWN_PREDICATE = `
     AND datetime(requested_at) >= datetime('now', '-24 hours'))
 `;
 
-const CheckPhoneRow = v.object({
-  iccid: v.string(),
-  number: v.string(),
-  carrier: v.nullable(v.string()),
-  country: v.nullable(v.string()),
-  sim_status: v.string(),
-});
-
-const CooldownRow = v.object({
-  id: v.string(),
-  status: v.picklist(CHECK_STATUSES),
-  requested_at: v.string(),
-});
-
 // A scope larger than D1's bind limit is read in chunks.
 export async function listPlanPhones(
   db: D1<'all'>,
-  scope: readonly string[] | null,
+  scope: readonly string[],
 ): Promise<PlanPhone[]> {
   const select = `
     SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role, service_type
     FROM device_view`;
-  if (scope === null) {
-    return queryAll(db.prepare(`${select} ORDER BY sim_index`), PlanPhoneRow);
-  }
   const phones: PlanPhone[] = [];
   for (let start = 0; start < scope.length; start += D1_MAX_BOUND_PARAMETERS) {
     const chunk = scope.slice(start, start + D1_MAX_BOUND_PARAMETERS);
@@ -129,50 +105,5 @@ export function listParsedChecks(db: D1<'all'>): Promise<ParsedCheck[]> {
     `,
     ),
     ParsedCheckRow,
-  );
-}
-
-export function findEnabledBalanceProfile(db: D1<'first'>, profileId: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-        SELECT ${PROFILE_COLUMNS} FROM sim_balance_profiles
-        WHERE id = ? AND (discovery_enabled = 1 OR enabled = 1)
-      `,
-      )
-      .bind(profileId),
-    ProfileRow,
-  );
-}
-
-export function findCheckPhone(db: D1<'first'>, iccid: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-        SELECT iccid, number, carrier, country, sim_status
-        FROM device_view WHERE iccid = ?
-      `,
-      )
-      .bind(iccid),
-    CheckPhoneRow,
-  );
-}
-
-export function findRecentBalanceCheck(db: D1<'first'>, iccid: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-        SELECT id, status, requested_at
-        FROM sim_balance_checks
-        WHERE sim_iccid = ?
-          AND (${BALANCE_COOLDOWN_PREDICATE})
-        ORDER BY requested_at DESC LIMIT 1
-      `,
-      )
-      .bind(iccid),
-    CooldownRow,
   );
 }

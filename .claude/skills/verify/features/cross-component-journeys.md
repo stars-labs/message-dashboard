@@ -35,7 +35,7 @@ both, in addition to `check-daemon` and `bun run test`.
 
 - These journeys stand in for the daemon; they prove the Worker and the dashboard
   against the recorded wire, not the daemon binary. The daemon's half is
-  `orange-pi-daemon/tests/control_fixtures_tests.rs` under `check-daemon`.
+  `orange-pi-daemon/src/wire/tests.rs` under `check-daemon`.
 - Each run starts from the seed; a journey brings its own preconditions through
   production paths (device sync, the SIM dialog), never through `d1()` writes.
 - Carrier-browser jobs stop at `pending`; see

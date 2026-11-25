@@ -4,7 +4,7 @@ import { ALL_PERMISSIONS } from '../../../config/auth0-roles.js';
 import { ALL_RUNNER_SCOPES } from '../runner-scopes.js';
 
 /**
- * `session`: signed in, any role. `daemon`: the API key the Pi daemon and ops scripts hold.
+ * `session`: signed in, any role. `daemon`: the API key the Pi daemon holds.
  * `runner`: the API key or an Auth0 token with the route's scope. A daemon route says how
  * it refuses: `{ error }` (`plain`) or `{ success: false, error }` (`flagged`); a runner
  * route refuses in `{ error }`. shared/control-fixtures/ pins them.

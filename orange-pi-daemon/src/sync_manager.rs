@@ -125,14 +125,6 @@ impl SyncManager {
         false
     }
 
-    pub fn get_sync_mode(&self) -> SyncMode {
-        if self.needs_full_sync() {
-            SyncMode::Full
-        } else {
-            SyncMode::Incremental
-        }
-    }
-
     pub fn record_success(&mut self, sync_mode: SyncMode) {
         self.consecutive_failures = 0;
 
@@ -203,7 +195,6 @@ mod tests {
     fn test_initial_state_needs_full_sync() {
         let sm = SyncManager::new();
         assert!(sm.needs_full_sync());
-        assert_eq!(sm.get_sync_mode(), SyncMode::Full);
     }
 
     #[test]
@@ -212,7 +203,6 @@ mod tests {
 
         sm.record_success(SyncMode::Full);
         assert!(!sm.needs_full_sync());
-        assert_eq!(sm.get_sync_mode(), SyncMode::Incremental);
     }
 
     #[test]

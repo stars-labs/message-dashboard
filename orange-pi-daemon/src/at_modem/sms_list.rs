@@ -2,7 +2,7 @@ use super::{AtModemManager, AtSms};
 use crate::types::SmsStorage;
 use anyhow::{anyhow, Result};
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 impl AtModemManager {
     /// Scans each read storage independently: the EC20 treats `MT` as an alias for `ME`,
@@ -201,7 +201,6 @@ impl AtModemManager {
                             messages.push(AtSms {
                                 storage: None,
                                 index: sms.0,
-                                part_indices: vec![sms.0],
                                 sender: sms.1,
                                 timestamp: sms.2,
                                 text,
@@ -274,20 +273,6 @@ impl AtModemManager {
     ) -> Result<()> {
         self.select_sms_storage(port, storage).await?;
         self.delete_sms(port, index).await
-    }
-
-    pub async fn delete_all_sms(&self, port: &str) -> Result<()> {
-        // AT+CMGD=1,4: delete-flag 4 deletes all messages
-        let response = self
-            .send_at_command(port, "AT+CMGD=1,4", self.timeout)
-            .await?;
-
-        if response.contains("OK") {
-            info!("Deleted all SMS from {}", port);
-            Ok(())
-        } else {
-            Err(anyhow!("Failed to delete all SMS: {response}"))
-        }
     }
 }
 

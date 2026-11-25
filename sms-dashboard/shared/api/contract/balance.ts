@@ -1,10 +1,5 @@
 import * as v from 'valibot';
 import {
-  BalanceCheckCreateBody,
-  BalanceCheckCreateResponse,
-  BalanceCheckIdBody,
-  BalanceCheckStepResponse,
-  BalanceCheckStopResponse,
   BalanceCheckDetailResponse,
   BalanceCheckStatusQuery,
   BalanceCheckStatusResponse,
@@ -31,11 +26,6 @@ export const balanceChecks = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ query: BalanceCheckStatusQuery }))
     .output(BalanceCheckStatusResponse),
-  previewAll: route(
-    { kind: 'user', permission: 'balances.query' },
-    'GET',
-    '/api/balance-checks/query-preview',
-  ).output(BalanceQueryPreviewResponse),
   preview: route(
     { kind: 'user', permission: 'balances.query' },
     'POST',
@@ -68,27 +58,6 @@ export const balanceChecks = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ params: v.object({ id: v.string() }) }))
     .output(BalanceCheckDetailResponse),
-};
-
-const OPS = { kind: 'daemon', errors: 'flagged' } as const;
-
-export const balanceCheckControl = {
-  // 202: the check is queued; its SMS or browser job runs later.
-  create: route(OPS, 'POST', '/api/control/balance-checks')
-    .route({ outputStructure: 'detailed' })
-    .input(BalanceCheckCreateBody)
-    .output(v.object({ status: v.literal(202), body: BalanceCheckCreateResponse })),
-  continue: route(OPS, 'POST', '/api/control/balance-checks/continue')
-    .route({ outputStructure: 'detailed' })
-    .input(BalanceCheckIdBody)
-    .output(v.object({ status: v.literal(202), body: BalanceCheckStepResponse })),
-  retry: route(OPS, 'POST', '/api/control/balance-checks/retry')
-    .route({ outputStructure: 'detailed' })
-    .input(BalanceCheckIdBody)
-    .output(v.object({ status: v.literal(202), body: BalanceCheckStepResponse })),
-  stop: route(OPS, 'POST', '/api/control/balance-checks/stop')
-    .input(BalanceCheckIdBody)
-    .output(BalanceCheckStopResponse),
 };
 
 export const balanceRunners = {

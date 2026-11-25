@@ -21,8 +21,7 @@ this page describes how the parts connect.
 
 Notes:
 
-- The daemon uses AT commands by default. ModemManager over D-Bus is opt-in
-  with `USE_DBUS=1`.
+- The daemon talks to the modems with AT commands only; ModemManager is off.
 - Only the Worker reads or writes D1. The daemon and the Agent connect outbound
   and poll; neither accepts inbound requests, except the daemon's voice bridge
   listener, which runs only when `VOICE_BRIDGE_DOMAIN` is set.

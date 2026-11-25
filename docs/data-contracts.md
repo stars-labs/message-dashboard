@@ -12,8 +12,8 @@
   `server/db/modems.ts` reads or writes `modems`; `bun run lint` enforces it.
 - `device_view` joins `sims.imei` to `modems.equipment_id`. The join key is IMEI,
   not ICCID.
-- Use `modems.detected_iccid`; `modems.current_iccid` is stale legacy data frozen
-  since migration `033` — never query it.
+- A modem's ICCID is `modems.detected_iccid`; migration `081` dropped the legacy
+  `current_iccid`.
 - `modem_state` was removed by migration `033`; signal fields live on `modems`.
 - The v8 daemon syncs through `/api/control/devices`. The pre-`033`
   `/api/control/phones` route was removed; do not reintroduce it.
@@ -76,13 +76,11 @@
   fixtures, and a controlled preview; it starts disabled.
 
 Browser users need `bills.read` to list accounts and read bills. Administrators need
-`bills.write` for account configuration, bill actions, and historical backfill.
+`bills.write` for account configuration and bill actions.
 
 Carrier-neutral routes:
 
 - `GET /api/carrier-billing/accounts`
-- `POST /api/carrier-billing/backfill/preview`
-- `POST /api/carrier-billing/backfill/execute`
 - `GET /api/carrier-bills`
 - `GET /api/carrier-bills/:id`
 - `POST /api/carrier-bills/:id/payment-planned`
@@ -91,6 +89,4 @@ Carrier-neutral routes:
 - `POST /api/carrier-bills/:id/reopen`
 
 Every user billing write takes the actor from the verified Auth0 identity. Bill
-actions and backfill execution require an idempotency key and the exact expected
-version. Backfill execution additionally requires the exact digest returned by a
-read-only preview.
+actions require an idempotency key and the exact expected version.

@@ -9,8 +9,7 @@
 - Syncs through `/api/control/devices`. The pre-v8 `/api/control/phones` route is
   removed — do not reintroduce it.
 - Never writes `sims` inventory — only writes `modems` and `daemon_health`.
-- `modems.detected_iccid` is the live field. `modems.current_iccid` is dead legacy —
-  never read or write it.
+- A modem's ICCID is `modems.detected_iccid`.
 - Daemon health and SIM state are separate domains — do not infer one from the other.
 - `wire::PendingSms` and `PendingSmsResponse` define the shared pending-SMS
   payload. A missing `purpose` retains the established `user` default.
@@ -47,9 +46,14 @@ SMS_API_URL=http://localhost:8787 SMS_API_KEY=<local key> RUST_LOG=debug cargo r
 It runs the tests under `cargo llvm-cov`, which fails when the line or function
 total falls below the floors in `flake.nix` (`check-daemon`); raise a floor when
 coverage rises, never lower one to make a change pass.
-Clippy checks all targets and features, including tests and diagnostic binaries,
+Clippy checks all targets and features, including tests and `at_debug`,
 and treats every warning as an error. Fix violations rather than suppressing them;
 any unavoidable exception must be narrowly scoped and explain the external constraint.
+
+The crate is one binary with no library target, so rustc reports any item the daemon
+never reaches as dead code, including one only tests call. Tests live in
+`<module>/tests.rs` (shared helpers in `src/test_support.rs`); do not add a `[lib]`
+or a `tests/` directory to reach internals, which would hide dead code again.
 
 ## Deploy
 

@@ -4,8 +4,6 @@ use std::time::Instant;
 #[derive(Debug, Clone, Copy)]
 pub enum HealthTask {
     ModemReader,
-    DeviceSync,
-    OutboundPoll,
     MessageUploader,
 }
 
@@ -40,22 +38,6 @@ impl HealthTracker {
             HealthTask::MessageUploader => {
                 self.message_uploader.last_success = Some(Instant::now());
             }
-            HealthTask::DeviceSync | HealthTask::OutboundPoll => {}
-        }
-    }
-
-    pub fn queue_snapshot(
-        &self,
-        pending: usize,
-        dead_letter: usize,
-        in_flight: usize,
-        oldest: Option<u64>,
-    ) -> QueueHealthSnapshot {
-        QueueHealthSnapshot {
-            pending,
-            in_flight,
-            dead_letter,
-            oldest_unacknowledged_age_seconds: oldest,
         }
     }
 
@@ -87,9 +69,13 @@ mod tests {
         let mut tracker = HealthTracker::new("session".into(), "8.0.0".into());
         tracker.record_success(HealthTask::ModemReader);
         tracker.record_success(HealthTask::MessageUploader);
-        let value =
-            serde_json::to_value(tracker.snapshot(tracker.queue_snapshot(2, 1, 3, Some(45))))
-                .unwrap();
+        let value = serde_json::to_value(tracker.snapshot(QueueHealthSnapshot {
+            pending: 2,
+            in_flight: 3,
+            dead_letter: 1,
+            oldest_unacknowledged_age_seconds: Some(45),
+        }))
+        .unwrap();
         assert_eq!(value["schema_version"], 3);
         assert_eq!(value["queue"]["dead_letter"], 1);
         assert!(value.get("tasks").is_none());

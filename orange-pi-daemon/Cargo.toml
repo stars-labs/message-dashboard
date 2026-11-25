@@ -3,13 +3,9 @@ name = "orange-pi-daemon-rust"
 version = "8.0.1"
 edition = "2021"
 publish = false
-# src/bin/ holds throwaway diagnostic tools (at_debug, modem_health,
-# test_sms_delete), so bare `cargo run` is ambiguous. Default to the daemon.
+# src/bin/at_debug is the AT tool scripts/slim-modem-usbcfg.sh drives, so bare
+# `cargo run` is ambiguous. Default to the daemon.
 default-run = "orange-pi-daemon-rust"
-
-[lib]
-name = "orange_pi_daemon_rust"
-path = "src/lib.rs"
 
 [[bin]]
 name = "orange-pi-daemon-rust"
@@ -49,9 +45,6 @@ chrono = { version = "0.4", features = ["serde", "clock"] }
 # UUID for correlation IDs
 uuid = { version = "1", features = ["v4"] }
 
-# Native D-Bus communication (eliminates subprocess overhead)
-zbus = { version = "4", features = ["tokio"] }
-
 # SQLite for local message storage and queue
 rusqlite = { version = "0.43", features = ["bundled", "chrono"] }
 
@@ -77,9 +70,7 @@ strip = true
 [lints.rust]
 unsafe_code = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }
-unreachable_pub = "warn"
 unused_qualifications = "warn"
-missing_debug_implementations = "warn"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

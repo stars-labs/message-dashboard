@@ -12,17 +12,12 @@ import {
   getExistingSim,
   getSimRole,
   insertSim,
-  insertSimFromImport,
   updateSim,
   updateSimByUpsert,
-  updateSimFromImport,
   type ExistingSim,
 } from '../db/sims.js';
 import { errorText } from '../../shared/error-text.js';
 import {
-  SimMapping,
-  type BulkIccidMappingsBody,
-  type BulkIccidMappingsResponse,
   type CreateIccidMappingBody,
   type CreateIccidMappingResponse,
   type DeleteIccidMappingResponse,
@@ -227,16 +222,6 @@ export const iccidMappingsHandler = {
     }
   },
 
-  async getByIccid({ env }: ReadCall, iccid: string): Promise<IccidMappingDetailResponse> {
-    try {
-      const mapping = await getIccidMappingDetail(env.DB, iccid);
-      if (!mapping) throw new ORPCError('NOT_FOUND', { message: 'ICCID not found' });
-      return { success: true, data: mapping };
-    } catch (error) {
-      fail(error, 'Error fetching ICCID by ID', 'Failed to fetch ICCID mapping');
-    }
-  },
-
   async create(
     { env, user }: WriteCall,
     data: v.InferOutput<typeof CreateIccidMappingBody>,
@@ -339,78 +324,6 @@ export const iccidMappingsHandler = {
         });
       }
       fail(error, 'Error deleting ICCID mapping', 'Failed to delete ICCID mapping');
-    }
-  },
-
-  async bulkImport(
-    { env, user }: WriteCall,
-    { mappings }: v.InferOutput<typeof BulkIccidMappingsBody>,
-  ): Promise<BulkIccidMappingsResponse> {
-    try {
-      let created = 0;
-      let updated = 0;
-      let failed = 0;
-      const errors: string[] = [];
-
-      for (const candidate of mappings) {
-        const parsed = v.safeParse(SimMapping, candidate);
-        if (!parsed.success) {
-          failed++;
-          errors.push(`Missing required fields for mapping: ${JSON.stringify(candidate)}`);
-          continue;
-        }
-        const mapping = parsed.output;
-        try {
-          const { iccid, phone_number, sim_index, country_code, carrier, imei, notes } = mapping;
-
-          const existing = await getExistingSim(env.DB, iccid);
-          const service = resolveServiceType(mapping, existing);
-          if ('error' in service) {
-            failed++;
-            errors.push(`Invalid service type for ICCID ${iccid}: ${service.error}`);
-            continue;
-          }
-          const role = await resolveSimRole(mapping, existing, env);
-          if ('error' in role) {
-            failed++;
-            errors.push(`Invalid SIM role for ICCID ${iccid}: ${role.error}`);
-            continue;
-          }
-
-          const sim = {
-            sim_index,
-            phone_number,
-            country_code: emptyToNull(country_code),
-            carrier: emptyToNull(carrier),
-            imei: emptyToNull(imei),
-            notes: emptyToNull(notes),
-            serviceType: service.serviceType,
-            serviceTypeSource: service.serviceTypeSource,
-            serviceTypeProvided: service.serviceTypeProvided,
-            role: role.role,
-            primaryIccid: role.primaryIccid,
-            updatedBy: updatedBy(user),
-          };
-          if (existing) {
-            await updateSimFromImport(env.DB, iccid, sim);
-            updated++;
-          } else {
-            await insertSimFromImport(env.DB, iccid, sim);
-            created++;
-          }
-        } catch (error) {
-          failed++;
-          errors.push(`Failed to import mapping for ICCID ${mapping.iccid}: ${errorText(error)}`);
-        }
-      }
-
-      return {
-        success: true,
-        summary: { total: mappings.length, created, updated, failed },
-        ...(errors.length > 0 ? { errors } : {}),
-      };
-    } catch (error) {
-      fail(error, 'Error in bulk import', `Failed to import ICCID mappings: ${errorText(error)}`);
     }
   },
 };

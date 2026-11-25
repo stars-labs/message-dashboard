@@ -12,7 +12,7 @@
   `sims` and only `server/db/modems.ts` touches `modems`; lint enforces both.
 - `sims` — user inventory, source of truth. Daemon never writes it.
 - `sims.service_type` — manually verified. Never infer from ICCID or balance replies.
-- `modems.detected_iccid` — live field. `modems.current_iccid` is dead legacy.
+- `modems.detected_iccid` — a modem's ICCID.
 - `modem_state` dropped in migration `033` — signal fields are on `modems`.
 - SIM indices: `S` + two digits (`S01`, `S36`) — use the centralized formatter.
 - Auth: browser → Auth0 session + RBAC; daemon → `API_KEY`; Balance Agent →

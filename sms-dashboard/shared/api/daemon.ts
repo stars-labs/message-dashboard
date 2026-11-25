@@ -107,10 +107,6 @@ export const UploadResponse = v.object({
 
 export type UploadResponse = v.InferOutput<typeof UploadResponse>;
 
-export const ClearMessagesResponse = v.object({ success: v.literal(true), message: v.string() });
-
-export type ClearMessagesResponse = v.InferOutput<typeof ClearMessagesResponse>;
-
 /** The daemon process names itself; the handler checks the name. */
 export const PendingSmsHeaders = v.object({ 'x-daemon-session-id': v.optional(v.string()) });
 

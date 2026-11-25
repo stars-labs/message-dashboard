@@ -1,7 +1,35 @@
+mod api_client;
+mod at_modem;
+mod health;
+mod identifiers;
+mod logging;
+mod message_store;
+mod modem_manager;
+mod partial_sms;
 mod periodic_tasks;
+mod proxy_protocol;
 mod reader;
+mod signal_cache;
+mod sms_sender;
+mod stall_watchdog;
 mod startup;
+mod sync_manager;
+mod termios_chars;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod tests;
+mod timeout_tracker;
+mod types;
 mod uploader;
+mod urc_reader;
+mod voice_auth;
+mod voice_bridge;
+mod voice_call;
+mod voice_codec;
+mod voice_pacer;
+mod wire;
+mod worker_pool;
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -10,14 +38,12 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
-use orange_pi_daemon_rust::api_client::ApiClient;
-use orange_pi_daemon_rust::benchmark::PerformanceBenchmark;
-use orange_pi_daemon_rust::health::HealthTracker;
-use orange_pi_daemon_rust::logging;
-use orange_pi_daemon_rust::modem_manager::ModemManager;
-use orange_pi_daemon_rust::stall_watchdog::{self, Heartbeat, STALL_AFTER};
-use orange_pi_daemon_rust::types::Config;
-use orange_pi_daemon_rust::wire::ModemReport;
+use api_client::ApiClient;
+use health::HealthTracker;
+use modem_manager::ModemManager;
+use stall_watchdog::{Heartbeat, STALL_AFTER};
+use types::Config;
+use wire::ModemReport;
 
 use periodic_tasks::{
     spawn_device_sync, spawn_health_heartbeat, spawn_rediscovery, spawn_retention_cleanup,
@@ -46,11 +72,6 @@ async fn main() -> Result<()> {
 
     let db_path = resolve_db_path(&args);
 
-    if args.iter().any(|a| a == "benchmark") {
-        info!("🏁 Running performance benchmark...");
-        return PerformanceBenchmark::run_benchmark().await;
-    }
-
     let (api_url, api_key) = api_settings(|name| std::env::var(name).ok())?;
 
     let session_id = format!("rust-daemon-{}", uuid::Uuid::new_v4());
@@ -64,11 +85,10 @@ async fn main() -> Result<()> {
 
     let message_store = open_message_store(&db_path)?;
 
-    let modem_manager = Arc::new(ModemManager::new().await);
+    let modem_manager = Arc::new(ModemManager::new());
     let config = Config {
         api_url: api_url.clone(),
         api_key: api_key.clone(),
-        check_interval_secs: 1, // Fast 1-second check interval for dual-loop
     };
     let api_client = Arc::new(ApiClient::new(config)?);
 

@@ -5,14 +5,6 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_FILTER: &str = "orange_pi_daemon_rust=info";
 
-pub fn backend_name() -> &'static str {
-    if cfg!(target_os = "linux") {
-        "journald"
-    } else {
-        "terminal"
-    }
-}
-
 pub fn init() -> Result<()> {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
@@ -38,17 +30,4 @@ pub fn init() -> Result<()> {
         .map_err(|error| anyhow::anyhow!("Failed to initialize terminal tracing: {error}"))?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn selects_the_native_backend_on_linux_only() {
-        let expected = if cfg!(target_os = "linux") {
-            "journald"
-        } else {
-            "terminal"
-        };
-        assert_eq!(super::backend_name(), expected);
-    }
 }

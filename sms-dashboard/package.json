@@ -15,7 +15,7 @@
     "typecheck:svelte": "svelte-check --tsconfig ./tsconfig.client.json --fail-on-warnings && svelte-check --tsconfig ./tsconfig.client-test.json --fail-on-warnings",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "knip": "knip --no-progress",
+    "knip": "knip --no-progress && knip --no-progress --production",
     "check:no-js": "bun scripts/check-no-js.ts",
     "check:migrations": "bun scripts/check-migrations.ts",
     "check:doc-links": "bun scripts/check-doc-links.ts",

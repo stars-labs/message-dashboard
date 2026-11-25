@@ -194,11 +194,6 @@ export async function updateSmsResult(
   return result.meta.changes;
 }
 
-export async function deleteAllMessages(db: D1<'run'>): Promise<number> {
-  const result = await db.prepare('DELETE FROM messages').run();
-  return result.meta.changes;
-}
-
 export async function upsertDaemonHeartbeat(
   db: D1<'run'>,
   heartbeat: { clientIp: string; version: string; metadata: string; sessionId: string },

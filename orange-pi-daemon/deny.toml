@@ -3,9 +3,6 @@
 [advisories]
 ignore = [
   { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained, with no known vulnerability; moving to jiff is a separate change." },
-  { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained, with no known vulnerability; it goes away with zbus 6 (src/native_dbus.rs), a separate change verified on the Pi." },
-  { id = "RUSTSEC-2026-0371", reason = "zbus_names: as RUSTSEC-2026-0370." },
-  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: as RUSTSEC-2026-0370." },
 ]
 
 [licenses]

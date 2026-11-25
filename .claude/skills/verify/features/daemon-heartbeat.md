@@ -39,7 +39,7 @@ Checked in: `scripts/verify/journeys/daemon-contract.ts`.
 ## Gotchas
 
 - The daemon's own half (building the body, the stall watchdog) is proven by
-  `check-daemon` and `orange-pi-daemon/tests/control_fixtures_tests.rs`, not here:
+  `check-daemon` and `orange-pi-daemon/src/wire/tests.rs`, not here:
   the daemon cannot run on a Mac (it reads `/sys/class/tty`).
 - The seeded heartbeat is stamped at stack start; a long journey sees it age.
 - A wire change here must change the fixture, the Worker and the daemon together

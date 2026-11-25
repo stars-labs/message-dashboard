@@ -91,9 +91,6 @@
                     enable = true;
                     package = self.packages.aarch64-linux.orange-pi-daemon-rust;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
-                    phoneUpdateIntervalSeconds = 1;
-                    messageCheckIntervalMs = 1000;
-                    signalCheckIntervalSeconds = 10;
                     debugBuild = false;
                     # Cloudflare Realtime adapters connect here; DNS-only A record
                     # to the office IP, 443 forwarded to the Pi. docs/voice-calls.md
@@ -142,12 +139,7 @@
             };
 
             nativeBuildInputs = with pkgs; [
-              pkg-config
               rustfmt
-            ];
-            buildInputs = with pkgs; [
-              openssl
-              dbus
             ];
 
             # Formatting is a deployment gate: an unformatted tree fails the build.
@@ -162,11 +154,9 @@
             meta = with lib; {
               description = "High-performance Rust SMS daemon with direct AT commands for 100+ modems";
               longDescription = ''
-                A multi-threaded async Rust daemon optimized for 100+ USB modems. Uses direct
-                AT commands via serial ports as primary backend, with D-Bus/ModemManager fallback.
-                Collects SMS messages and phone status, forwarding to SMS Dashboard API in real-time.
-                Features: Direct AT commands (~1-5ms/op), worker pool architecture, signal caching,
-                and automatic backend selection based on availability.
+                A multi-threaded async Rust daemon optimized for 100+ USB modems. Talks to each
+                modem with direct AT commands over its serial ports. Collects SMS messages and
+                phone status, forwarding them to the SMS Dashboard API in real time.
               '';
               homepage = "https://github.com/hecoinfo/message-dashboard";
               license = licenses.mit;
@@ -190,7 +180,7 @@
               root="$(git rev-parse --show-toplevel)"
               wire="sms-dashboard/shared/daemon-wire"
               rm -f "$root/$wire"/*.ts
-              (cd "$root/orange-pi-daemon" && cargo test --locked --lib export_bindings)
+              (cd "$root/orange-pi-daemon" && cargo test --locked --bin orange-pi-daemon-rust export_bindings)
               if [ -n "$(git -C "$root" status --porcelain --untracked-files=all -- "$wire")" ]; then
                 git -C "$root" status --short --untracked-files=all -- "$wire"
                 git -C "$root" --no-pager diff -- "$wire"
@@ -277,7 +267,10 @@
               git
               rustfmt
             ];
+            # Git exports GIT_DIR to hooks; in a linked worktree it makes every git
+            # call below a subdirectory treat that subdirectory as the work tree root.
             text = ''
+              unset GIT_DIR GIT_WORK_TREE
               project="$1"
               shift
               cd "$(git rev-parse --show-toplevel)/$project"
@@ -320,7 +313,9 @@
               LLVM_COV = "${pkgs.rustc.llvm}/bin/llvm-cov";
               LLVM_PROFDATA = "${pkgs.rustc.llvm}/bin/llvm-profdata";
             };
+            # See in-project: a hook's GIT_DIR would misplace check-daemon-wire's root.
             text = ''
+              unset GIT_DIR GIT_WORK_TREE
               cd "$(git rev-parse --show-toplevel)/orange-pi-daemon"
               too_long="$(find src -name '*.rs' ! -name tests.rs -exec awk 'END { if (NR > 600) print FILENAME ": " NR " lines" }' {} \;)"
               if [ -n "$too_long" ]; then
@@ -333,7 +328,6 @@
               # Coverage floors: raise them when coverage rises, never lower one to pass.
               cargo llvm-cov --locked --all-features --summary-only \
                 --fail-under-lines 53.3 --fail-under-functions 62.6
-              cargo test --locked --doc
               check-daemon-wire
             '';
           };
@@ -799,8 +793,6 @@
                 nixfmt
                 nixd
 
-                ansible
-                ansible-lint
                 sops
                 age
 
@@ -838,9 +830,6 @@
                 echo "  • check-api-compat — breaking API changes against origin/main (fails for /api/control/)"
                 echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
-
-                # Ensure Ansible finds collections installed by ansible-galaxy (SOPS, general)
-                export ANSIBLE_COLLECTIONS_PATHS="$HOME/.ansible/collections:/usr/share/ansible/collections:/etc/ansible/collections:''${ANSIBLE_COLLECTIONS_PATHS:-}"
               '';
             };
 

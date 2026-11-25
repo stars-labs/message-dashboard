@@ -179,68 +179,29 @@ describe('keyword rule D1 reads', () => {
     expect(immutableResponse.status).toBe(400);
     expect(db.statements).toHaveLength(1);
   });
-
-  test('batch tag reads hide inactive keyword rules', async () => {
-    const db = await database();
-    addKeyword(db, { keyword: 'code', tag: 'Active' });
-    addKeyword(db, { keyword: 'pin', tag: 'Inactive', is_active: 0 });
-    addMessage(db, { id: 'm-1' });
-    addTag(db, { message_id: 'm-1', keyword_tag_id: 1, position: 0 });
-    addTag(db, { message_id: 'm-1', keyword_tag_id: 2, position: 5 });
-
-    const response = await call(db, 'POST', '/api/messages/batch-tags', {
-      body: JSON.stringify({ messageIds: ['m-1'] }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(db.statements.join('\n')).toContain('kt.is_active = TRUE');
-    expect(await bodyOf(response)).toMatchObject({
-      success: true,
-      data: { 'm-1': [{ id: 1, tag: 'Active' }] },
-    });
-  });
 });
 
 describe('authorization', () => {
-  const guarded: { method: string; path: string; viewerAllowed: boolean }[] = [
-    { method: 'GET', path: '/api/keywords', viewerAllowed: false },
-    { method: 'GET', path: '/api/keywords/1', viewerAllowed: false },
-    { method: 'POST', path: '/api/keywords', viewerAllowed: false },
-    { method: 'PUT', path: '/api/keywords/1', viewerAllowed: false },
-    { method: 'DELETE', path: '/api/keywords/1', viewerAllowed: false },
-    { method: 'POST', path: '/api/keywords/1/history', viewerAllowed: false },
-    { method: 'POST', path: '/api/messages/batch-tags', viewerAllowed: true },
-    { method: 'GET', path: '/api/messages/m-1/tags', viewerAllowed: true },
+  const guarded: { method: string; path: string }[] = [
+    { method: 'GET', path: '/api/keywords' },
+    { method: 'GET', path: '/api/keywords/1' },
+    { method: 'POST', path: '/api/keywords' },
+    { method: 'PUT', path: '/api/keywords/1' },
+    { method: 'DELETE', path: '/api/keywords/1' },
+    { method: 'POST', path: '/api/keywords/1/history' },
   ];
 
-  for (const { method, path, viewerAllowed } of guarded) {
+  for (const { method, path } of guarded) {
     test(`${method} ${path} answers 401 without a credential the middleware accepts`, async () => {
       const response = await call(await database(), method, path, { token: 'unknown' });
       expect(response.status).toBe(401);
     });
 
-    if (!viewerAllowed) {
-      test(`${method} ${path} answers 403 to a role without the permission`, async () => {
-        const response = await call(await database(), method, path, { token: VIEWER });
-        expect(response.status).toBe(403);
-      });
-    }
-  }
-
-  test('a viewer may read message tags', async () => {
-    const db = await database();
-    const response = await call(db, 'GET', '/api/messages/m-1/tags', { token: VIEWER });
-    expect(response.status).toBe(200);
-  });
-
-  test('a viewer may read batch tags', async () => {
-    const db = await database();
-    const response = await call(db, 'POST', '/api/messages/batch-tags', {
-      token: VIEWER,
-      body: '{"messageIds":["m-1"]}',
+    test(`${method} ${path} answers 403 to a role without the permission`, async () => {
+      const response = await call(await database(), method, path, { token: VIEWER });
+      expect(response.status).toBe(403);
     });
-    expect(response.status).toBe(200);
-  });
+  }
 });
 
 describe('GET /api/keywords', () => {
@@ -879,125 +840,6 @@ describe('DELETE /api/keywords/:id', () => {
   });
 });
 
-describe('POST /api/messages/batch-tags', () => {
-  function batch(db: TestDb, body: string) {
-    return call(db, 'POST', '/api/messages/batch-tags', { body });
-  }
-
-  test('groups the active tags by message, in position order', async () => {
-    const db = await database();
-    addKeyword(db, { keyword: 'code', tag: 'OTP', priority: 2 });
-    addKeyword(db, { keyword: 'pin', tag: 'PIN', color: null, priority: 1 });
-    addMessage(db, { id: 'm-1' });
-    addMessage(db, { id: 'm-2' });
-    addTag(db, { message_id: 'm-1', keyword_tag_id: 2, position: 9, matched_text: 'pin' });
-    addTag(db, { message_id: 'm-1', keyword_tag_id: 1, position: 0, matched_text: 'code' });
-    addTag(db, { message_id: 'm-2', keyword_tag_id: 1, position: 3, matched_text: 'code' });
-
-    const response = await batch(db, JSON.stringify({ messageIds: ['m-1', 'm-2'] }));
-
-    expect(response.status).toBe(200);
-    expect(await bodyOf(response)).toEqual({
-      success: true,
-      data: {
-        'm-1': [
-          {
-            id: 1,
-            keyword: 'code',
-            tag: 'OTP',
-            color: '#3B82F6',
-            priority: 2,
-            position: 0,
-            length: 4,
-          },
-          { id: 2, keyword: 'pin', tag: 'PIN', color: null, priority: 1, position: 9, length: 3 },
-        ],
-        'm-2': [
-          {
-            id: 1,
-            keyword: 'code',
-            tag: 'OTP',
-            color: '#3B82F6',
-            priority: 2,
-            position: 3,
-            length: 4,
-          },
-        ],
-      },
-    });
-  });
-
-  test('reads only the first 100 message ids', async () => {
-    const db = await database();
-    addKeyword(db, { keyword: 'code' });
-    addMessage(db, { id: 'm-first' });
-    addMessage(db, { id: 'm-late' });
-    addTag(db, { message_id: 'm-first', keyword_tag_id: 1, position: 0 });
-    addTag(db, { message_id: 'm-late', keyword_tag_id: 1, position: 0 });
-    const ids = ['m-first', ...Array.from({ length: 98 }, (_, index) => `x-${index}`), 'm-fill'];
-    expect(ids).toHaveLength(100);
-
-    const response = await batch(db, JSON.stringify({ messageIds: [...ids, 'm-late'] }));
-
-    const { data } = v.parse(
-      v.object({ data: v.record(v.string(), v.array(v.unknown())) }),
-      await response.json(),
-    );
-    expect(Object.keys(data)).toEqual(['m-first']);
-  });
-
-  test('answers an empty result to no ids without reading', async () => {
-    const db = await database();
-
-    const response = await batch(db, JSON.stringify({ messageIds: [] }));
-
-    expect(response.status).toBe(200);
-    expect(await bodyOf(response)).toEqual({ success: true, data: {} });
-    expect(db.statements).toEqual([]);
-  });
-
-  const malformed: [string, unknown, string][] = [
-    ['ids that are not a list', { messageIds: 'm-1' }, 'messageIds must be an array of strings'],
-    ['ids that are not text', { messageIds: [1] }, 'messageIds must be an array of strings'],
-    ['a missing list', {}, 'messageIds must be an array of strings'],
-    ['a body that is null', null, 'Body must be a JSON object'],
-  ];
-
-  for (const [name, body, message] of malformed) {
-    test(`answers 400 to ${name} without reading`, async () => {
-      const db = await database();
-
-      const response = await batch(db, JSON.stringify(body));
-
-      expect(response.status).toBe(400);
-      expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST', detail: message });
-      expect(db.statements).toEqual([]);
-    });
-  }
-
-  test('answers 500 when the read fails', async () => {
-    const db = await database();
-    db.db.run('DROP TABLE message_tags');
-
-    const response = await batch(db, JSON.stringify({ messageIds: ['m-1'] }));
-
-    expect(response.status).toBe(500);
-    expect(await problemOf(response)).toMatchObject({
-      code: 'INTERNAL_SERVER_ERROR',
-      detail: 'Failed to fetch message tags',
-    });
-  });
-
-  test('answers 400 when the body is not JSON', async () => {
-    const db = await database();
-
-    const response = await batch(db, 'not json');
-
-    expect(response.status).toBe(400);
-    expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
-  });
-});
-
 describe('POST /api/keywords/:id/history', () => {
   const range = { since: '2026-01-01T00:00:00Z', until: '2026-12-31T00:00:00Z' };
 
@@ -1172,70 +1014,5 @@ describe('POST /api/keywords/:id/history', () => {
     const response = await history(db, JSON.stringify({ ...range, cursor: null }));
 
     expect(response.status).toBe(200);
-  });
-});
-
-describe('GET /api/messages/:id/tags', () => {
-  function tagsOf(db: TestDb, id: string) {
-    return call(db, 'GET', `/api/messages/${id}/tags`);
-  }
-
-  test('answers the active tags of one message with the keyword fields, in position order', async () => {
-    const db = await database();
-    addKeyword(db, { keyword: 'code', tag: 'OTP' });
-    addKeyword(db, { keyword: 'pin', tag: 'PIN', is_active: 0 });
-    addKeyword(db, { keyword: 'bank', tag: 'Bank', color: null });
-    addMessage(db, { id: 'm-1' });
-    addMessage(db, { id: 'm-2' });
-    addTag(db, { message_id: 'm-1', keyword_tag_id: 3, position: 8, matched_text: 'bank' });
-    addTag(db, { message_id: 'm-1', keyword_tag_id: 1, position: 1, matched_text: 'code' });
-    addTag(db, { message_id: 'm-1', keyword_tag_id: 2, position: 4, matched_text: 'pin' });
-    addTag(db, { message_id: 'm-2', keyword_tag_id: 1, position: 0, matched_text: 'code' });
-
-    const response = await tagsOf(db, 'm-1');
-
-    expect(response.status).toBe(200);
-    expect(await bodyOf(response)).toMatchObject({
-      tags: [
-        {
-          message_id: 'm-1',
-          keyword_tag_id: 1,
-          matched_text: 'code',
-          position: 1,
-          keyword: 'code',
-          tag: 'OTP',
-          color: '#3B82F6',
-        },
-        {
-          message_id: 'm-1',
-          keyword_tag_id: 3,
-          matched_text: 'bank',
-          position: 8,
-          keyword: 'bank',
-          tag: 'Bank',
-          color: null,
-        },
-      ],
-    });
-  });
-
-  test('answers an empty list for a message without tags', async () => {
-    const response = await tagsOf(await database(), 'm-1');
-
-    expect(response.status).toBe(200);
-    expect(await bodyOf(response)).toEqual({ tags: [] });
-  });
-
-  test('answers 500 when the read fails', async () => {
-    const db = await database();
-    db.db.run('DROP TABLE message_tags');
-
-    const response = await tagsOf(db, 'm-1');
-
-    expect(response.status).toBe(500);
-    expect(await problemOf(response)).toMatchObject({
-      code: 'INTERNAL_SERVER_ERROR',
-      detail: 'Failed to fetch message tags',
-    });
   });
 });

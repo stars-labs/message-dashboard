@@ -1,4 +1,4 @@
-use super::{MessageStore, RecoverySegment, Segment, StoredSegment};
+use super::{MessageStore, Segment, StoredSegment};
 use crate::identifiers::{Iccid, SmsAddress};
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
@@ -82,20 +82,6 @@ impl MessageStore {
         Ok(())
     }
 
-    pub fn get_segments(
-        &self,
-        iccid: &Iccid,
-        sender: &SmsAddress,
-        ref_id: u8,
-        total_parts: u8,
-    ) -> Result<Vec<(u8, String, String, u32)>> {
-        Ok(self
-            .get_segments_with_storage(iccid, sender, ref_id, total_parts)?
-            .into_iter()
-            .map(|(part, content, timestamp, _, index)| (part, content, timestamp, index))
-            .collect())
-    }
-
     pub fn get_segments_with_storage(
         &self,
         iccid: &Iccid,
@@ -151,34 +137,6 @@ impl MessageStore {
         }
 
         Ok(deleted)
-    }
-
-    pub fn get_all_segments(&self) -> Result<Vec<RecoverySegment>> {
-        let conn = self.conn();
-
-        let mut stmt = conn.prepare(
-            "SELECT phone_iccid, sender, ref_id, total_parts, part_number, content, timestamp, sms_storage, sms_index
-             FROM multipart_segments
-             ORDER BY phone_iccid, ref_id, part_number",
-        )?;
-
-        let segments = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get::<_, u8>(2)?,
-                    row.get::<_, u8>(3)?,
-                    row.get::<_, u8>(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get::<_, u32>(8)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(segments)
     }
 
     pub fn cleanup_old_segments(&self, timeout_secs: i64) -> Result<usize> {
