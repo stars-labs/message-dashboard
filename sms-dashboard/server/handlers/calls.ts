@@ -12,7 +12,6 @@ import { parseJson } from '../../shared/parse-json.js';
 import { listCallHistory } from '../db/calls.js';
 import {
   IceServersResponse,
-  PhoneNumber,
   type AnswerBody,
   type CallHistoryQuery,
   type CallIdBody,
@@ -53,10 +52,6 @@ import {
 const ENDPOINT_TTL_SECONDS = CALL_TTL_SECONDS;
 
 const TURN_BASE = 'https://rtc.live.cloudflare.com/v1/turn/keys';
-
-export function validNumber(value: unknown): boolean {
-  return v.is(PhoneNumber, value);
-}
 
 async function failMedia(
   env: CallEnv,

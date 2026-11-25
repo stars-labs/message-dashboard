@@ -24,7 +24,3 @@ export const SIM_SERVICE_TYPE_SOURCES: readonly LabelledOption<
 export function getSimServiceTypeLabel(value: string | null | undefined): string {
   return SIM_SERVICE_TYPES.find((option) => option.value === value)?.label ?? '待确认';
 }
-
-export function getSimServiceTypeSourceLabel(value: string | null | undefined): string {
-  return SIM_SERVICE_TYPE_SOURCES.find((option) => option.value === value)?.label ?? '—';
-}

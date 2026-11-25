@@ -48,10 +48,6 @@ export function getCountryFlag(code: string | null | undefined): string {
   return (code ? COUNTRY_BY_CODE.get(code)?.flag : undefined) ?? '🌍';
 }
 
-export function getCountryName(code: string | null | undefined): string {
-  return (code ? COUNTRY_BY_CODE.get(code)?.name : undefined) ?? code ?? '';
-}
-
 export function inferCountryFromNumber(numberOrPhone: PhoneLike): string | null {
   if (typeof numberOrPhone === 'object' && numberOrPhone !== null) {
     const stated = textOr(numberOrPhone.country, textOr(numberOrPhone.mapped_country, null));

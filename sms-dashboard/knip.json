@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5.88.1/schema.json",
+  "ignoreExportsUsedInFile": true,
   "workspaces": {
     ".": {
       "entry": [
@@ -8,22 +9,24 @@
         "svelte.config.ts",
         "test/setup.ts",
         "tailwindcss-forms.d.ts",
-        "server/*.d.ts",
-        "client/vite-env.d.ts",
-        "worker-configuration.d.ts",
-        "worker-runtime.d.ts"
+        "server/*.d.ts!",
+        "client/vite-env.d.ts!",
+        "worker-configuration.d.ts!",
+        "worker-runtime.d.ts!"
       ],
-      "project": ["**/*.{js,ts,svelte}"],
+      "project": ["**/*.{js,ts,svelte}!", "!{test,scripts,shared/control-fixtures}/**!"],
       "ignore": ["shared/daemon-wire/**"]
     },
     "balance-agent": {
       "entry": [
-        "src/main.ts",
-        "src/preload.ts",
-        "src/renderer/renderer.ts",
-        "src/renderer/balance-agent.d.ts"
+        "src/main.ts!",
+        "src/preload.ts!",
+        "src/cli.ts!",
+        "src/renderer/renderer.ts!",
+        "src/renderer/balance-agent.d.ts!"
       ],
-      "project": ["**/*.ts"]
+      "project": ["**/*.ts!", "!{scripts,src/test-support}/**!"],
+      "ignoreBinaries": ["electron"]
     }
   }
 }

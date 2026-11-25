@@ -44,10 +44,6 @@ function scopedSubject(payload: unknown, requiredScope: RunnerScope): string | n
   return granted.has(requiredScope) ? sub : null;
 }
 
-export function hasRunnerScope(payload: unknown, requiredScope: RunnerScope): boolean {
-  return scopedSubject(payload, requiredScope) !== null;
-}
-
 export function runnerCanAccessOwner(
   auth: RunnerAuth,
   requestedBySubject: string | null | undefined,

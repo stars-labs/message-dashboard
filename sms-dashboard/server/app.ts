@@ -34,6 +34,7 @@ router.get('*', async (request) =>
     : ((await appShellRedirect(request, request.env)) ?? serveFrontend(request)),
 );
 
+/** @internal */
 export function routeTable() {
   return [...contractRoutes(), ...router.routes()];
 }

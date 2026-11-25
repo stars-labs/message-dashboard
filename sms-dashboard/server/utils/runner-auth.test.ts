@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
-import { RUNNER_SCOPES } from '../../shared/api/runner-scopes.js';
+import { RUNNER_SCOPES, type RunnerScope } from '../../shared/api/runner-scopes.js';
 import { auth0Handler } from '../handlers/auth0.js';
-import {
-  authorizeRunnerControl,
-  hasRunnerScope,
-  runnerCanAccessOwner,
-  type RunnerAuth,
-} from './runner-auth.js';
+import { authorizeRunnerControl, runnerCanAccessOwner, type RunnerAuth } from './runner-auth.js';
 
 let verifySpy: Mock<typeof auth0Handler.verifyToken> | undefined;
 
@@ -91,41 +86,39 @@ describe('authorizeRunnerControl', () => {
 });
 
 describe('runner Auth0 scopes', () => {
-  test('accepts only an exact scope attached to an authenticated subject', () => {
-    expect(
-      hasRunnerScope(
-        { sub: 'device-1', scope: `openid ${RUNNER_SCOPES.heartbeat}` },
-        RUNNER_SCOPES.heartbeat,
-      ),
-    ).toBe(true);
-    expect(
-      hasRunnerScope({ sub: 'device-1', scope: 'balance:runners' }, RUNNER_SCOPES.heartbeat),
-    ).toBe(false);
-    expect(hasRunnerScope({ scope: RUNNER_SCOPES.heartbeat }, RUNNER_SCOPES.heartbeat)).toBe(false);
+  async function grants(claims: Record<string, unknown>, scope: RunnerScope): Promise<boolean> {
+    verifySpy?.mockRestore();
+    verifySpy = spyOn(auth0Handler, 'verifyToken').mockResolvedValue(claims);
+    const auth = await authorizeRunnerControl(
+      runnerRequest({ Authorization: 'Bearer device-jwt' }),
+      scope,
+    );
+    return auth.authorized;
+  }
+
+  test('accepts only an exact scope attached to an authenticated subject', async () => {
+    const heartbeat = RUNNER_SCOPES.heartbeat;
+    expect(await grants({ sub: 'device-1', scope: `openid ${heartbeat}` }, heartbeat)).toBe(true);
+    expect(await grants({ sub: 'device-1', scope: 'balance:runners' }, heartbeat)).toBe(false);
+    expect(await grants({ scope: heartbeat }, heartbeat)).toBe(false);
+    expect(await grants({ sub: '', scope: heartbeat }, heartbeat)).toBe(false);
   });
 
-  test('supports Auth0 RBAC permissions arrays', () => {
-    expect(
-      hasRunnerScope({ sub: 'device-1', permissions: [RUNNER_SCOPES.smsAi] }, RUNNER_SCOPES.smsAi),
-    ).toBe(true);
-    expect(
-      hasRunnerScope(
-        { sub: 'device-1', permissions: [RUNNER_SCOPES.smsAi] },
-        RUNNER_SCOPES.carrierBrowser,
-      ),
-    ).toBe(false);
+  test('supports Auth0 RBAC permissions arrays', async () => {
+    const claims = { sub: 'device-1', permissions: [RUNNER_SCOPES.smsAi] };
+    expect(await grants(claims, RUNNER_SCOPES.smsAi)).toBe(true);
+    expect(await grants(claims, RUNNER_SCOPES.carrierBrowser)).toBe(false);
   });
 
-  test('grants nothing when a claim has the wrong type', () => {
+  test('grants nothing when a claim has the wrong type', async () => {
     const heartbeat = RUNNER_SCOPES.heartbeat;
     expect(
-      hasRunnerScope({ sub: 'device-1', scope: heartbeat, permissions: ['x', 7] }, heartbeat),
+      await grants({ sub: 'device-1', scope: heartbeat, permissions: ['x', 7] }, heartbeat),
     ).toBe(false);
-    expect(hasRunnerScope({ sub: 'device-1', permissions: [heartbeat], scope: 5 }, heartbeat)).toBe(
+    expect(await grants({ sub: 'device-1', permissions: [heartbeat], scope: 5 }, heartbeat)).toBe(
       false,
     );
-    expect(hasRunnerScope({ sub: 42, scope: heartbeat }, heartbeat)).toBe(false);
-    expect(hasRunnerScope(null, heartbeat)).toBe(false);
+    expect(await grants({ sub: 42, scope: heartbeat }, heartbeat)).toBe(false);
   });
 
   test('keeps Auth0 and legacy balance-job ownership separate', () => {
