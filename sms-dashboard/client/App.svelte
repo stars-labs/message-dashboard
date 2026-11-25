@@ -18,7 +18,9 @@
   import { auth } from './lib/auth.js';
   import { getDaemonStatusMeta, isDaemonConnected, type DaemonView } from './lib/daemon-status.js';
   import { MESSAGE_PAGE_SIZE } from './lib/message-page.js';
+  import { toEpochMilliseconds } from './lib/time.js';
   import type { MeResponse } from '../shared/api/auth.js';
+  import type { D1QuotaExceeded } from '../shared/api/d1-quota.js';
   import type { CreateIccidMappingResponse } from '../shared/api/iccid-mappings.js';
   import type { ApiMessage } from '../shared/api/messages.js';
   import type { Phone } from '../shared/api/phones.js';
@@ -71,7 +73,11 @@
   const POLL_INTERVAL_MS = 60000;
   const DAEMON_POLL_INTERVAL_MS = 300000;
   let lastDaemonPollAt = 0;
+  let daemonStatusRequest: Promise<boolean> | null = null;
   let daemonRefreshing = $state(false);
+  let d1Quota = $state<D1QuotaExceeded | null>(null);
+  let awaitingD1Write = $state(false);
+  let databasePollingPaused = $derived(d1Quota !== null && !awaitingD1Write);
   let showDaemonDetails = $state(false);
   let swUpdatePrompt = $state<{ checkForUpdate(): Promise<unknown> } | null>(null);
   let authError = $state<string | null>(null);
@@ -96,7 +102,11 @@
     view: () => currentView,
     selectedIccid: () => selectedPhoneIccid,
   });
-  const calls = new CallController({ isSignedIn: () => user !== null, can });
+  const calls = new CallController({
+    isSignedIn: () => user !== null,
+    can,
+    allowHistoryRead: () => !databasePollingPaused,
+  });
 
   async function handleResetLocalCache() {
     showMoreMenu = false;
@@ -107,7 +117,7 @@
     if (pullRefreshing) return;
     pullRefreshing = true;
     try {
-      await Promise.all([loadData(), swUpdatePrompt?.checkForUpdate()]);
+      await Promise.all([refreshData(), swUpdatePrompt?.checkForUpdate()]);
     } finally {
       pullRefreshing = false;
     }
@@ -130,7 +140,7 @@
     showSendDrawer = false;
     currentView = view;
     window.location.hash = view;
-    if (view === 'balances') void balances.refresh();
+    if (view === 'balances' && !databasePollingPaused) void balances.refresh();
   }
 
   function openIccidMappings(filter: 'all' | 'error') {
@@ -175,7 +185,7 @@
   }
 
   async function loadData() {
-    if (!user) {
+    if (!user || databasePollingPaused) {
       dataLoading = false;
       return;
     }
@@ -195,7 +205,6 @@
       feed.applyFirstPage(messagesResponse);
 
       balances.checks = nextBalanceChecks;
-      await checkDaemonStatus();
 
       dataLoading = false;
     } catch (error) {
@@ -204,6 +213,15 @@
       feed.loadError = errorMessage(error, '数据加载失败');
       dataLoading = false;
     }
+  }
+
+  async function refreshData() {
+    if (databasePollingPaused) {
+      await handleRefreshDaemon();
+      return;
+    }
+    await checkDaemonStatus();
+    await loadData();
   }
 
   onMount(async () => {
@@ -222,7 +240,7 @@
     loading = false;
 
     if (user) {
-      loadData()
+      refreshData()
         .finally(() => {
           dataLoading = false;
           startPolling();
@@ -276,7 +294,16 @@
     }
   }
 
-  async function checkDaemonStatus() {
+  function checkDaemonStatus(): Promise<boolean> {
+    daemonStatusRequest ??= readDaemonStatus()
+      .then(() => !databasePollingPaused)
+      .finally(() => {
+        daemonStatusRequest = null;
+      });
+    return daemonStatusRequest;
+  }
+
+  async function readDaemonStatus() {
     lastDaemonPollAt = Date.now();
     try {
       const data = await contractApi.health.daemonStatus();
@@ -288,7 +315,19 @@
         ...(data.message === undefined ? {} : { message: data.message }),
         ...('last_heartbeat' in data ? { last_heartbeat: data.last_heartbeat } : {}),
       };
+      if (d1Quota?.quota === 'rows_written') {
+        const heartbeat = toEpochMilliseconds(daemonStatus.last_heartbeat);
+        awaitingD1Write = heartbeat === null || heartbeat <= Date.parse(d1Quota.timestamp);
+        if (awaitingD1Write) return;
+      }
+      d1Quota = null;
+      awaitingD1Write = false;
     } catch (error) {
+      if (error instanceof ApiError && error.d1Quota !== null) {
+        awaitingD1Write = false;
+        d1Quota = error.d1Quota;
+        return;
+      }
       if (error instanceof ApiError) {
         daemonStatus = {
           ...daemonStatus,
@@ -309,9 +348,15 @@
   }
 
   async function handleRefreshDaemon() {
+    if (daemonRefreshing) return;
     daemonRefreshing = true;
     try {
-      await checkDaemonStatus();
+      const wasPaused = databasePollingPaused;
+      const readsAvailable = await checkDaemonStatus();
+      if (wasPaused && readsAvailable) {
+        await loadData();
+        void calls.loadHistory();
+      }
     } finally {
       daemonRefreshing = false;
     }
@@ -325,21 +370,22 @@
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
-      if (
-        document.visibilityState !== 'visible' ||
-        !user ||
-        pollInFlight ||
-        !['dashboard', 'balances'].includes(currentView)
-      )
-        return;
+      if (document.visibilityState !== 'visible' || !user || pollInFlight) return;
       pollInFlight = true;
       try {
-        if (currentView === 'dashboard') {
-          await feed.load(selectedPhoneIccid, { replace: false });
-        }
         const now = Date.now();
+        if (databasePollingPaused && d1Quota !== null) {
+          if (now >= Date.parse(d1Quota.retry_at) && now - lastDaemonPollAt >= POLL_INTERVAL_MS) {
+            await handleRefreshDaemon();
+          }
+          return;
+        }
+        if (d1Quota === null && !['dashboard', 'balances'].includes(currentView)) return;
         if (now - lastDaemonPollAt >= DAEMON_POLL_INTERVAL_MS) {
           await checkDaemonStatus();
+        }
+        if (currentView === 'dashboard' && !databasePollingPaused) {
+          await feed.load(selectedPhoneIccid, { replace: false });
         }
       } catch {
         // The next tick retries.
@@ -390,6 +436,10 @@
       >
         <StatusBanners
           {daemonStatus}
+          {daemonRefreshing}
+          {d1Quota}
+          {awaitingD1Write}
+          onCheckD1={handleRefreshDaemon}
           {phoneNumbers}
           {can}
           onOpenIccidMappings={openIccidMappings}
@@ -417,7 +467,7 @@
               }}
               onRetry={() => {
                 dataLoading = true;
-                void loadData().finally(() => {
+                void refreshData().finally(() => {
                   dataLoading = false;
                 });
               }}
@@ -452,6 +502,7 @@
               <BalanceManagement
                 {phoneNumbers}
                 balanceChecks={balances.checks}
+                {databasePollingPaused}
                 canQueryBalances={can('balances.query')}
                 canWriteBills={can('bills.write')}
                 onQueriesChanged={balances.refresh}

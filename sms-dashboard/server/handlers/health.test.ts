@@ -213,8 +213,11 @@ describe('Worker health monitoring', () => {
     expect(answered.status).toBe(503);
     expect(answered.body).toMatchObject({
       code: 'D1_QUOTA_EXCEEDED',
+      quota: 'rows_read',
       message: 'Service status is temporarily unavailable',
     });
+    const { timestamp } = v.parse(v.object({ timestamp: v.string() }), answered.body);
+    expect(new Date(timestamp).toISOString()).toBe(timestamp);
     expect(JSON.stringify(answered.body)).not.toContain('free tier daily row read limit');
     expect(answered.headers.has('Retry-After')).toBe(true);
   });

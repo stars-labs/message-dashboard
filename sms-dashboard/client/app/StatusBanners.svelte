@@ -1,23 +1,67 @@
 <script lang="ts">
+  import type { D1QuotaExceeded } from '../../shared/api/d1-quota.js';
   import { textOr } from '../../shared/text.js';
   import { getDaemonStatusMeta, type DaemonView } from '../lib/daemon-status.js';
   import { getStatusMeta } from '../lib/device-status.js';
-  import { formatTimeAgo } from '../lib/time.js';
+  import { formatFullTime, formatTimeAgo } from '../lib/time.js';
   import type { Permission, ViewPhone } from './types.js';
 
   interface Props {
     daemonStatus: DaemonView;
+    daemonRefreshing: boolean;
+    d1Quota: D1QuotaExceeded | null;
+    awaitingD1Write: boolean;
+    onCheckD1: () => void;
     phoneNumbers: readonly ViewPhone[];
     can: Permission;
     onOpenIccidMappings: (filter: 'all' | 'error') => void;
   }
 
-  let { daemonStatus, phoneNumbers, can, onOpenIccidMappings }: Props = $props();
+  let {
+    daemonStatus,
+    daemonRefreshing,
+    d1Quota,
+    awaitingD1Write,
+    onCheckD1,
+    phoneNumbers,
+    can,
+    onOpenIccidMappings,
+  }: Props = $props();
 
   let daemonMeta = $derived(getDaemonStatusMeta(daemonStatus.status));
 </script>
 
-{#if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
+{#if d1Quota}
+  <div class="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+    <p role="status" class="text-sm">
+      {#if awaitingD1Write}
+        数据库读取已恢复，正在等待 Pi 的下一次心跳确认写入恢复。
+      {:else}
+        <strong>数据库今日{d1Quota.quota === 'rows_read' ? '读取' : '写入'}额度已用完。</strong>
+        预计 <time datetime={d1Quota.retry_at}>{formatFullTime(d1Quota.retry_at)}</time>
+        （UTC+8）重置。Pi 仍可在本地接收短信，网页同步暂缓。
+      {/if}
+    </p>
+    <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-medium">
+      {#if can('users.write')}
+        <a
+          class="underline underline-offset-2"
+          href="https://dash.cloudflare.com/793e3286eaca411bf1eebaf4b8c7051e/workers/plans"
+          target="_blank"
+          rel="noopener noreferrer">升级 Workers 套餐</a
+        >
+      {:else}
+        <span>急需使用平台时，请联系管理员升级 Workers 套餐。</span>
+      {/if}
+      <button
+        type="button"
+        class="rounded-md border border-amber-300 bg-white px-3 py-1 disabled:opacity-60"
+        onclick={onCheckD1}
+        disabled={daemonRefreshing}>{daemonRefreshing ? '正在检查…' : '检查是否恢复'}</button
+      >
+    </div>
+  </div>
+{:else if daemonStatus.status === 'offline' || daemonStatus.status === 'error'}
   <div class="bg-red-50 border-b border-red-200 px-4 py-3">
     <div class="flex items-start gap-3">
       <span class="mt-0.5 shrink-0">

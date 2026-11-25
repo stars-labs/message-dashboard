@@ -23,6 +23,7 @@ type CallSession = ReturnType<
 interface CallAccess {
   isSignedIn: () => boolean;
   can: Permission;
+  allowHistoryRead?: () => boolean;
 }
 
 function readCallsSeenAt() {
@@ -163,7 +164,7 @@ export class CallController {
   }
 
   async loadHistory() {
-    if (!this.access.can('messages.read')) return;
+    if (!this.access.can('messages.read') || this.access.allowHistoryRead?.() === false) return;
     this.historyLoading = true;
     try {
       const { calls } = await fetchCallHistory({ limit: 30 });

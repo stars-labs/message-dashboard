@@ -2,6 +2,7 @@ import { ORPCError } from '@orpc/server';
 import type { D1 } from '../lib/d1.js';
 import { getDaemonHealth } from '../db/daemon.js';
 import type { DaemonStatusResponse } from '../../shared/api/daemon-status.js';
+import type { D1QuotaExceeded } from '../../shared/api/d1-quota.js';
 import type { HealthResponse, LiveResponse } from '../../shared/api/health.js';
 import { deriveDaemonHealth } from '../utils/daemon-health.js';
 import { classifyD1Error, logD1Error } from '../utils/d1-error.js';
@@ -102,13 +103,22 @@ export const healthHandler = {
     try {
       daemonHealth = await getDaemonHealth(env.DB);
     } catch (error) {
-      const classification = classifyD1Error(error);
+      const failedAt = new Date();
+      const classification = classifyD1Error(error, failedAt);
       logD1Error('daemon_status', error, classification);
       retryAfter(classification, resHeaders);
+      const data =
+        classification.code === 'D1_QUOTA_EXCEEDED'
+          ? ({
+              quota: classification.quota,
+              retry_at: classification.retryAt.toISOString(),
+              timestamp: failedAt.toISOString(),
+            } satisfies Omit<D1QuotaExceeded, 'code'>)
+          : { retry_at: null };
       throw new ORPCError(classification.code, {
         status: 503,
         message: 'Service status is temporarily unavailable',
-        data: { retry_at: classification.retryAt?.toISOString() ?? null },
+        data,
       });
     }
 

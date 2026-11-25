@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
 import { textOr } from '../../shared/text.js';
 import { ErrorResponse } from '../../shared/api/error.js';
+import { D1QuotaExceeded } from '../../shared/api/d1-quota.js';
 import type { BalanceCheck } from '../../shared/api/balance-checks.js';
 import type {
   CreateIccidMappingBody,
@@ -22,11 +23,13 @@ const ErrorBody = v.partial(v.object({ ...ErrorResponse.entries, title: v.string
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly d1Quota: D1QuotaExceeded | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, d1Quota: D1QuotaExceeded | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.d1Quota = d1Quota;
   }
 }
 
@@ -80,7 +83,8 @@ async function checked(response: Response): Promise<Response> {
   }
 
   if (!response.ok) {
-    const body = parseJson(await response.text(), ErrorBody);
+    const text = await response.text();
+    const body = parseJson(text, ErrorBody);
     const errorBody = body.ok ? body.value : { error: 'Unknown error' };
     // `detail` carries the upstream cause (missing scope, bad credentials) that is otherwise only in Worker logs.
     const base = textOr(
@@ -88,7 +92,12 @@ async function checked(response: Response): Promise<Response> {
       `Request failed with status ${String(response.status)}`,
     );
     const detail = textOr(errorBody.detail, null);
-    throw new ApiError(detail === null ? base : `${base}: ${detail}`, response.status);
+    const quota = response.status === 503 ? parseJson(text, D1QuotaExceeded) : null;
+    throw new ApiError(
+      detail === null ? base : `${base}: ${detail}`,
+      response.status,
+      quota?.ok ? quota.value : null,
+    );
   }
 
   return response;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { confirmAction } from './confirm.svelte.js';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { formatCardNumber } from '../../shared/card-number.js';
   import { buildCarrierOptions, carrierKey } from './carrier.js';
@@ -56,6 +56,7 @@
     onOpenBalance?: ((check: BalanceCheck) => void) | null;
     canQueryBalances?: boolean;
     canWriteBills?: boolean;
+    databasePollingPaused?: boolean;
     onQueriesChanged?: ((change: QueriesChange) => Promise<void>) | null;
   }
 
@@ -65,6 +66,7 @@
     onOpenBalance = null,
     canQueryBalances = false,
     canWriteBills = false,
+    databasePollingPaused = false,
     onQueriesChanged = null,
   }: Props = $props();
 
@@ -205,16 +207,22 @@
     }
   }
 
-  onMount(() => {
-    void loadRunnerStatus();
-    void loadBillingAccounts();
-    const interval = setInterval(() => {
+  $effect(() => {
+    if (databasePollingPaused) return;
+    untrack(() => {
       void loadRunnerStatus();
+      void loadBillingAccounts();
+    });
+  });
+
+  onMount(() => {
+    const interval = setInterval(() => {
+      if (!databasePollingPaused) void loadRunnerStatus();
     }, 30_000);
     async function pollActiveQueries() {
       try {
         const activeIds = activeBalanceCheckIds(balanceChecks);
-        if (activeIds.length && document.visibilityState === 'visible') {
+        if (!databasePollingPaused && activeIds.length && document.visibilityState === 'visible') {
           await onQueriesChanged?.({ activeIds });
         }
       } catch (error) {
