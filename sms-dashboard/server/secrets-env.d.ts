@@ -2,6 +2,7 @@
 // types omits them. Optional: the code reading each decides what absence means.
 interface Env {
   API_KEY?: string;
+  ALERT_RECIPIENTS?: string;
   AUTH0_DOMAIN?: string;
   AUTH0_CLIENT_ID?: string;
   AUTH0_CLIENT_SECRET?: string;

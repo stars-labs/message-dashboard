@@ -14,6 +14,9 @@ the 采集服务 status and the health panel.
   "N 条消息需要人工处理" when `dead_letter` > 0.
 - refusals: a non-JSON body, an unsupported schema version, a wrong key
   (`shared/control-fixtures/daemon/heartbeat.*.json`).
+- alert emails (`server/utils/alerts.ts`, five-minute cron): no heartbeat for 20
+  minutes, assigned SIMs offline for 30 minutes, the check itself failing; state in
+  the `alert_state` table.
 
 ## How to get to it (user POV)
 
@@ -36,11 +39,26 @@ await panel.getByText('8.0.2').waitFor();
 
 Checked in: `scripts/verify/journeys/daemon-contract.ts`.
 
+Alerts: fire the cron at a chosen time instead of waiting, and read `alert_state`.
+The stack runs `wrangler dev --test-scheduled` with `ALERT_RECIPIENTS` set to a fake
+address; `notified_at` is written only after `EMAIL.send()` resolved.
+
+```ts
+const at = Math.ceil((Date.now() + 25 * 60_000) / 900_000) * 900_000; // a quarter hour, seed heartbeat 25+ min old
+const r = await fetch(`${stack.baseUrl}/cdn-cgi/local/scheduled?cron=${encodeURIComponent('*/5 * * * *')}&time=${at}&format=json`);
+// body {"outcome":"ok",…}; then: daemon_offline notified, sims_offline open for S03
+await stack.d1('SELECT alert, first_seen_at, notified_at FROM alert_state');
+```
+
 ## Gotchas
 
 - The daemon's own half (building the body, the stall watchdog) is proven by
   `check-daemon` and `orange-pi-daemon/src/wire/tests.rs`, not here:
   the daemon cannot run on a Mac (it reads `/sys/class/tty`).
 - The seeded heartbeat is stamped at stack start; a long journey sees it age.
+- The scheduled trigger is `/cdn-cgi/local/scheduled`, not the older `/__scheduled`:
+  that path falls through to the app shell and answers 200 without running anything,
+  so check for `"outcome":"ok"`. The local cron also fires on its own every five
+  minutes, so a journey can find an `alert_state` row it did not cause.
 - A wire change here must change the fixture, the Worker and the daemon together
   (`shared/control-fixtures/`), and `check-api-compat` fails on it.

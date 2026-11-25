@@ -3,6 +3,7 @@ import { maintainWebBalanceJobs } from './handlers/carrier-web-balance.js';
 import { purgeExpiredMessages } from './utils/message-retention.js';
 import { sweepPending } from './utils/spam-backfill.js';
 import { reconcileCarrierBillMessages } from './utils/carrier-billing.js';
+import { runAlertChecks } from './utils/alerts.js';
 import { handleRequest } from './app.js';
 import type { AppRequest } from './worker-context.js';
 
@@ -12,7 +13,7 @@ export default {
     return handleRequest(request);
   },
 
-  async scheduled(event: { cron: string }, env: Env) {
+  async scheduled(event: { cron: string; scheduledTime: number }, env: Env) {
     console.log(`[scheduled] cron ${event.cron} firing`);
 
     try {
@@ -31,7 +32,21 @@ export default {
       console.error('[scheduled] web balance maintenance failed:', error);
     }
 
-    // The five-minute trigger is only for balance response windows; the heavier work is nightly.
+    try {
+      await runAlertChecks({
+        db: env.DB,
+        kv: env.SESSIONS,
+        mail: env.EMAIL,
+        recipients: env.ALERT_RECIPIENTS?.split(',')
+          .map((address) => address.trim())
+          .filter((address) => address !== ''),
+        now: event.scheduledTime,
+      });
+    } catch (error) {
+      console.error('[scheduled] alert delivery failed:', error);
+    }
+
+    // The five-minute trigger is for balance response windows and alerts; the heavier work is nightly.
     if (event.cron !== '17 4 * * *') return;
 
     // Retention before classification: no point classifying messages about to be deleted.
