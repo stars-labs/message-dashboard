@@ -6,8 +6,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    # Locked apart from `nixpkgs`, which also builds the Orange Pi system: a
-    # developer tool it alone provides (oasdiff) can move without changing the Pi.
+    # Locked apart from `nixpkgs`, which also builds the Orange Pi system: the
+    # developer tools taken from it (oasdiff, bun) can move without changing the Pi.
     nixpkgs-tools.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     sops-nix = {
@@ -112,6 +112,11 @@
           ...
         }:
         let
+          # Every `bun` below, including those inside `with pkgs;`, is this one.
+          # Bun 1.4.2 (from `nixpkgs`) silently skipped a failing statement in
+          # multi-statement SQL; test/sqlite-run.test.ts pins the fix.
+          inherit (inputs'.nixpkgs-tools.legacyPackages) bun;
+
           daemonCargo = builtins.fromTOML (builtins.readFile ./orange-pi-daemon/Cargo.toml);
           daemonVersion = daemonCargo.package.version;
 
