@@ -7,10 +7,6 @@ publish = false
 # `cargo run` is ambiguous. Default to the daemon.
 default-run = "orange-pi-daemon-rust"
 
-[lib]
-name = "orange_pi_daemon_rust"
-path = "src/lib.rs"
-
 [[bin]]
 name = "orange-pi-daemon-rust"
 path = "src/main.rs"
@@ -74,9 +70,7 @@ strip = true
 [lints.rust]
 unsafe_code = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }
-unreachable_pub = "warn"
 unused_qualifications = "warn"
-missing_debug_implementations = "warn"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

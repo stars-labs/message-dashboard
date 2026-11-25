@@ -1,4 +1,5 @@
-use super::{read_chunk, set_control_char, AtModemManager};
+use super::{read_chunk, AtModemManager};
+use crate::termios_chars::set_control_char;
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
 use std::fs::{File, OpenOptions};

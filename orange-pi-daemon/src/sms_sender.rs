@@ -246,17 +246,4 @@ fn is_short_code(recipient: &SmsAddress) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::is_short_code;
-    use crate::identifiers::SmsAddress;
-
-    #[test]
-    fn recognizes_only_plain_ascii_short_codes() {
-        assert!(is_short_code(&SmsAddress::from("100")));
-        assert!(is_short_code(&SmsAddress::from("10010")));
-        assert!(!is_short_code(&SmsAddress::from("12")));
-        assert!(!is_short_code(&SmsAddress::from("+10010")));
-        assert!(!is_short_code(&SmsAddress::from("1001A")));
-        assert!(!is_short_code(&SmsAddress::from("6512345678")));
-    }
-}
+mod tests;

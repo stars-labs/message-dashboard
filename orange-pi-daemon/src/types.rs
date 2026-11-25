@@ -4,20 +4,8 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// A submitted SMS; submission failures are returned through `Result::Err`.
-///
-/// ```
-/// use orange_pi_daemon_rust::types::SmsSubmission;
-/// let submission: Result<SmsSubmission, &str> = Ok(SmsSubmission::Confirmed);
-/// assert_eq!(submission, Ok(SmsSubmission::Confirmed));
-/// ```
-///
-/// A failed send cannot be constructed as a successful submission:
-///
-/// ```compile_fail,E0599
-/// use orange_pi_daemon_rust::types::SmsSubmission;
-/// let submission: Result<SmsSubmission, &str> = Ok(SmsSubmission::Failed);
-/// ```
+/// A submitted SMS; submission failures are returned through `Result::Err`, so
+/// there is no failed variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmsSubmission {
     Confirmed,

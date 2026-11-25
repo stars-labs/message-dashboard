@@ -1,15 +1,13 @@
 // Integration tests for ApiClient - HTTP communication layer
-mod support;
-
-use orange_pi_daemon_rust::api_client::ApiClient;
-use orange_pi_daemon_rust::identifiers::{Iccid, Imei, SmsAddress};
-use orange_pi_daemon_rust::message_store::StoredMessage;
-use orange_pi_daemon_rust::types::{Config, Message};
-use orange_pi_daemon_rust::wire::{
+use super::ApiClient;
+use crate::identifiers::{Iccid, Imei, SmsAddress};
+use crate::message_store::StoredMessage;
+use crate::test_support::serve;
+use crate::types::{Config, Message};
+use crate::wire::{
     CallEndReason, Direction, HealthSnapshot, ModemReport, QueueHealthSnapshot, SyncMode,
 };
 use serde_json::Value;
-use support::serve;
 
 const API_KEY: &str = "test_api_key_12345";
 
@@ -21,10 +19,6 @@ fn create_test_config() -> Config {
     }
 }
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
 fn client_for(api_url: String) -> ApiClient {
     ApiClient::new(Config {
         api_url,
@@ -34,10 +28,6 @@ fn client_for(api_url: String) -> ApiClient {
 }
 
 // Helper function to create test message
-#[expect(
-    clippy::unwrap_used,
-    reason = "test helper: clippy.toml allow-unwrap-in-tests covers only #[test] items"
-)]
 fn create_test_message(iccid: &str, content: &str) -> Message {
     Message {
         phone_iccid: Iccid::try_from(iccid).unwrap(),

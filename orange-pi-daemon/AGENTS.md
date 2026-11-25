@@ -50,6 +50,11 @@ Clippy checks all targets and features, including tests and `at_debug`,
 and treats every warning as an error. Fix violations rather than suppressing them;
 any unavoidable exception must be narrowly scoped and explain the external constraint.
 
+The crate is one binary with no library target, so rustc reports any item the daemon
+never reaches as dead code, including one only tests call. Tests live in
+`<module>/tests.rs` (shared helpers in `src/test_support.rs`); do not add a `[lib]`
+or a `tests/` directory to reach internals, which would hide dead code again.
+
 ## Deploy
 
 See [docs/deployment.md](../docs/deployment.md).

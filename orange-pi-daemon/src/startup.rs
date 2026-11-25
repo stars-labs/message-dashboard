@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
-use orange_pi_daemon_rust::identifiers::Iccid;
-use orange_pi_daemon_rust::message_store::MessageStore;
-use orange_pi_daemon_rust::modem_manager::ModemManager;
-use orange_pi_daemon_rust::types::ApiKey;
-use orange_pi_daemon_rust::worker_pool::{WorkerPool, WorkerPoolConfig};
+use crate::identifiers::Iccid;
+use crate::message_store::MessageStore;
+use crate::modem_manager::ModemManager;
+use crate::types::ApiKey;
+use crate::worker_pool::{WorkerPool, WorkerPoolConfig};
 
 #[expect(clippy::print_stdout, reason = "--help writes its text to stdout")]
 pub(crate) fn print_help(program: &str) {

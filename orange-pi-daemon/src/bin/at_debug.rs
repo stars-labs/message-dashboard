@@ -6,10 +6,13 @@
 
 use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
-use orange_pi_daemon_rust::at_modem::set_control_char;
+#[path = "../termios_chars.rs"]
+mod termios_chars;
+
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
+use termios_chars::set_control_char;
 
 fn open_serial(port: &str) -> Result<File> {
     let file = OpenOptions::new().read(true).write(true).open(port)?;

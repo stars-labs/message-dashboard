@@ -180,7 +180,7 @@
               root="$(git rev-parse --show-toplevel)"
               wire="sms-dashboard/shared/daemon-wire"
               rm -f "$root/$wire"/*.ts
-              (cd "$root/orange-pi-daemon" && cargo test --locked --lib export_bindings)
+              (cd "$root/orange-pi-daemon" && cargo test --locked --bin orange-pi-daemon-rust export_bindings)
               if [ -n "$(git -C "$root" status --porcelain --untracked-files=all -- "$wire")" ]; then
                 git -C "$root" status --short --untracked-files=all -- "$wire"
                 git -C "$root" --no-pager diff -- "$wire"
@@ -323,7 +323,6 @@
               # Coverage floors: raise them when coverage rises, never lower one to pass.
               cargo llvm-cov --locked --all-features --summary-only \
                 --fail-under-lines 53.3 --fail-under-functions 62.6
-              cargo test --locked --doc
               check-daemon-wire
             '';
           };

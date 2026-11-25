@@ -232,3 +232,6 @@ impl ApiClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
