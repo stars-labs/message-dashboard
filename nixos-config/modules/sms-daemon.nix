@@ -21,12 +21,6 @@ in
       description = "API URL for the SMS dashboard server";
     };
 
-    deviceId = mkOption {
-      type = types.str;
-      default = "orange-pi-001";
-      description = "Device ID for this daemon instance";
-    };
-
     apiKey = mkOption {
       type = types.nullOr types.str;
       default = null;
@@ -38,33 +32,6 @@ in
       type = types.nullOr types.path;
       default = null;
       description = "Path to file containing API key (recommended)";
-    };
-
-    phoneUpdateIntervalSeconds = mkOption {
-      type = types.int;
-      default = 30;
-      description = ''
-        How often to update phone status (in seconds).
-        Default: 30 seconds
-      '';
-    };
-
-    messageCheckIntervalMs = mkOption {
-      type = types.int;
-      default = 100;
-      description = ''
-        How often to check for new messages (in milliseconds).
-        Default: 100ms (10 Hz)
-      '';
-    };
-
-    signalCheckIntervalSeconds = mkOption {
-      type = types.int;
-      default = 60;
-      description = ''
-        How often to check signal quality (in seconds).
-        Default: 60 seconds (1 minute)
-      '';
     };
 
     debugBuild = mkOption {
@@ -166,11 +133,6 @@ in
 
       environment = {
         SMS_API_URL = cfg.apiUrl;
-        CHECK_INTERVAL_SECS = toString cfg.phoneUpdateIntervalSeconds;
-        SMS_CHECK_INTERVAL = toString cfg.phoneUpdateIntervalSeconds;
-        SMS_MESSAGE_CHECK_INTERVAL = toString cfg.messageCheckIntervalMs;
-        SMS_SIGNAL_CHECK_INTERVAL = toString cfg.signalCheckIntervalSeconds;
-        SMS_DEVICE_ID = cfg.deviceId;
 
         RUST_LOG = if cfg.debugBuild then "orange_pi_daemon_rust=debug" else "orange_pi_daemon_rust=info";
 

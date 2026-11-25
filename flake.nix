@@ -91,9 +91,6 @@
                     enable = true;
                     package = self.packages.aarch64-linux.orange-pi-daemon-rust;
                     apiKeyFile = config.sops.secrets."sms-dashboard/api-key".path;
-                    phoneUpdateIntervalSeconds = 1;
-                    messageCheckIntervalMs = 1000;
-                    signalCheckIntervalSeconds = 10;
                     debugBuild = false;
                     # Cloudflare Realtime adapters connect here; DNS-only A record
                     # to the office IP, 443 forwarded to the Pi. docs/voice-calls.md
