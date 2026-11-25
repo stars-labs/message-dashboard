@@ -60,12 +60,18 @@ function mockSuccessfulAuth(userInfo: Record<string, unknown> = {}) {
   });
 }
 
+const STATE = 'state-from-this-browser';
+
 function callbackRequest({
   dbRun,
   sessionPut,
+  stateParam = STATE,
+  stateCookie = STATE,
 }: {
   dbRun?: () => Promise<D1RunResult>;
   sessionPut?: () => Promise<void>;
+  stateParam?: string | null;
+  stateCookie?: string | null;
 } = {}) {
   const waits: Promise<unknown>[] = [];
   const sessionWrites: string[] = [];
@@ -87,8 +93,14 @@ function callbackRequest({
     },
   };
 
+  const url = new URL('https://sexy.itoken.world/callback?code=authorization-code');
+  if (stateParam !== null) url.searchParams.set('state', stateParam);
+  const headers = new Headers();
+  if (stateCookie !== null) headers.set('Cookie', `__Host-oauth_state=${stateCookie}`);
+
   const request: CallbackRequest = {
-    url: 'https://sexy.itoken.world/callback?code=authorization-code',
+    url: url.toString(),
+    headers,
     env: callbackEnv,
     ctx: {
       waitUntil(promise) {
@@ -188,6 +200,19 @@ describe('Auth0 login', () => {
     expect(location.searchParams.get('audience')).toBe('https://sexy.itoken.world/login-api');
   });
 
+  test('binds the state to this browser in a short-lived __Host- cookie', () => {
+    const response = auth0Handler.login({
+      url: 'https://sexy.itoken.world/login',
+      env: { AUTH0_DOMAIN: 'tenant.example', AUTH0_CLIENT_ID: 'dashboard-client' },
+    });
+    const state = new URL(response.headers.get('location') ?? '').searchParams.get('state');
+
+    expect(state).toBeTruthy();
+    expect(response.headers.getSetCookie()).toEqual([
+      `__Host-oauth_state=${state ?? ''}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+    ]);
+  });
+
   test('answers 500 when Auth0 is not configured', async () => {
     const response = auth0Handler.login({
       url: 'https://sexy.itoken.world/login',
@@ -219,11 +244,13 @@ describe('Auth0 callback', () => {
     const response = await auth0Handler.callback(request);
     await Promise.all(waits);
 
-    const cookies = response.headers.getSetCookie();
-    expect(cookies).toHaveLength(1);
+    const sessionCookies = response.headers
+      .getSetCookie()
+      .filter((cookie) => cookie.startsWith('auth_token='));
+    expect(sessionCookies).toHaveLength(1);
     const match =
       /^auth_token=([^;]+); Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400$/.exec(
-        cookies[0] ?? '',
+        sessionCookies[0] ?? '',
       );
     expect(match).not.toBeNull();
     const token = match?.[1] ?? 'no token';
@@ -331,9 +358,48 @@ describe('Auth0 callback', () => {
     expect(body).not.toContain('sensitive-provider-detail');
   });
 
+  test.each([
+    ['no state cookie', { stateCookie: null }],
+    ['a state cookie from another login', { stateCookie: 'state-from-another-login' }],
+    ['no state in the URL', { stateParam: null }],
+    ['neither', { stateParam: null, stateCookie: null }],
+  ] as const)(
+    'refuses a callback with %s before contacting Auth0 or creating a session',
+    async (_case, state) => {
+      mockSuccessfulAuth();
+      const { request, sessionWrites } = callbackRequest(state);
+
+      const response = await auth0Handler.callback(request);
+
+      expect(response.status).toBe(400);
+      expect(await response.text()).toBe(
+        'Login expired or was not started here. Start again from /login.',
+      );
+      expect(response.headers.getSetCookie()).toEqual([
+        '__Host-oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+      ]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(sessionWrites).toHaveLength(0);
+      expect(loggedText()).toContain('auth_state_mismatch');
+    },
+  );
+
+  test('spends the state cookie when the login succeeds', async () => {
+    mockSuccessfulAuth();
+    const { request, waits } = callbackRequest();
+
+    const response = await auth0Handler.callback(request);
+    await Promise.all(waits);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.getSetCookie()).toContain(
+      '__Host-oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+    );
+  });
+
   test('answers 400 when the authorization code is missing', async () => {
     const { request } = callbackRequest();
-    request.url = 'https://sexy.itoken.world/callback';
+    request.url = `https://sexy.itoken.world/callback?state=${STATE}`;
 
     const response = await auth0Handler.callback(request);
 
@@ -637,7 +703,7 @@ describe('Auth0 login role reconciliation', () => {
     );
 
     const { request } = callbackRequest();
-    request.url = 'https://sexy.qzz.io/callback?code=authorization-code';
+    request.url = `https://sexy.qzz.io/callback?code=authorization-code&state=${STATE}`;
 
     try {
       // This mirrors the router registration, which passes callback without a receiver.

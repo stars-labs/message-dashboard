@@ -54,5 +54,11 @@ user does; assert on `location.hash` and the view's heading.
   age, so assert on the panel's fields, not 刚刚.
 - 使用 Auth0 登录 and 退出登录 redirect to the fake Auth0 tenant, which serves no
   login page; drive sign-in through the seeded session, not the button.
+- The login `state` check (GRA-240) is driven over HTTP, not in a page: `fetch` the
+  stack's `/login` with `redirect: 'manual'` for the `__Host-oauth_state` cookie and
+  the `state` in `Location`, then `/callback?code=…&state=…` with and without that
+  cookie. A missing or other cookie answers 400 before Auth0 is contacted; a matching
+  one reaches the token exchange, which the fake tenant refuses with 401, since it
+  issues no authorization codes.
 - The mobile tab 发送 is shown without checking `messages.send`; the `#send` view
   itself is gated.

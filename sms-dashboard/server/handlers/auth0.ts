@@ -13,7 +13,7 @@ import {
 import type { D1 } from '../lib/d1.js';
 import { readKvJson, type KV } from '../lib/kv.js';
 import { auth0Origin } from '../../shared/auth0-origin.js';
-import { extractSessionToken } from '../utils/session-token.js';
+import { extractSessionToken, readCookie } from '../utils/session-token.js';
 import { getUserRoles, setUserRole, type Auth0ManagementEnv } from '../utils/auth0-management.js';
 import { indexSession, unindexSession } from '../utils/user-sessions.js';
 import { scheduleAuthAudit } from '../utils/audit-log.js';
@@ -44,6 +44,12 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 const COOKIE_CLEARED = 'auth_token=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
 
+// RFC 9700 §2.1: `state` must be bound to the browser that started the login, which a
+// server-side store alone cannot do. Lax still sends it on Auth0's top-level redirect.
+const STATE_COOKIE = '__Host-oauth_state';
+const STATE_COOKIE_ATTRIBUTES = 'Path=/; HttpOnly; Secure; SameSite=Lax';
+const STATE_COOKIE_CLEARED = `${STATE_COOKIE}=; ${STATE_COOKIE_ATTRIBUTES}; Max-Age=0`;
+
 interface CallbackEnv extends Auth0ManagementEnv {
   AUTH0_CLIENT_ID?: string;
   AUTH0_CLIENT_SECRET?: string;
@@ -65,6 +71,7 @@ interface LoginRequest {
 
 interface CallbackRequest {
   url: string;
+  headers: { get(name: string): string | null };
   env: CallbackEnv;
   ctx: { waitUntil(promise: Promise<unknown>): void };
 }
@@ -230,7 +237,8 @@ export const auth0Handler = {
     authUrl.searchParams.set('client_id', env.AUTH0_CLIENT_ID);
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('scope', 'openid profile email');
-    authUrl.searchParams.set('state', nanoid());
+    const state = nanoid();
+    authUrl.searchParams.set('state', state);
 
     // The runner API audience belongs to the Balance Agent; only a dedicated login
     // audience may be requested here.
@@ -238,7 +246,13 @@ export const auth0Handler = {
       authUrl.searchParams.set('audience', env.AUTH0_LOGIN_AUDIENCE);
     }
 
-    return Response.redirect(authUrl.toString(), 302);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: authUrl.toString(),
+        'Set-Cookie': `${STATE_COOKIE}=${state}; ${STATE_COOKIE_ATTRIBUTES}; Max-Age=600`,
+      },
+    });
   },
 
   callback: async (request: CallbackRequest): Promise<Response> => {
@@ -258,6 +272,15 @@ export const auth0Handler = {
       return new Response('Authentication failed', {
         status: 401,
         headers: { 'Cache-Control': 'no-store' },
+      });
+    }
+
+    const state = url.searchParams.get('state');
+    if (state === null || state !== readCookie(request.headers.get('Cookie'), STATE_COOKIE)) {
+      console.error(JSON.stringify({ event: 'auth_state_mismatch' }));
+      return new Response('Login expired or was not started here. Start again from /login.', {
+        status: 400,
+        headers: { 'Cache-Control': 'no-store', 'Set-Cookie': STATE_COOKIE_CLEARED },
       });
     }
 
@@ -421,13 +444,13 @@ export const auth0Handler = {
       // Cookie only: a token in the redirect URL would leak via Referer, history and logs.
       const frontendUrl = new URL('/', url.origin);
 
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: frontendUrl.toString(),
-          'Set-Cookie': `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
-        },
-      });
+      const headers = new Headers({ Location: frontendUrl.toString() });
+      headers.append(
+        'Set-Cookie',
+        `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
+      );
+      headers.append('Set-Cookie', STATE_COOKIE_CLEARED);
+      return new Response(null, { status: 302, headers });
     } catch (exchangeError) {
       logAuthFailure('auth_callback_failed', exchangeError);
       return authenticationUnavailable();
