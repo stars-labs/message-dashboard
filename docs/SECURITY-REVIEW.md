@@ -28,8 +28,8 @@ references below predate the TypeScript migration: `*.js` files are now `*.ts`,
 `server/api/` was merged into `server/handlers/`, the role table is
 `config/auth0-roles.ts`, keyword colours are normalized in `shared/keyword-color.ts`,
 and recipient validation on the daemon is in `orange-pi-daemon/src/at_modem/sms_send.rs`.
-Still open: [OAuth `state`](#open-follow-up-oauth-state-is-generated-but-never-validated)
-(GRA-240), the [Pi firewall and fail2ban](#unresolved--needs-on-device-confirmation)
+[OAuth `state`](#fixed-follow-up-oauth-state-is-generated-but-never-validated) is fixed
+(GRA-240). Still open: the [Pi firewall and fail2ban](#unresolved--needs-on-device-confirmation)
 (GRA-241; the Pi now also serves the voice bridge and NetBird on 443), and the CORS
 tidy-up under [Discarded findings](#discarded-findings) (GRA-242).
 
@@ -568,7 +568,15 @@ Recorded because each was raised during review and did **not** survive verificat
   `wrangler.toml` holds only non-secret IDs; secrets are documented as
   `wrangler secret put`.
 
-## Open follow-up: OAuth `state` is generated but never validated
+## Fixed follow-up: OAuth `state` is generated but never validated
+
+**Fixed 2026-11-25 (GRA-240).** `login()` sets `state` in a 10-minute
+`__Host-oauth_state` cookie (`HttpOnly; Secure; SameSite=Lax`). `callback()` answers 400
+before contacting Auth0 unless the URL's `state` equals that cookie, and clears the cookie
+either way, so each `state` works once. The short-TTL KV entry suggested below would not
+have been enough on its own: RFC 9700 §2.1 requires `state` to be bound to the browser that
+started the login, and an attacker can mint a valid KV-stored `state` by starting a login
+of their own. PKCE is not used yet.
 
 * **Severity:** MEDIUM (login CSRF / session fixation)
 * **Location:** `server/handlers/auth0.js` — `login()` sets
