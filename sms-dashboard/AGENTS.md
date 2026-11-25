@@ -53,7 +53,7 @@ The dashboard calls it as `contractApi.iccidMappings.get({ params: { id } })`
 `requireApiKey` or `authorizeRunnerControl` outside `server/contract/handler.ts`,
 and `searchParams` / `URLSearchParams` in `server/` outside the OAuth redirects
 (`server/handlers/auth0.ts`). The legacy `Router` in `server/app.ts` serves only
-those redirects, CORS preflight and the app shell. Why oRPC, and its quirks:
+those redirects and the app shell. Why oRPC, and its quirks:
 [ADR 0001](../docs/adr/0001-api-contract-orpc.md).
 
 ## Types and tests

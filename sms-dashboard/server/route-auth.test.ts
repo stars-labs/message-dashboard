@@ -11,7 +11,6 @@ const PUBLIC = new Map([
   ['GET /callback', 'Auth0 returns here before a session exists'],
   ['GET /logout', 'clears the session'],
   ['GET *', 'the app shell gates itself (appShellRedirect) and assets are public'],
-  ['OPTIONS *', 'a CORS preflight carries no credentials'],
 ]);
 
 const routes = routeTable().map(({ method, path }) => ({ method, path, key: `${method} ${path}` }));

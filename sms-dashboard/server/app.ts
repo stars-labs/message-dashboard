@@ -1,4 +1,3 @@
-import { handleCORS, corsPreflight } from './middleware/cors.js';
 import { auth0Handler } from './handlers/auth0.js';
 import { serveFrontend } from './frontend-handler.js';
 import { appShellRedirect } from './frontend-gate.js';
@@ -14,8 +13,6 @@ function isApiPath(request: Request): boolean {
   const { pathname } = new URL(request.url);
   return pathname === '/api' || pathname.startsWith('/api/');
 }
-
-router.options('*', corsPreflight);
 
 // Outside the contract for good: browser redirects, not the JSON API.
 // Browsers ask for /favicon.ico even when index.html declares icons.
@@ -48,9 +45,7 @@ export async function handleRequest(request: AppRequest): Promise<Response> {
     if (!response) {
       if (isApiPath(request)) {
         const { pathname } = new URL(request.url);
-        return handleCORS(
-          problemResponse(404, 'NOT_FOUND', `No route for ${request.method} ${pathname}`),
-        );
+        return problemResponse(404, 'NOT_FOUND', `No route for ${request.method} ${pathname}`);
       }
 
       console.log(`[Worker] No route matched, serving frontend`);
@@ -58,7 +53,7 @@ export async function handleRequest(request: AppRequest): Promise<Response> {
     }
 
     console.log(`[Worker] Route matched, returning response`);
-    return handleCORS(response);
+    return response;
   } catch (error) {
     console.error(`[Worker] Error:`, error);
     return json({ error: 'Internal Server Error' }, 500);

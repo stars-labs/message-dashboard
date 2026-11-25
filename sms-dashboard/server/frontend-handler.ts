@@ -43,7 +43,6 @@ export function serveFrontend(request: { url: string }): Response {
   const headers = new Headers({
     'Content-Type': asset.type,
     'Cache-Control': cacheControlFor(pathname),
-    'Access-Control-Allow-Origin': '*',
   });
 
   if (asset.type === 'text/html') {
