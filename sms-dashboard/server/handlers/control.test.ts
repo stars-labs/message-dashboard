@@ -209,6 +209,7 @@ async function syncDevices(body: unknown) {
 
 describe('POST /api/control/devices', () => {
   beforeEach(() => {
+    // eslint-disable-next-line no-restricted-syntax -- a probe beside production's tables that counts the UPDATEs on modems
     sqlite.run(`
       CREATE TABLE modem_update_log (equipment_id TEXT NOT NULL);
       CREATE TRIGGER audit_modem_update AFTER UPDATE ON modems

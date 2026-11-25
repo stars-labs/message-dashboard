@@ -111,7 +111,8 @@ The baseline is `migrations/schema.sql` (structure) plus `reference-data.sql` (t
 `sim_balance_profiles` rows only migrations write), exported from production; its
 `-- through: NNN` header names the last migration included. Tests build every
 database with `createSchema` (`test/schema.ts`): baseline, then each newer
-migration. A new test uses it, never a hand-written `CREATE TABLE`. After a migration reaches
+migration. `bun run lint` rejects `CREATE TABLE|INDEX|VIEW|TRIGGER` in a test outside
+`migrations/`, whose tests start from the tables before their migration. After a migration reaches
 production, regenerate both files and run `bun run check:schema-drift`
 ([deployment](../docs/deployment.md)).
 

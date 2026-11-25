@@ -111,6 +111,7 @@ describe('GET /api/phones', () => {
     const database = new Database(':memory:');
     await createSchema(database);
     database.run(`DROP VIEW device_view`);
+    // eslint-disable-next-line no-restricted-syntax -- replaces device_view with one whose row breaks its schema
     database.run(`CREATE VIEW device_view AS SELECT
       '1' AS id, NULL AS equipment_id, '1' AS iccid, 'n' AS number, NULL AS country,
       NULL AS carrier, 'unknown' AS service_type, NULL AS service_type_source,

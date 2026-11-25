@@ -79,6 +79,15 @@ const SCHEMA_CHANGES = [
   { selector: `Literal[value=${SCHEMA_CHANGE_SQL}]`, message: SCHEMA_CHANGE_MESSAGE },
 ];
 
+const TEST_SCHEMA_MESSAGE =
+  "Build the database with createSchema (test/schema.ts), production's baseline, not a hand-written table.";
+const TEST_SCHEMA_SQL = '/\\bcreate\\s+(unique\\s+)?(table|index|view|trigger)\\b/i';
+
+const TEST_SCHEMAS = [
+  { selector: `TemplateElement[value.raw=${TEST_SCHEMA_SQL}]`, message: TEST_SCHEMA_MESSAGE },
+  { selector: `Literal[value=${TEST_SCHEMA_SQL}]`, message: TEST_SCHEMA_MESSAGE },
+];
+
 const ORPC_OC = {
   name: '@orpc/contract',
   importNames: ['oc'],
@@ -183,6 +192,18 @@ export default defineConfig([
     rules: {
       'no-restricted-syntax': ['error', ...UNTYPED_DATA, ...touching('sims'), ...SCHEMA_CHANGES],
     },
+  },
+  {
+    name: "Tests run on production's schema",
+    files: ['**/*.test.ts'],
+    ignores: [
+      // A migration's test starts from the tables as they were before it.
+      'migrations/**',
+      // These test the SQL tooling itself, on toy tables.
+      'scripts/schema-drift.test.ts',
+      'test/sqlite-d1.test.ts',
+    ],
+    rules: { 'no-restricted-syntax': ['error', ...TEST_SCHEMAS] },
   },
   {
     name: 'Clients reach the Dashboard through the contract client',
