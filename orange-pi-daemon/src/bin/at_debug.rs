@@ -8,6 +8,9 @@ use anyhow::{anyhow, Result};
 use nix::sys::termios::{self, BaudRate, SetArg};
 #[path = "../termios_chars.rs"]
 mod termios_chars;
+#[cfg(test)]
+#[path = "at_debug/tests.rs"]
+mod tests;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
