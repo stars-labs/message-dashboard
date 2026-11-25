@@ -1,4 +1,6 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Statement } from '../lib/d1.js';
 import {
@@ -345,20 +347,15 @@ describe('classifyMessage — malformed input', () => {
   });
 });
 
-function ruleDatabase() {
-  const d1 = sqliteD1();
-  d1.db.run(`CREATE TABLE filter_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_type TEXT NOT NULL CHECK(rule_type IN ('body_keyword', 'sender')),
-    pattern TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1
-  )`);
-  return d1;
+async function ruleDatabase() {
+  const database = new Database(':memory:');
+  await createSchema(database);
+  return sqliteD1(database);
 }
 
 describe('loadActiveRules', () => {
   test('returns the active rules in id order with exactly the fields classification reads', async () => {
-    const d1 = ruleDatabase();
+    const d1 = await ruleDatabase();
     d1.db.run(`INSERT INTO filter_rules (id, rule_type, pattern, is_active) VALUES
       (3, 'sender', '10010', 1),
       (1, 'body_keyword', '中国海关提示', 1),
@@ -373,7 +370,7 @@ describe('loadActiveRules', () => {
   });
 
   test('returns no rules when none are active', async () => {
-    const d1 = ruleDatabase();
+    const d1 = await ruleDatabase();
     d1.db.run(`INSERT INTO filter_rules (rule_type, pattern, is_active) VALUES ('sender', '1', 0)`);
     expect(await loadActiveRules(d1)).toEqual([]);
   });

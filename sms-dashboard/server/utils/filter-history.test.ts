@@ -1,5 +1,7 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Batch, D1Statement } from '../lib/d1.js';
 import { processRuleHistoryPage, type HistoryRule } from './filter-history.js';
@@ -27,30 +29,18 @@ const senderRule: HistoryRule = {
 
 const window = { since: '2026-09-01T00:00:00.000Z', until: '2026-09-30T00:00:00.000Z' };
 
-function database(messages: Seed[], { ruleActive = true }: { ruleActive?: boolean } = {}) {
-  const real = sqliteD1();
-  real.db.run(`CREATE TABLE filter_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_type TEXT NOT NULL CHECK(rule_type IN ('body_keyword', 'sender')),
-    pattern TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1
-  )`);
+async function database(messages: Seed[], { ruleActive = true }: { ruleActive?: boolean } = {}) {
+  const sqlite = new Database(':memory:');
+  await createSchema(sqlite);
+  const real = sqliteD1(sqlite);
   real.db
     .query(
       `INSERT INTO filter_rules (id, rule_type, pattern, is_active) VALUES (9, 'sender', '10655446', ?)`,
     )
     .run(ruleActive ? 1 : 0);
-  real.db.run(`CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    content TEXT NOT NULL,
-    phone_number TEXT,
-    filter_status TEXT NOT NULL DEFAULT 'pending',
-    filter_rule_id INTEGER,
-    purpose TEXT NOT NULL DEFAULT 'user',
-    verification_code TEXT,
-    created_at TIMESTAMP
-  )`);
+  real.db.run(
+    `INSERT INTO filter_rules (id, rule_type, pattern) VALUES (4, 'sender', 'another-sender')`,
+  );
   const insert = real.db.query(
     `INSERT INTO messages (id, type, content, phone_number, filter_status, filter_rule_id,
        purpose, verification_code, created_at)
@@ -101,7 +91,7 @@ function database(messages: Seed[], { ruleActive = true }: { ruleActive?: boolea
 
 describe('bounded filter history processing', () => {
   test('writes only changed final verdicts and returns a stable page cursor', async () => {
-    const { db, queries, batches, verdict } = database([
+    const { db, queries, batches, verdict } = await database([
       { id: 'm-1', phone_number: '106554460', created_at: '2026-09-01 00:00:00' },
       { id: 'm-2', phone_number: '13106554461', created_at: '2026-09-02 00:00:00' },
       { id: 'm-3', phone_number: '106554462', created_at: '2026-09-03 00:00:00' },
@@ -133,7 +123,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('continues strictly after the cursor and ends without one', async () => {
-    const { db, verdict } = database([
+    const { db, verdict } = await database([
       { id: 'a', created_at: '2026-09-01 00:00:00' },
       { id: 'b', created_at: '2026-09-01 00:00:00' },
       { id: 'c', created_at: '2026-09-02 00:00:00' },
@@ -159,7 +149,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('applies a body-keyword rule', async () => {
-    const { db, verdict } = database([
+    const { db, verdict } = await database([
       {
         id: 'hit',
         content: '中国海关提示，请勿携带',
@@ -183,7 +173,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('skips messages the rule must not touch', async () => {
-    const { db, verdict } = database([
+    const { db, verdict } = await database([
       { id: 'sent', type: 'sent', created_at: '2026-09-01 00:00:00' },
       { id: 'internal', purpose: 'balance_maintenance', created_at: '2026-09-01 00:00:01' },
       { id: 'code', verification_code: '123456', created_at: '2026-09-01 00:00:02' },
@@ -211,7 +201,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('releases the messages a deactivated rule hid', async () => {
-    const { db, queries, verdict } = database(
+    const { db, queries, verdict } = await database(
       [
         {
           id: 'mine',
@@ -247,7 +237,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('reads a boolean is_active as the mode', async () => {
-    const { db } = database([{ id: 'a', created_at: '2026-09-01 00:00:00' }]);
+    const { db } = await database([{ id: 'a', created_at: '2026-09-01 00:00:00' }]);
 
     expect(
       (await processRuleHistoryPage(db, { ...senderRule, is_active: true }, window)).mode,
@@ -258,7 +248,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('answers an empty window without loading rules or writing', async () => {
-    const { db, queries, batches } = database([]);
+    const { db, queries, batches } = await database([]);
 
     expect(await processRuleHistoryPage(db, senderRule, window)).toEqual({
       mode: 'apply',
@@ -272,7 +262,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('does not write a page whose verdicts are all unchanged', async () => {
-    const { db, batches } = database([
+    const { db, batches } = await database([
       { id: 'a', phone_number: '9528', created_at: '2026-09-01 00:00:00', filter_status: 'clean' },
     ]);
     const rule: HistoryRule = {
@@ -290,7 +280,7 @@ describe('bounded filter history processing', () => {
   });
 
   test('bounds the page size to between 1 and 200 and defaults a bad one', async () => {
-    const { db, queries } = database([]);
+    const { db, queries } = await database([]);
     const limitFor = async (pageSize: unknown) => {
       queries.length = 0;
       await processRuleHistoryPage(db, senderRule, { ...window, pageSize });

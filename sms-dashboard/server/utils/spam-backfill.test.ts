@@ -1,5 +1,7 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Batch, D1Statement } from '../lib/d1.js';
 import { countPending, sweepPending } from './spam-backfill.js';
@@ -15,26 +17,15 @@ interface Seed {
 
 const Verdict = v.object({ filter_status: v.string(), filter_rule_id: v.nullable(v.number()) });
 
-function database(messages: Seed[]) {
-  const d1 = sqliteD1();
-  d1.db.run(`CREATE TABLE filter_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_type TEXT NOT NULL CHECK(rule_type IN ('body_keyword', 'sender')),
-    pattern TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1
-  )`);
-  d1.db.run(`INSERT INTO filter_rules (rule_type, pattern, is_active) VALUES
-    ('sender', '10086', 1),
-    ('body_keyword', '中国海关提示', 1),
-    ('sender', '10010', 0)`);
-  d1.db.run(`CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    content TEXT NOT NULL,
-    phone_number TEXT,
-    filter_status TEXT NOT NULL DEFAULT 'pending',
-    filter_rule_id INTEGER
-  )`);
+async function database(messages: Seed[]) {
+  const sqlite = new Database(':memory:');
+  await createSchema(sqlite);
+  const d1 = sqliteD1(sqlite);
+  d1.db.run(`INSERT INTO filter_rules (id, rule_type, pattern, is_active) VALUES
+    (1, 'sender', '10086', 1),
+    (2, 'body_keyword', '中国海关提示', 1),
+    (3, 'sender', '10010', 0),
+    (9, 'body_keyword', 'retired', 0)`);
   const insert = d1.db.query(
     `INSERT INTO messages (id, type, content, phone_number, filter_status, filter_rule_id)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -69,7 +60,7 @@ afterEach(() => {
 
 describe('countPending', () => {
   test('counts the messages still waiting to be judged', async () => {
-    const { d1 } = database([
+    const { d1 } = await database([
       { id: 'a', content: 'x' },
       { id: 'b', content: 'x' },
       { id: 'c', content: 'x', filter_status: 'clean' },
@@ -79,13 +70,13 @@ describe('countPending', () => {
   });
 
   test('is zero for an empty table', async () => {
-    expect(await countPending(database([]).d1)).toBe(0);
+    expect(await countPending((await database([])).d1)).toBe(0);
   });
 });
 
 describe('sweepPending', () => {
   test('judges pending messages with the active rules and records the matching rule', async () => {
-    const { d1, verdict } = database([
+    const { d1, verdict } = await database([
       { id: 'spam-sender', content: 'promo', phone_number: '10086' },
       { id: 'spam-body', content: '中国海关提示，请勿携带', phone_number: '9528' },
       { id: 'clean', content: 'lunch?', phone_number: '+6590000000' },
@@ -101,7 +92,7 @@ describe('sweepPending', () => {
   });
 
   test('keeps a verification code and our own outbound messages clean', async () => {
-    const { d1, verdict } = database([
+    const { d1, verdict } = await database([
       { id: 'otp', content: '验证码：754852，感谢您使用', phone_number: '10086' },
       { id: 'sent', type: 'sent', content: '中国海关提示', phone_number: '10086' },
       { id: 'untyped', type: null, content: 'promo', phone_number: '10086' },
@@ -115,7 +106,7 @@ describe('sweepPending', () => {
   });
 
   test('leaves judged messages alone and clears a stale rule on re-judged ones', async () => {
-    const { d1, verdict } = database([
+    const { d1, verdict } = await database([
       { id: 'judged', content: 'promo', phone_number: '10086', filter_status: 'clean' },
       { id: 'rejudged', content: 'lunch?', phone_number: '9528', filter_rule_id: 9 },
     ]);
@@ -127,7 +118,7 @@ describe('sweepPending', () => {
   });
 
   test('sweeps in pages of the requested size until the queue is drained', async () => {
-    const { d1 } = database(
+    const { d1 } = await database(
       ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, content: 'x', phone_number: '10086' })),
     );
 
@@ -135,7 +126,7 @@ describe('sweepPending', () => {
   });
 
   test('stops starting pages once the time budget is spent and reports what remains', async () => {
-    const { d1 } = database([
+    const { d1 } = await database([
       { id: 'a', content: 'x' },
       { id: 'b', content: 'x' },
     ]);
@@ -144,7 +135,7 @@ describe('sweepPending', () => {
   });
 
   test('logs how many it swept and how many are still pending', async () => {
-    const { d1 } = database([{ id: 'a', content: 'x' }]);
+    const { d1 } = await database([{ id: 'a', content: 'x' }]);
 
     await sweepPending(d1);
 

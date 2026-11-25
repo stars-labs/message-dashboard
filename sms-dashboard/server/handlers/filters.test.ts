@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { listFilterRules } from './filters.js';
 
@@ -13,32 +15,10 @@ afterEach(() => {
   errorSpy.mockRestore();
 });
 
-function database() {
-  const d1 = sqliteD1();
-  d1.db.run(`
-    CREATE TABLE filter_rules (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      rule_type  TEXT NOT NULL CHECK(rule_type IN ('body_keyword', 'sender')),
-      pattern    TEXT NOT NULL,
-      note       TEXT,
-      is_active  INTEGER NOT NULL DEFAULT 1,
-      created_by TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(rule_type, pattern)
-    );
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      type TEXT,
-      content TEXT NOT NULL,
-      phone_number TEXT,
-      verification_code TEXT,
-      filter_status TEXT NOT NULL DEFAULT 'pending',
-      filter_rule_id INTEGER REFERENCES filter_rules(id) ON DELETE SET NULL,
-      purpose TEXT NOT NULL DEFAULT 'user',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+async function database() {
+  const sqlite = new Database(':memory:');
+  await createSchema(sqlite);
+  const d1 = sqliteD1(sqlite);
   const statements: string[] = [];
   const recorded = {
     ...d1,
@@ -50,7 +30,7 @@ function database() {
   return { d1: recorded, db: d1.db, statements };
 }
 
-type TestDb = ReturnType<typeof database>;
+type TestDb = Awaited<ReturnType<typeof database>>;
 
 import { memoryKv } from '../../test/memory-kv.js';
 import { callWorker } from '../../test/worker-harness.js';
@@ -168,7 +148,7 @@ function messageRows({ db }: TestDb) {
 
 describe('filter rule list D1 reads', () => {
   test('lists rule metadata without scanning messages for historical hit counts', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10655446', note: 'China Unicom marketing' });
 
     const result = await listFilterRules(db.d1);
@@ -188,7 +168,7 @@ describe('filter rule list D1 reads', () => {
   });
 
   test('orders rules by type, then id', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
     addRule(db, { rule_type: 'body_keyword', pattern: 'promo' });
     addRule(db, { rule_type: 'body_keyword', pattern: 'sale' });
@@ -210,12 +190,12 @@ describe('authorization', () => {
 
   for (const { method, path } of guarded) {
     test(`${method} ${path} answers 401 without a credential the middleware accepts`, async () => {
-      const response = await call(database(), method, path, { token: 'unknown' });
+      const response = await call(await database(), method, path, { token: 'unknown' });
       expect(response.status).toBe(401);
     });
 
     test(`${method} ${path} answers 403 to a role without the permission`, async () => {
-      const response = await call(database(), method, path, { token: VIEWER });
+      const response = await call(await database(), method, path, { token: VIEWER });
       expect(response.status).toBe(403);
     });
   }
@@ -223,7 +203,7 @@ describe('authorization', () => {
 
 describe('GET /api/filters', () => {
   test('answers the rules with every column', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086', note: 'mobile' });
 
     const response = await call(db, 'GET', '/api/filters');
@@ -243,7 +223,7 @@ describe('GET /api/filters', () => {
   });
 
   test('keeps the timestamps the table stores', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await call(db, 'GET', '/api/filters');
@@ -257,7 +237,7 @@ describe('GET /api/filters', () => {
   });
 
   test('answers 500 when the read fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE filter_rules');
 
     const response = await call(db, 'GET', '/api/filters');
@@ -276,7 +256,7 @@ describe('POST /api/filters', () => {
   }
 
   test('creating a rule does not read or write historical messages', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await create(db, JSON.stringify({ rule_type: 'sender', pattern: '10655446' }));
 
@@ -297,7 +277,7 @@ describe('POST /api/filters', () => {
   });
 
   test('stores the trimmed pattern and trimmed note of a body keyword', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await create(
       db,
@@ -311,7 +291,7 @@ describe('POST /api/filters', () => {
   });
 
   test('stores a numeric sender as bare digits', async () => {
-    const db = database();
+    const db = await database();
 
     await create(db, JSON.stringify({ rule_type: 'sender', pattern: '+86 100-86' }));
 
@@ -321,7 +301,7 @@ describe('POST /api/filters', () => {
   });
 
   test('stores a named sender verbatim', async () => {
-    const db = database();
+    const db = await database();
 
     await create(db, JSON.stringify({ rule_type: 'sender', pattern: ' Telco ' }));
 
@@ -331,7 +311,7 @@ describe('POST /api/filters', () => {
   });
 
   test('a blank note is stored as null', async () => {
-    const db = database();
+    const db = await database();
 
     await create(db, JSON.stringify({ rule_type: 'sender', pattern: '10086', note: '   ' }));
 
@@ -341,7 +321,7 @@ describe('POST /api/filters', () => {
   });
 
   test('a null note is stored as null', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await create(
       db,
@@ -390,7 +370,7 @@ describe('POST /api/filters', () => {
 
   for (const [name, body, message] of rejected) {
     test(`answers 400 to ${name} and writes nothing`, async () => {
-      const db = database();
+      const db = await database();
 
       const response = await create(db, JSON.stringify(body));
 
@@ -401,7 +381,7 @@ describe('POST /api/filters', () => {
   }
 
   test('answers 409 to a rule that already exists', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await create(db, JSON.stringify({ rule_type: 'sender', pattern: '10086' }));
@@ -414,7 +394,7 @@ describe('POST /api/filters', () => {
   });
 
   test('answers 400 when the body is not JSON', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await create(db, 'not json');
 
@@ -424,7 +404,7 @@ describe('POST /api/filters', () => {
   });
 
   test('answers 500 when the write fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE filter_rules');
 
     const response = await create(db, JSON.stringify({ rule_type: 'sender', pattern: '10086' }));
@@ -443,7 +423,7 @@ describe('PUT /api/filters/:id', () => {
   }
 
   test('toggling a rule changes only the rule row and keeps matching identity immutable', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10655446' });
 
     const response = await update(db, '1', JSON.stringify({ is_active: false }));
@@ -460,7 +440,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('is_active turns a rule on and off', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086', is_active: 0 });
 
     await update(db, '1', JSON.stringify({ is_active: true }));
@@ -479,7 +459,7 @@ describe('PUT /api/filters/:id', () => {
 
   for (const [name, body, message] of malformed) {
     test(`answers 400 to ${name} and changes nothing`, async () => {
-      const db = database();
+      const db = await database();
       addRule(db, { rule_type: 'sender', pattern: '10086', note: 'old', is_active: 0 });
 
       const response = await update(db, '1', JSON.stringify(body));
@@ -493,7 +473,7 @@ describe('PUT /api/filters/:id', () => {
   }
 
   test('an omitted is_active keeps the stored state', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086', is_active: 0 });
 
     await update(db, '1', JSON.stringify({ note: 'changed' }));
@@ -504,7 +484,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('stores a trimmed note, and a blank note clears it', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086', note: 'old' });
 
     await update(db, '1', JSON.stringify({ note: '  new  ' }));
@@ -515,7 +495,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('an omitted note keeps the stored one', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086', note: 'old' });
 
     await update(db, '1', JSON.stringify({ is_active: true }));
@@ -524,7 +504,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('a null note keeps the stored one', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086', note: 'old' });
 
     const response = await update(db, '1', JSON.stringify({ note: null }));
@@ -534,7 +514,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('accepts the stored rule type and pattern, even untrimmed', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await update(
@@ -554,7 +534,7 @@ describe('PUT /api/filters/:id', () => {
 
   for (const [name, body] of immutable) {
     test(`answers 400 to ${name}`, async () => {
-      const db = database();
+      const db = await database();
       addRule(db, { rule_type: 'sender', pattern: '10086' });
 
       const response = await update(db, '1', JSON.stringify(body));
@@ -568,7 +548,7 @@ describe('PUT /api/filters/:id', () => {
   }
 
   test('answers 404 to a rule that does not exist', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await update(db, '9', JSON.stringify({ note: 'n' }));
 
@@ -580,7 +560,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('answers 404 when the rule is deleted before the update lands', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
     const racing: TestDb = {
       ...db,
@@ -603,7 +583,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('answers 404 to an id that is not a number', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await update(db, 'abc', JSON.stringify({ note: 'x' }));
@@ -612,7 +592,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('answers 400 when the stored pattern no longer passes validation', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'body_keyword', pattern: 'a' });
 
     const response = await update(db, '1', JSON.stringify({ note: 'x' }));
@@ -625,7 +605,7 @@ describe('PUT /api/filters/:id', () => {
   });
 
   test('answers 400 when the body is not JSON', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await update(db, '1', 'not json');
@@ -641,7 +621,7 @@ describe('DELETE /api/filters/:id', () => {
   }
 
   test('deletes an unreferenced rule', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await remove(db, '1');
@@ -652,7 +632,7 @@ describe('DELETE /api/filters/:id', () => {
   });
 
   test('answers 409 to a rule that historical messages reference, and keeps it', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
     addMessage(db, { id: 'm1', content: 'x', filter_status: 'filtered', filter_rule_id: 1 });
 
@@ -667,7 +647,7 @@ describe('DELETE /api/filters/:id', () => {
   });
 
   test('answers 404 to a rule that does not exist', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await remove(db, '9');
 
@@ -679,7 +659,7 @@ describe('DELETE /api/filters/:id', () => {
   });
 
   test('answers 500 when the read fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE messages');
 
     const response = await remove(db, '1');
@@ -700,7 +680,7 @@ describe('POST /api/filters/:id/history', () => {
   }
 
   test('applies an active rule to the messages in range', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'body_keyword', pattern: 'promo' });
     addMessage(db, { id: 'm1', content: 'big promo today' });
     addMessage(db, { id: 'm2', content: 'hello', created_at: '2026-01-02 00:00:00' });
@@ -724,7 +704,7 @@ describe('POST /api/filters/:id/history', () => {
   });
 
   test('releases the messages of an inactive rule', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'body_keyword', pattern: 'promo', is_active: 0 });
     addMessage(db, { id: 'm1', content: 'promo', filter_status: 'filtered', filter_rule_id: 1 });
 
@@ -735,7 +715,7 @@ describe('POST /api/filters/:id/history', () => {
   });
 
   test('answers the cursor of the next page', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'body_keyword', pattern: 'hello' });
     for (let index = 0; index < 201; index++) {
       addMessage(db, {
@@ -756,7 +736,7 @@ describe('POST /api/filters/:id/history', () => {
   });
 
   test('answers 404 to a rule that does not exist', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await history(db, '9', JSON.stringify(range));
 
@@ -779,7 +759,7 @@ describe('POST /api/filters/:id/history', () => {
 
   for (const [name, body] of badRanges) {
     test(`answers 400 to ${name}`, async () => {
-      const db = database();
+      const db = await database();
       addRule(db, { rule_type: 'sender', pattern: '10086' });
 
       const response = await history(db, '1', JSON.stringify(body));
@@ -802,7 +782,7 @@ describe('POST /api/filters/:id/history', () => {
 
   for (const [name, cursor] of badCursors) {
     test(`answers 400 to ${name}`, async () => {
-      const db = database();
+      const db = await database();
       addRule(db, { rule_type: 'sender', pattern: '10086' });
 
       const response = await history(db, '1', JSON.stringify({ ...range, cursor }));
@@ -816,7 +796,7 @@ describe('POST /api/filters/:id/history', () => {
   }
 
   test('answers 400 when the body is not JSON', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await history(db, '1', 'not json');
@@ -826,7 +806,7 @@ describe('POST /api/filters/:id/history', () => {
   });
 
   test('answers 400 when the body is not an object', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await history(db, '1', 'null');
@@ -839,7 +819,7 @@ describe('POST /api/filters/:id/history', () => {
   });
 
   test('accepts a null cursor as the first page', async () => {
-    const db = database();
+    const db = await database();
     addRule(db, { rule_type: 'sender', pattern: '10086' });
 
     const response = await history(db, '1', JSON.stringify({ ...range, cursor: null }));

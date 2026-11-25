@@ -1,5 +1,7 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Batch, D1Statement } from '../lib/d1.js';
 import { FILTER_STATUS } from './spam-filter.js';
@@ -22,20 +24,22 @@ const StoredRow = v.object({
   updated_at: v.nullable(v.string()),
 });
 
-function fakeDb(seed: Seed[]) {
-  const d1 = sqliteD1();
-  d1.db.run(`CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    content TEXT NOT NULL,
-    type TEXT CHECK(type IN ('received', 'sent')) NOT NULL,
-    verification_code TEXT,
-    filter_status TEXT NOT NULL DEFAULT 'pending',
-    filter_rule_id INTEGER,
-    updated_at TIMESTAMP
-  )`);
+const SEEDED_AT = '2020-01-01 00:00:00';
+
+async function fakeDb(seed: Seed[]) {
+  const database = new Database(':memory:');
+  await createSchema(database);
+  const d1 = sqliteD1(database);
+  const insertRule = d1.db.query(
+    `INSERT INTO filter_rules (id, rule_type, pattern) VALUES (?, 'body_keyword', ?)`,
+  );
+  const ruleIds = new Set(seed.flatMap((row) => (row.filter_rule_id ? [row.filter_rule_id] : [])));
+  for (const id of ruleIds) {
+    insertRule.run(id, `rule-${String(id)}`);
+  }
   const insert = d1.db.query(
-    `INSERT INTO messages (id, content, type, verification_code, filter_status, filter_rule_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO messages (id, content, type, verification_code, filter_status, filter_rule_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const row of seed) {
     insert.run(
@@ -45,6 +49,7 @@ function fakeDb(seed: Seed[]) {
       row.verification_code ?? null,
       row.filter_status ?? 'pending',
       row.filter_rule_id ?? null,
+      SEEDED_AT,
     );
   }
 
@@ -63,7 +68,7 @@ function fakeDb(seed: Seed[]) {
 
 describe('reprocessVerificationPage', () => {
   test('removes loose false positives and queues changed rows for spam reclassification', async () => {
-    const { db, stored } = fakeDb([
+    const { db, stored } = await fakeDb([
       {
         id: 'marketing',
         content: 'M1 upgrade available on 9 August 2026',
@@ -83,13 +88,13 @@ describe('reprocessVerificationPage', () => {
     expect(result).toMatchObject({ processed: 2, changed: 1, removed: 1, done: true });
     expect(stored('marketing').verification_code).toBeNull();
     expect(stored('marketing').filter_status).toBe(FILTER_STATUS.PENDING);
-    expect(stored('marketing').updated_at).not.toBeNull();
+    expect(stored('marketing').updated_at).not.toBe(SEEDED_AT);
     expect(stored('otp').filter_status).toBe('clean');
-    expect(stored('otp').updated_at).toBeNull();
+    expect(stored('otp').updated_at).toBe(SEEDED_AT);
   });
 
   test('dry-run reports changes without writing them', async () => {
-    const { db, stored } = fakeDb([
+    const { db, stored } = await fakeDb([
       { id: 'card', content: '您的尾号9016卡片即将到期', verification_code: '9016' },
     ]);
 
@@ -100,7 +105,7 @@ describe('reprocessVerificationPage', () => {
   });
 
   test('adds a code to an existing WhatsApp message', async () => {
-    const { db, stored } = fakeDb([
+    const { db, stored } = await fakeDb([
       {
         id: 'whatsapp',
         content: "<#> Your WhatsApp code: 367-140 Don't share this code with others 4sgLq1p5sV6",
@@ -117,7 +122,7 @@ describe('reprocessVerificationPage', () => {
   });
 
   test('restores a filtered M1 selfcare OTP for reclassification', async () => {
-    const { db, stored } = fakeDb([
+    const { db, stored } = await fakeDb([
       {
         id: 'm1-selfcare',
         content: 'OTP for login to selfcare portal is 159571',
@@ -136,7 +141,7 @@ describe('reprocessVerificationPage', () => {
   });
 
   test('returns a cursor for bounded, resumable pages', async () => {
-    const { db } = fakeDb([
+    const { db } = await fakeDb([
       { id: '1', content: 'nothing', verification_code: null },
       { id: '2', content: 'nothing', verification_code: null },
       { id: '3', content: 'nothing', verification_code: null },
@@ -154,7 +159,7 @@ describe('reprocessVerificationPage scan', () => {
   const rows = ['a', 'b', 'c', 'd'].map((id) => ({ id, content: 'nothing' }));
 
   test('reads only received messages', async () => {
-    const { db, stored } = fakeDb([
+    const { db, stored } = await fakeDb([
       { id: 'sent', content: 'nothing', verification_code: '1234', type: 'sent' },
       { id: 'received', content: 'nothing', verification_code: '1234' },
     ]);
@@ -167,7 +172,7 @@ describe('reprocessVerificationPage scan', () => {
   });
 
   test('resumes after the cursor, which may arrive as text', async () => {
-    const { db } = fakeDb(rows);
+    const { db } = await fakeDb(rows);
 
     expect(await reprocessVerificationPage(db, { after: 2 })).toMatchObject({
       processed: 2,
@@ -180,7 +185,7 @@ describe('reprocessVerificationPage scan', () => {
   });
 
   test('restarts from the beginning for a cursor that is not a non-negative integer', async () => {
-    const { db } = fakeDb(rows);
+    const { db } = await fakeDb(rows);
 
     for (const after of [-1, 1.5, 'abc', Number.NaN, null, undefined, {}]) {
       expect(await reprocessVerificationPage(db, { after })).toMatchObject({ processed: 4 });
@@ -188,7 +193,7 @@ describe('reprocessVerificationPage scan', () => {
   });
 
   test('keeps the cursor where it was when nothing is left', async () => {
-    const { db } = fakeDb(rows);
+    const { db } = await fakeDb(rows);
 
     expect(await reprocessVerificationPage(db, { after: 4 })).toMatchObject({
       processed: 0,
@@ -198,7 +203,7 @@ describe('reprocessVerificationPage scan', () => {
   });
 
   test('reads the page size as an integer between 1 and 500 and defaults a bad one', async () => {
-    const { db } = fakeDb(rows);
+    const { db } = await fakeDb(rows);
 
     expect(await reprocessVerificationPage(db, { pageSize: '2' })).toMatchObject({ processed: 2 });
     expect(await reprocessVerificationPage(db, { pageSize: '1.9' })).toMatchObject({
@@ -217,13 +222,13 @@ describe('reprocessVerificationPage scan', () => {
   });
 
   test('treats an empty stored code as no code', async () => {
-    const { db } = fakeDb([{ id: 'empty', content: 'nothing', verification_code: '' }]);
+    const { db } = await fakeDb([{ id: 'empty', content: 'nothing', verification_code: '' }]);
 
     expect(await reprocessVerificationPage(db)).toMatchObject({ processed: 1, changed: 0 });
   });
 
   test('counts a replaced code and reports at most twelve samples', async () => {
-    const { db } = fakeDb([
+    const { db } = await fakeDb([
       { id: 'replaced', content: 'Your OTP is 4821', verification_code: '9999' },
       ...Array.from({ length: 14 }, (_, index) => ({
         id: `stale-${index}`,

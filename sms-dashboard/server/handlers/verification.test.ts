@@ -1,6 +1,8 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
 import { memoryKv } from '../../test/memory-kv.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 
@@ -17,28 +19,15 @@ afterEach(() => {
   errorSpy.mockRestore();
 });
 
-function database(messages: { id: string; content: string; verification_code?: string }[]) {
-  const d1 = sqliteD1();
-  d1.db.run(`CREATE TABLE filter_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_type TEXT NOT NULL,
-    pattern TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1
-  )`);
-  d1.db.run(`CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    content TEXT NOT NULL,
-    phone_number TEXT,
-    verification_code TEXT,
-    filter_status TEXT NOT NULL DEFAULT 'clean',
-    filter_rule_id INTEGER,
-    updated_at TIMESTAMP
-  )`);
+async function database(messages: { id: string; content: string; verification_code?: string }[]) {
+  const sqlite = new Database(':memory:');
+  await createSchema(sqlite);
+  const d1 = sqliteD1(sqlite);
   for (const message of messages) {
     d1.db
       .query(
-        `INSERT INTO messages (id, type, content, verification_code) VALUES (?, 'received', ?, ?)`,
+        `INSERT INTO messages (id, type, content, verification_code, filter_status)
+         VALUES (?, 'received', ?, ?, 'clean')`,
       )
       .run(message.id, message.content, message.verification_code ?? null);
   }
@@ -61,7 +50,7 @@ const SESSIONS = memoryKv({
 });
 
 async function reprocess(
-  db: ReturnType<typeof database>,
+  db: Awaited<ReturnType<typeof database>>,
   { query = '', token = ADMIN } = {},
 ): Promise<Response> {
   const { response } = await callWorker('POST', `/api/verification/reprocess${query}`, {
@@ -93,17 +82,17 @@ async function bodyOf(response: Response) {
 
 describe('POST /api/verification/reprocess', () => {
   test('answers 401 without a credential the middleware accepts', async () => {
-    const response = await reprocess(database([]), { token: 'unknown' });
+    const response = await reprocess(await database([]), { token: 'unknown' });
     expect(response.status).toBe(401);
   });
 
   test('answers 403 to a role without filters.write', async () => {
-    const response = await reprocess(database([]), { token: VIEWER });
+    const response = await reprocess(await database([]), { token: VIEWER });
     expect(response.status).toBe(403);
   });
 
   test('a dry run reports the changes and writes nothing', async () => {
-    const db = database([
+    const db = await database([
       { id: 'm1', content: 'Your code is 123456', verification_code: '000000' },
     ]);
 
@@ -119,7 +108,7 @@ describe('POST /api/verification/reprocess', () => {
   });
 
   test('a changing run rewrites the codes and then judges the pending messages', async () => {
-    const db = database([
+    const db = await database([
       { id: 'm1', content: 'Your code is 123456', verification_code: '000000' },
     ]);
 
@@ -135,7 +124,7 @@ describe('POST /api/verification/reprocess', () => {
   });
 
   test('a run with nothing to change does not sweep', async () => {
-    const db = database([
+    const db = await database([
       { id: 'm1', content: 'Your code is 123456', verification_code: '123456' },
     ]);
 
@@ -146,7 +135,7 @@ describe('POST /api/verification/reprocess', () => {
   });
 
   test('answers 500 when the scan fails', async () => {
-    const db = database([]);
+    const db = await database([]);
     db.db.run('DROP TABLE messages');
 
     const response = await reprocess(db);
