@@ -87,7 +87,7 @@
   const feed = new MessageFeed({
     isSignedIn: () => user !== null,
     selectedIccid: () => selectedPhoneIccid,
-    senderNumber: (iccid) => phoneNumbers.find((p) => p.iccid === iccid)?.number,
+    senderPhone: (iccid) => phoneNumbers.find((phone) => phone.iccid === iccid),
     notify: toasts.show,
   });
   const balances = new BalanceChecks({

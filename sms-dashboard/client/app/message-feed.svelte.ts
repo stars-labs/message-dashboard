@@ -1,5 +1,6 @@
 import type { FilterRule } from '../../shared/api/filters.js';
 import type { ApiMessage } from '../../shared/api/messages.js';
+import type { Phone } from '../../shared/api/phones.js';
 import { textOr } from '../../shared/text.js';
 import { api, contractApi, errorMessage } from '../lib/api.js';
 import {
@@ -18,7 +19,7 @@ type FirstPage = Awaited<ReturnType<typeof api.getMessages>>;
 interface FeedContext {
   isSignedIn: () => boolean;
   selectedIccid: () => string | null;
-  senderNumber: (iccid: string) => string | undefined;
+  senderPhone: (iccid: string) => Pick<Phone, 'number' | 'sim_index' | 'country'> | undefined;
   notify: (message: string, type: ToastType) => void;
 }
 
@@ -177,21 +178,14 @@ export class MessageFeed {
 
   send = async (newMessage: { phone_iccid: string; recipient: string; content: string }) => {
     try {
+      const sender = this.context.senderPhone(newMessage.phone_iccid);
       const response = await api.sendMessage({
         phone_iccid: newMessage.phone_iccid,
         recipient: newMessage.recipient,
         content: newMessage.content,
       });
 
-      const senderNumber = textOr(
-        this.context.senderNumber(newMessage.phone_iccid),
-        newMessage.phone_iccid,
-      );
-
-      this.messages = [
-        buildSentMessage(response.messageId, newMessage, senderNumber),
-        ...this.messages,
-      ];
+      this.messages = [buildSentMessage(response.messageId, newMessage, sender), ...this.messages];
       return response;
     } catch (error) {
       console.error('Failed to send message:', error);

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import postcss, { Rule } from 'postcss';
@@ -8,7 +8,7 @@ import type { MeResponse } from '../shared/api/auth.js';
 import type { BalanceChecksResponse } from '../shared/api/balance-checks.js';
 import type { DaemonStatusResponse } from '../shared/api/daemon-status.js';
 import type { KeywordsResponse } from '../shared/api/keywords.js';
-import type { ApiMessage, MessagePage } from '../shared/api/messages.js';
+import type { ApiMessage, MessagePage, SendMessageResponse } from '../shared/api/messages.js';
 import type { Phone, PhonesResponse } from '../shared/api/phones.js';
 import App from './App.svelte';
 import { auth } from './lib/auth.js';
@@ -191,10 +191,10 @@ function responseFor(input: Parameters<typeof fetch>[0]): Response {
   }
 }
 
-function stubApi(): void {
+function stubApi(respond = responseFor): void {
   auth.baseUrl = 'http://localhost';
   fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(
-    Object.assign((input: Parameters<typeof fetch>[0]) => Promise.resolve(responseFor(input)), {
+    Object.assign((input: Parameters<typeof fetch>[0]) => Promise.resolve(respond(input)), {
       preconnect: () => undefined,
     }),
   );
@@ -204,6 +204,41 @@ function elementOf(found: Element | null, description: string): HTMLElement {
   if (!(found instanceof HTMLElement)) throw new Error(`no ${description} rendered`);
   return found;
 }
+
+test('shows the chosen sender card and number immediately in the sent message row', async () => {
+  const sender = { ...phone, iccid: '8965000000000000002', sim_index: 2, number: '+6580000002' };
+  const content = 'local sender card test';
+  const outgoing = {
+    id: 'outgoing-1',
+    phone_iccid: sender.iccid,
+    recipient: '+6591234567',
+    content,
+    timestamp: '2026-11-25T00:00:00.000Z',
+    type: 'sent',
+    status: 'pending',
+  } satisfies SendMessageResponse['data'];
+  stubApi((input) => {
+    if (pathOf(input) === '/api/phones') return Response.json({ ...phones, data: [sender] });
+    if (pathOf(input) === '/api/messages/send') {
+      return Response.json({ success: true, messageId: outgoing.id, data: outgoing });
+    }
+    return responseFor(input);
+  });
+  const view = render(App);
+  await view.findByText(message.content);
+  const input = view.getByLabelText('发送卡');
+  await fireEvent.focus(input);
+  const picker = elementOf(input.closest('.sim-input-container'), 'sender picker');
+  await fireEvent.click(within(picker).getByRole('button', { name: /S02/ }));
+  await fireEvent.input(view.getByLabelText('接收号码'), { target: { value: '91234567' } });
+  await fireEvent.input(view.getByLabelText('短信内容'), { target: { value: content } });
+  const composer = elementOf(picker.parentElement, 'composer');
+  await fireEvent.click(within(composer).getByRole('button', { name: /^发送短信$/ }));
+
+  const row = elementOf((await view.findByText(content)).closest('[data-message-row]'), 'sent row');
+  expect(within(row).getByText('S02')).toBeTruthy();
+  expect(within(row).getByTitle('+6580000002').textContent).toContain('+6580000002');
+});
 
 describe('mobile detail navigation', () => {
   test('recurring dashboard refreshes avoid full-table stats and balance history reads', () => {
