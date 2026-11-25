@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -22,22 +23,41 @@ fn classify_upload_results(
     pending: &[StoredMessage],
     results: &[UploadResult],
 ) -> UploadClassification {
+    #[derive(PartialEq, Eq)]
+    enum Outcome {
+        Acknowledged,
+        DeadLetter,
+        Retryable,
+    }
+
+    let mut outcomes = HashMap::new();
+    for result in results {
+        let outcome = match result.status {
+            UploadStatus::Stored | UploadStatus::AlreadyStored => Outcome::Acknowledged,
+            UploadStatus::Rejected if !result.retryable => Outcome::DeadLetter,
+            UploadStatus::Rejected | UploadStatus::Unknown(_) => Outcome::Retryable,
+        };
+        outcomes
+            .entry(result.id.as_str())
+            .and_modify(|previous| {
+                if *previous != outcome {
+                    *previous = Outcome::Retryable;
+                }
+            })
+            .or_insert(outcome);
+    }
+
     let mut classification = UploadClassification::default();
     for result in results {
-        if let Some(message) = pending.iter().find(|m| m.source_message_id == result.id) {
-            match result.status {
-                UploadStatus::Stored | UploadStatus::AlreadyStored => {
-                    classification.acknowledged.push(message.clone());
-                }
-                UploadStatus::Rejected if !result.retryable => {
-                    classification.dead_letter.push(message.clone());
-                }
-                UploadStatus::Rejected | UploadStatus::Unknown(_) => {
-                    classification.retryable.push(message.clone());
-                }
-            }
-        } else {
+        let Some(message) = pending.iter().find(|m| m.source_message_id == result.id) else {
             classification.unknown_ids.push(result.id.clone());
+            continue;
+        };
+        match outcomes.remove(result.id.as_str()) {
+            Some(Outcome::Acknowledged) => classification.acknowledged.push(message.clone()),
+            Some(Outcome::DeadLetter) => classification.dead_letter.push(message.clone()),
+            Some(Outcome::Retryable) => classification.retryable.push(message.clone()),
+            None => {}
         }
     }
     classification
@@ -156,7 +176,7 @@ impl Uploader {
         if !retryable.is_empty() {
             let _ = self
                 .store
-                .return_to_pending(&retryable, "Worker returned retryable rejection");
+                .return_to_pending(&retryable, "Worker returned a retryable or unknown result");
         }
         info!(
             "☁️  Uploader: acknowledged {}, dead_letter {}, retryable {}",
@@ -311,6 +331,44 @@ mod tests {
 
         assert_eq!(source_ids(&classification.retryable), ["a", "b"]);
         assert!(classification.dead_letter.is_empty());
+    }
+
+    #[test]
+    fn contradictory_results_retry_only_the_conflicting_message() {
+        for statuses in [
+            [UploadStatus::Stored, UploadStatus::Rejected],
+            [UploadStatus::Rejected, UploadStatus::Stored],
+        ] {
+            let [first, second] = statuses;
+            let classification = classify_upload_results(
+                &[stored("conflict"), stored("valid")],
+                &[
+                    result("conflict", first, false),
+                    result("valid", UploadStatus::Stored, false),
+                    result("conflict", second, false),
+                    result("conflict", UploadStatus::AlreadyStored, false),
+                ],
+            );
+
+            assert_eq!(source_ids(&classification.retryable), ["conflict"]);
+            assert_eq!(source_ids(&classification.acknowledged), ["valid"]);
+            assert!(classification.dead_letter.is_empty());
+            assert!(classification.unknown_ids.is_empty());
+        }
+    }
+
+    #[test]
+    fn equivalent_acknowledgements_count_the_message_once() {
+        let classification = classify_upload_results(
+            &[stored("a")],
+            &[
+                result("a", UploadStatus::Stored, false),
+                result("a", UploadStatus::AlreadyStored, false),
+            ],
+        );
+
+        assert_eq!(source_ids(&classification.acknowledged), ["a"]);
+        assert!(classification.retryable.is_empty());
     }
 
     #[test]

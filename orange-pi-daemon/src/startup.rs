@@ -123,14 +123,21 @@ pub(crate) async fn check_modem_manager(modem_manager: &ModemManager) -> Result<
     Ok(())
 }
 
-pub(crate) fn resolve_db_path(args: &[String]) -> String {
-    args.windows(2)
-        .find_map(|w| match w {
-            [flag, value] if flag == "--db-path" => Some(value.clone()),
-            _ => None,
-        })
+pub(crate) fn resolve_db_path(args: &[String]) -> Result<String> {
+    let mut db_path = None;
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--db-path" {
+            let value = args
+                .get(index + 1)
+                .filter(|value| !value.starts_with("--"))
+                .ok_or_else(|| anyhow::anyhow!("--db-path requires a path"))?;
+            db_path.get_or_insert(value);
+        }
+    }
+    Ok(db_path
+        .cloned()
         .or_else(|| std::env::var("MESSAGE_DB_PATH").ok())
-        .unwrap_or_else(|| "/var/lib/sms-daemon/messages.db".to_string())
+        .unwrap_or_else(|| "/var/lib/sms-daemon/messages.db".to_string()))
 }
 
 pub(crate) fn open_message_store(db_path: &str) -> Result<Arc<MessageStore>> {
@@ -272,7 +279,7 @@ mod tests {
     #[test]
     fn resolve_db_path_takes_the_value_after_the_flag() {
         assert_eq!(
-            resolve_db_path(&args(&["daemon", "--db-path", "/data/messages.db"])),
+            resolve_db_path(&args(&["daemon", "--db-path", "/data/messages.db"])).unwrap(),
             "/data/messages.db"
         );
     }
@@ -286,7 +293,8 @@ mod tests {
                 "--db-path",
                 "/x.db",
                 "--help"
-            ])),
+            ]))
+            .unwrap(),
             "/x.db"
         );
     }
@@ -299,9 +307,22 @@ mod tests {
                 "/first.db",
                 "--db-path",
                 "/second.db"
-            ])),
+            ]))
+            .unwrap(),
             "/first.db"
         );
+    }
+
+    #[test]
+    fn resolve_db_path_rejects_another_long_flag_as_the_value() {
+        let error = resolve_db_path(&args(&["daemon", "--db-path", "--help"])).unwrap_err();
+        assert_eq!(error.to_string(), "--db-path requires a path");
+    }
+
+    #[test]
+    fn resolve_db_path_rejects_a_missing_value() {
+        let error = resolve_db_path(&args(&["daemon", "--db-path"])).unwrap_err();
+        assert_eq!(error.to_string(), "--db-path requires a path");
     }
 
     #[test]

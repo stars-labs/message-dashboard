@@ -40,7 +40,7 @@ impl AtModemManager {
 
     /// Strips trailing 'F' BCD filler (ITU-T E.118).
     fn normalize_iccid(iccid: &str) -> Option<Iccid> {
-        Iccid::try_from(iccid.trim_end_matches('F')).ok()
+        Iccid::try_from(iccid.trim_end_matches(['F', 'f'])).ok()
     }
 
     pub async fn get_imei(&self, port: &str) -> Result<Option<Imei>> {

@@ -64,13 +64,12 @@ async fn main() -> Result<()> {
     logging::init()?;
 
     let args: Vec<String> = std::env::args().collect();
+    let db_path = resolve_db_path(&args)?;
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_help(args.first().map_or("orange-pi-daemon", String::as_str));
         return Ok(());
     }
-
-    let db_path = resolve_db_path(&args);
 
     let (api_url, api_key) = api_settings(|name| std::env::var(name).ok())?;
 

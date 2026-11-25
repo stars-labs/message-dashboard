@@ -1053,6 +1053,16 @@ fn parse_iccid_drops_trailing_filler() {
 }
 
 #[test]
+fn parse_iccid_drops_mixed_case_trailing_filler() {
+    for response in ["+QCCID: 89860121750097fFfF", "89860121750097ffff"] {
+        assert_eq!(
+            AtModemManager::parse_iccid(response),
+            Iccid::try_from("89860121750097").ok()
+        );
+    }
+}
+
+#[test]
 fn parse_iccid_rejects_a_value_made_only_of_filler() {
     assert_eq!(
         AtModemManager::parse_iccid("+QCCID: FFFFFFFFFFFFFFFFFFFF"),
