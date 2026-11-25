@@ -11,28 +11,37 @@ use crate::worker_pool::{WorkerPool, WorkerPoolConfig};
 
 #[expect(clippy::print_stdout, reason = "--help writes its text to stdout")]
 pub(crate) fn print_help(program: &str) {
-    println!(
-        "SMS Daemon v{} - Direct AT Commands for 100+ modems",
+    print!("{}", help_text(program));
+}
+
+fn help_text(program: &str) -> String {
+    format!(
+        "SMS Daemon v{} - Direct AT Commands for 100+ modems
+
+USAGE:
+    {program} [OPTIONS] [COMMAND]
+
+COMMANDS:
+    cleanup      Run database cleanup and exit
+
+OPTIONS:
+    --db-path <PATH>    SQLite database path (default: /var/lib/sms-daemon/messages.db)
+    -h, --help          Print this help message
+
+ENVIRONMENT VARIABLES:
+    MESSAGE_DB_PATH             SQLite database path (overridden by --db-path)
+    SMS_API_URL                 API endpoint URL (required)
+    SMS_API_KEY                 API authentication key (required)
+    RUST_LOG                    Log level (e.g., orange_pi_daemon_rust=debug)
+    VOICE_BRIDGE_DOMAIN         Hostname for the voice bridge (enable when set)
+    VOICE_BRIDGE_LISTEN         Listen IP address (default: 0.0.0.0)
+    VOICE_BRIDGE_PROXY_PROTOCOL Require PROXY protocol v1 when set to 1
+    VOICE_BRIDGE_PORT           Listen port (default: 443)
+    VOICE_BRIDGE_ACME_DIR       ACME state directory (default: /var/lib/sms-daemon/acme)
+    VOICE_BRIDGE_ACME_STAGING   Use the ACME staging endpoint when set to 1
+",
         env!("CARGO_PKG_VERSION")
-    );
-    println!();
-    println!("USAGE:");
-    println!("    {program} [OPTIONS] [COMMAND]");
-    println!();
-    println!("COMMANDS:");
-    println!("    cleanup      Run database cleanup and exit");
-    println!();
-    println!("OPTIONS:");
-    println!(
-        "    --db-path <PATH>    SQLite database path (default: /var/lib/sms-daemon/messages.db)"
-    );
-    println!("    -h, --help          Print this help message");
-    println!();
-    println!("ENVIRONMENT VARIABLES:");
-    println!("    MESSAGE_DB_PATH     SQLite database path (overridden by --db-path)");
-    println!("    SMS_API_URL         API endpoint URL (required)");
-    println!("    SMS_API_KEY         API authentication key (required)");
-    println!("    RUST_LOG            Log level (e.g., orange_pi_daemon_rust=debug)");
+    )
 }
 
 /// Probe every listed modem; a modem needs a valid IMEI to be cached, and its
@@ -157,6 +166,52 @@ pub(crate) fn init_worker_pool(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    fn collect_literal_env_reads(directory: &Path, names: &mut BTreeSet<String>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_literal_env_reads(&path, names);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let source = std::fs::read_to_string(path).unwrap();
+                names.extend(source.split("env::var").skip(1).filter_map(|tail| {
+                    let argument = tail.trim_start().strip_prefix('(')?.trim_start();
+                    let (name, _) = argument.strip_prefix('"')?.split_once('"')?;
+                    Some(name.to_string())
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn help_lists_every_environment_variable_read_by_the_daemon() {
+        let used = RefCell::new(BTreeSet::from([
+            tracing_subscriber::EnvFilter::DEFAULT_ENV.to_string()
+        ]));
+        api_settings(|name| {
+            used.borrow_mut().insert(name.to_string());
+            Some("fixture".to_string())
+        })
+        .unwrap();
+        let mut used = used.into_inner();
+        collect_literal_env_reads(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut used,
+        );
+
+        let help = help_text("daemon");
+        let (_, environment) = help.split_once("ENVIRONMENT VARIABLES:\n").unwrap();
+        let mut listed: Vec<_> = environment
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .map(str::to_string)
+            .collect();
+        listed.sort_unstable();
+        assert_eq!(listed, used.into_iter().collect::<Vec<_>>());
+    }
 
     fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         |name| {
