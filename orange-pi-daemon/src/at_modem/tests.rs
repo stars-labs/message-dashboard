@@ -846,3 +846,277 @@ fn test_parse_pdu_sms_alphanumeric_sender() {
     assert_eq!(sms.sender.as_str(), "Google");
     assert_eq!(sms.text, "Hello");
 }
+
+fn recipient_error(recipient: &str, allow_short_code: bool) -> String {
+    AtModemManager::validate_recipient_with_short_code(recipient, allow_short_code)
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn validate_recipient_reports_the_digit_count_when_the_length_is_wrong() {
+    assert_eq!(
+        recipient_error("12345", false),
+        "Invalid SMS recipient: expected 6-15 digits, got 5 character(s)"
+    );
+    assert_eq!(
+        recipient_error("+", false),
+        "Invalid SMS recipient: expected 6-15 digits, got 0 character(s)"
+    );
+    assert_eq!(
+        recipient_error("+1234567890123456", false),
+        "Invalid SMS recipient: expected 6-15 digits, got 16 character(s)"
+    );
+    assert_eq!(
+        recipient_error("12", true),
+        "Invalid SMS recipient: expected 6-15 digits, got 2 character(s)"
+    );
+}
+
+#[test]
+fn validate_recipient_does_not_echo_a_value_with_control_characters() {
+    let message = recipient_error("+65\rA1234", false);
+
+    assert_eq!(
+        message,
+        "Invalid SMS recipient: must be E.164 (optional leading '+' then digits only)"
+    );
+    assert!(!message.contains('\r'));
+    assert_eq!(
+        recipient_error("++6512345", false),
+        "Invalid SMS recipient: must be E.164 (optional leading '+' then digits only)"
+    );
+}
+
+#[test]
+fn validate_recipient_without_the_short_code_option_refuses_short_codes() {
+    assert_eq!(
+        AtModemManager::validate_recipient("10086")
+            .unwrap_err()
+            .to_string(),
+        "Invalid SMS recipient: expected 6-15 digits, got 5 character(s)"
+    );
+    assert!(AtModemManager::validate_recipient("+6512345678").is_ok());
+}
+
+#[test]
+fn validate_recipient_accepts_short_codes_of_three_to_five_digits_only() {
+    for accepted in ["123", "1234", "10086"] {
+        assert!(
+            AtModemManager::validate_recipient_with_short_code(accepted, true).is_ok(),
+            "{accepted}"
+        );
+    }
+    assert!(AtModemManager::validate_recipient_with_short_code("123456", true).is_ok());
+    assert_eq!(
+        recipient_error("1a3", true),
+        "Invalid SMS recipient: expected 6-15 digits, got 3 character(s)"
+    );
+}
+
+#[test]
+fn validate_message_body_names_the_offending_control_character() {
+    let error = |body: &str| {
+        AtModemManager::validate_message_body(body)
+            .unwrap_err()
+            .to_string()
+    };
+
+    assert_eq!(
+        error("x\x1Ay"),
+        "Invalid SMS body: contains control character U+001A"
+    );
+    assert_eq!(
+        error("x\x1By"),
+        "Invalid SMS body: contains control character U+001B"
+    );
+    assert_eq!(
+        error("x\0y"),
+        "Invalid SMS body: contains control character U+0000"
+    );
+    assert_eq!(
+        error("a\x1Bb\x1Ac"),
+        "Invalid SMS body: contains control character U+001B"
+    );
+    assert!(AtModemManager::validate_message_body("").is_ok());
+}
+
+#[test]
+fn recognises_every_final_result_code_of_an_sms_submission() {
+    for response in [
+        "> \r\n+CMGS: 12\r\n\r\nOK\r\n",
+        "+CMGS: 12",
+        "OK",
+        "  OK  ",
+        "ERROR",
+        "+CMS ERROR: 330",
+        "+CME ERROR: 10",
+    ] {
+        assert!(
+            AtModemManager::has_sms_submit_final_code(response),
+            "{response:?}"
+        );
+    }
+}
+
+#[test]
+fn does_not_mistake_the_prompt_or_echo_for_a_final_result_code() {
+    for response in [
+        "",
+        "> ",
+        "AT+CMGS=\"+6512345678\"\r\n> ",
+        "OKAY",
+        "NO ERROR",
+        "+CMGS",
+        "+CMS ERROR 330",
+    ] {
+        assert!(
+            !AtModemManager::has_sms_submit_final_code(response),
+            "{response:?}"
+        );
+    }
+}
+
+#[test]
+fn confirms_a_submission_the_modem_acknowledged() {
+    for response in ["+CMGS: 5\r\n\r\nOK\r\n", "+CMGS: 5", "\r\nOK\r\n"] {
+        for timed_out in [false, true] {
+            assert_eq!(
+                AtModemManager::classify_sms_submit_response(response, timed_out).unwrap(),
+                SmsSubmission::Confirmed,
+                "{response:?} timed_out={timed_out}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_explicit_modem_error_fails_a_submission_even_after_a_timeout_or_an_ok() {
+    for (response, timed_out) in [
+        ("+CMS ERROR: 500\r\n", true),
+        ("+CME ERROR: 10\r\n", false),
+        ("+CMGS: 5\r\nERROR\r\n", false),
+        ("ERROR", true),
+    ] {
+        let error = AtModemManager::classify_sms_submit_response(response, timed_out).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("Send SMS failed: {response}"),
+            "{response:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unrecognised_reply_that_did_not_time_out_is_a_failed_submission() {
+    let error = AtModemManager::classify_sms_submit_response("garbage", false).unwrap_err();
+    assert_eq!(error.to_string(), "Send SMS failed: garbage");
+
+    let error = AtModemManager::classify_sms_submit_response("", false).unwrap_err();
+    assert_eq!(error.to_string(), "Send SMS failed: ");
+}
+
+#[test]
+fn an_empty_reply_that_timed_out_is_an_unconfirmed_submission() {
+    assert_eq!(
+        AtModemManager::classify_sms_submit_response("", true).unwrap(),
+        SmsSubmission::SubmittedUnconfirmed,
+    );
+}
+
+#[test]
+fn post_submit_recovery_reports_the_modem_error_line_only() {
+    let error = |response: &str| {
+        AtModemManager::classify_post_submit_recovery_response(response)
+            .unwrap_err()
+            .to_string()
+    };
+
+    assert_eq!(
+        error("AT\r\n+CMS ERROR: 350\r\nOK\r\n"),
+        "Send SMS failed after submission: +CMS ERROR: 350"
+    );
+    assert_eq!(
+        error("  +CME ERROR: 10  \r\n"),
+        "Send SMS failed after submission: +CME ERROR: 10"
+    );
+    assert_eq!(error("ERROR"), "Send SMS failed after submission: ERROR");
+}
+
+#[test]
+fn parse_iccid_skips_a_short_tagged_line_and_reads_the_next_line() {
+    assert_eq!(
+        AtModemManager::parse_iccid("+QCCID: 1234\r\n89860121750097854321\r\nOK"),
+        Iccid::try_from("89860121750097854321").ok()
+    );
+    assert_eq!(
+        AtModemManager::parse_iccid("AT+QCCID\r\n+QCCID: nothex\r\nOK"),
+        None
+    );
+}
+
+#[test]
+fn parse_iccid_drops_trailing_filler() {
+    assert_eq!(
+        AtModemManager::parse_iccid("+QCCID: 89860121750097FFFF"),
+        Iccid::try_from("89860121750097").ok()
+    );
+}
+
+#[test]
+fn parse_iccid_rejects_a_value_made_only_of_filler() {
+    assert_eq!(
+        AtModemManager::parse_iccid("+QCCID: FFFFFFFFFFFFFFFFFFFF"),
+        None
+    );
+}
+
+#[test]
+fn parse_imei_takes_the_first_valid_line() {
+    assert_eq!(
+        AtModemManager::parse_imei("860123456789012\r\n860123456789999\r\nOK"),
+        Imei::try_from("860123456789012").ok()
+    );
+    assert_eq!(AtModemManager::parse_imei(""), None);
+}
+
+#[test]
+fn parse_cnum_reads_the_first_line_that_carries_a_number() {
+    assert_eq!(
+        AtModemManager::parse_cnum(
+            "+CNUM: \"\",\"\",129\r\n+CNUM: \"Line 2\",\"+6591234567\",145\r\nOK"
+        ),
+        SimNumber::try_from("+6591234567").ok()
+    );
+}
+
+#[test]
+fn parse_cnum_ignores_a_line_without_a_quoted_number() {
+    assert_eq!(AtModemManager::parse_cnum("+CNUM: ,6591234567,129"), None);
+    assert_eq!(AtModemManager::parse_cnum("+CNUM: \"\""), None);
+    assert_eq!(AtModemManager::parse_cnum(""), None);
+}
+
+#[test]
+fn parse_cpms_read_stores_uppercases_trims_and_drops_empty_names() {
+    assert_eq!(
+        AtModemManager::parse_cpms_read_stores("+CPMS: (\"me\", \" sm \",\"\",\"  \"),(\"ME\")"),
+        vec!["ME", "SM"]
+    );
+    assert!(AtModemManager::parse_cpms_read_stores("+CPMS: ()").is_empty());
+}
+
+#[test]
+fn sms_read_store_candidates_ignore_duplicates_and_an_empty_capability_list() {
+    let supported = vec!["ME".to_string(), "ME".to_string()];
+
+    assert_eq!(
+        AtModemManager::sms_read_store_candidates(&supported),
+        vec![SmsStorage::Me]
+    );
+    assert_eq!(
+        AtModemManager::sms_read_store_candidates(&["SM".to_string()]),
+        vec![SmsStorage::Sm]
+    );
+    assert!(AtModemManager::sms_read_store_candidates(&[]).is_empty());
+}

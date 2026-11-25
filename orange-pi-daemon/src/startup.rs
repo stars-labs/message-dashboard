@@ -199,4 +199,67 @@ mod tests {
         let error = api_settings(env(&[("SMS_API_KEY", "key")])).unwrap_err();
         assert_eq!(error.to_string(), "SMS_API_URL is not set");
     }
+
+    #[test]
+    fn api_settings_checks_the_url_before_the_key() {
+        let error = api_settings(env(&[])).unwrap_err();
+        assert_eq!(error.to_string(), "SMS_API_URL is not set");
+    }
+
+    #[test]
+    fn api_settings_refuses_an_empty_url() {
+        let error = api_settings(env(&[("SMS_API_URL", ""), ("SMS_API_KEY", "key")])).unwrap_err();
+        assert_eq!(error.to_string(), "SMS_API_URL is not set");
+    }
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn resolve_db_path_takes_the_value_after_the_flag() {
+        assert_eq!(
+            resolve_db_path(&args(&["daemon", "--db-path", "/data/messages.db"])),
+            "/data/messages.db"
+        );
+    }
+
+    #[test]
+    fn resolve_db_path_finds_the_flag_among_other_arguments() {
+        assert_eq!(
+            resolve_db_path(&args(&[
+                "daemon",
+                "cleanup",
+                "--db-path",
+                "/x.db",
+                "--help"
+            ])),
+            "/x.db"
+        );
+    }
+
+    #[test]
+    fn resolve_db_path_uses_the_first_flag_when_it_is_repeated() {
+        assert_eq!(
+            resolve_db_path(&args(&[
+                "--db-path",
+                "/first.db",
+                "--db-path",
+                "/second.db"
+            ])),
+            "/first.db"
+        );
+    }
+
+    #[test]
+    fn open_message_store_opens_an_empty_queue() {
+        let store = open_message_store(":memory:").unwrap();
+
+        assert!(store.claim_messages(10, 90).unwrap().is_empty());
+    }
+
+    #[test]
+    fn open_message_store_refuses_a_path_in_a_missing_directory() {
+        assert!(open_message_store("/nonexistent-sms-daemon-dir/messages.db").is_err());
+    }
 }

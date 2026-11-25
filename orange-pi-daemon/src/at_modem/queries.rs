@@ -288,3 +288,65 @@ impl AtModemManager {
         Ok(health)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_creg_reads_mode_and_status() {
+        assert_eq!(
+            AtModemManager::parse_creg("+CREG: 0,1\r\n\r\nOK\r\n"),
+            (0, 1)
+        );
+        assert_eq!(
+            AtModemManager::parse_creg("+CREG: 2,5,\"1A2B\",\"0C3D\"\r\nOK"),
+            (2, 5)
+        );
+        assert_eq!(AtModemManager::parse_creg("+CREG:  1 , 3 "), (1, 3));
+    }
+
+    #[test]
+    fn parse_creg_falls_back_to_zero_for_missing_or_unparsable_fields() {
+        assert_eq!(AtModemManager::parse_creg(""), (0, 0));
+        assert_eq!(AtModemManager::parse_creg("OK"), (0, 0));
+        assert_eq!(AtModemManager::parse_creg("+CREG: 1"), (0, 0));
+        assert_eq!(AtModemManager::parse_creg("+CREG: x,y"), (0, 0));
+        assert_eq!(AtModemManager::parse_creg("+CREG: 2,x"), (2, 0));
+    }
+
+    #[test]
+    fn parse_creg_ignores_the_packet_registration_line() {
+        assert_eq!(AtModemManager::parse_creg("+CGREG: 0,1"), (0, 0));
+    }
+
+    #[test]
+    fn parse_cgreg_reads_mode_and_status() {
+        assert_eq!(
+            AtModemManager::parse_cgreg("AT+CGREG?\r\n+CGREG: 0,5\r\n\r\nOK\r\n"),
+            (0, 5)
+        );
+        assert_eq!(AtModemManager::parse_cgreg("+CGREG: 2,1,\"1A2B\""), (2, 1));
+    }
+
+    #[test]
+    fn parse_cgreg_falls_back_to_zero_for_missing_or_unparsable_fields() {
+        assert_eq!(AtModemManager::parse_cgreg(""), (0, 0));
+        assert_eq!(AtModemManager::parse_cgreg("+CGREG: 1"), (0, 0));
+        assert_eq!(AtModemManager::parse_cgreg("+CGREG: 1,x"), (1, 0));
+        assert_eq!(AtModemManager::parse_cgreg("+CREG: 0,1"), (0, 0));
+    }
+
+    #[test]
+    fn normalize_iccid_strips_trailing_filler_and_rejects_pure_filler() {
+        assert_eq!(
+            AtModemManager::normalize_iccid("8965012306052989707F"),
+            Iccid::try_from("8965012306052989707").ok()
+        );
+        assert_eq!(
+            AtModemManager::normalize_iccid("89650123060529897FFF"),
+            Iccid::try_from("89650123060529897").ok()
+        );
+        assert_eq!(AtModemManager::normalize_iccid("FFFF"), None);
+    }
+}

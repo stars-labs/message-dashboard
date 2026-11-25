@@ -290,3 +290,36 @@ impl AtModemManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_cmgl_pdu_header_reads_the_index_before_the_first_comma() {
+        assert_eq!(
+            AtModemManager::parse_cmgl_pdu_header("+CMGL: 0,1,,23"),
+            Some(0)
+        );
+        assert_eq!(
+            AtModemManager::parse_cmgl_pdu_header("+CMGL: 12,0,,159"),
+            Some(12)
+        );
+        assert_eq!(AtModemManager::parse_cmgl_pdu_header("+CMGL:7"), Some(7));
+        assert_eq!(
+            AtModemManager::parse_cmgl_pdu_header("  +CMGL:  3 "),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn parse_cmgl_pdu_header_refuses_a_non_numeric_or_missing_index() {
+        for line in ["+CMGL: abc,1,,23", "+CMGL:", "+CMGL: -1,1", "+CMGL: ,1", ""] {
+            assert_eq!(
+                AtModemManager::parse_cmgl_pdu_header(line),
+                None,
+                "{line:?}"
+            );
+        }
+    }
+}

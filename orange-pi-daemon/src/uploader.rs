@@ -257,4 +257,91 @@ mod tests {
         assert_eq!(ids(&classification.retryable), ["retry", "unknown"]);
         assert_eq!(classification.unknown_ids, ["missing"]);
     }
+
+    fn source_ids(messages: &[StoredMessage]) -> Vec<&str> {
+        messages
+            .iter()
+            .map(|m| m.source_message_id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn no_results_leave_every_pending_message_unclassified() {
+        let classification = classify_upload_results(&[stored("a"), stored("b")], &[]);
+
+        assert!(classification.acknowledged.is_empty());
+        assert!(classification.dead_letter.is_empty());
+        assert!(classification.retryable.is_empty());
+        assert!(classification.unknown_ids.is_empty());
+    }
+
+    #[test]
+    fn results_for_an_empty_batch_are_all_unknown_ids() {
+        let classification = classify_upload_results(
+            &[],
+            &[
+                result("x", UploadStatus::Stored, false),
+                result("y", UploadStatus::Rejected, true),
+            ],
+        );
+
+        assert_eq!(classification.unknown_ids, ["x", "y"]);
+        assert!(classification.acknowledged.is_empty());
+        assert!(classification.retryable.is_empty());
+    }
+
+    #[test]
+    fn the_retryable_flag_does_not_change_an_acknowledged_result() {
+        let classification = classify_upload_results(
+            &[stored("a"), stored("b")],
+            &[
+                result("a", UploadStatus::Stored, true),
+                result("b", UploadStatus::AlreadyStored, true),
+            ],
+        );
+
+        assert_eq!(source_ids(&classification.acknowledged), ["a", "b"]);
+        assert!(classification.retryable.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_status_is_retried_whatever_its_retryable_flag() {
+        let classification = classify_upload_results(
+            &[stored("a"), stored("b")],
+            &[
+                result("a", UploadStatus::Unknown("new".to_string()), true),
+                result("b", UploadStatus::Unknown("new".to_string()), false),
+            ],
+        );
+
+        assert_eq!(source_ids(&classification.retryable), ["a", "b"]);
+        assert!(classification.dead_letter.is_empty());
+    }
+
+    #[test]
+    fn results_keep_the_order_the_worker_answered_in() {
+        let classification = classify_upload_results(
+            &[stored("a"), stored("b"), stored("c")],
+            &[
+                result("c", UploadStatus::Stored, false),
+                result("a", UploadStatus::Stored, false),
+                result("b", UploadStatus::Stored, false),
+            ],
+        );
+
+        assert_eq!(source_ids(&classification.acknowledged), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn a_pending_message_without_a_result_is_in_no_bucket() {
+        let classification = classify_upload_results(
+            &[stored("answered"), stored("silent")],
+            &[result("answered", UploadStatus::Stored, false)],
+        );
+
+        assert_eq!(source_ids(&classification.acknowledged), ["answered"]);
+        assert!(classification.dead_letter.is_empty());
+        assert!(classification.retryable.is_empty());
+        assert!(classification.unknown_ids.is_empty());
+    }
 }

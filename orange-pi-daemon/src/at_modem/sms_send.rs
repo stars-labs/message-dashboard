@@ -343,3 +343,46 @@ impl AtModemManager {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_ucs2_hex_writes_four_uppercase_hex_digits_per_utf16_unit() {
+        assert_eq!(AtModemManager::encode_ucs2_hex(""), "");
+        assert_eq!(AtModemManager::encode_ucs2_hex("A"), "0041");
+        assert_eq!(AtModemManager::encode_ucs2_hex("+65"), "002B00360035");
+        assert_eq!(AtModemManager::encode_ucs2_hex("你好"), "4F60597D");
+    }
+
+    #[test]
+    fn encode_ucs2_hex_splits_a_character_outside_the_bmp_into_a_surrogate_pair() {
+        assert_eq!(AtModemManager::encode_ucs2_hex("\u{1F600}"), "D83DDE00");
+    }
+
+    #[test]
+    fn only_non_ascii_text_needs_ucs2() {
+        assert!(!AtModemManager::needs_ucs2(""));
+        assert!(!AtModemManager::needs_ucs2("Code 1234, reply STOP\r\n"));
+        assert!(AtModemManager::needs_ucs2("caf\u{e9}"));
+        assert!(AtModemManager::needs_ucs2("验证码"));
+    }
+
+    #[test]
+    fn sms_submit_error_line_returns_the_trimmed_error_line() {
+        assert_eq!(
+            AtModemManager::sms_submit_error_line("> \r\n  +CMS ERROR: 500  \r\n"),
+            Some("+CMS ERROR: 500")
+        );
+        assert_eq!(
+            AtModemManager::sms_submit_error_line("+CME ERROR: SIM busy"),
+            Some("+CME ERROR: SIM busy")
+        );
+        assert_eq!(
+            AtModemManager::sms_submit_error_line("+CMGS: 1\r\nOK"),
+            None
+        );
+        assert_eq!(AtModemManager::sms_submit_error_line("ERROR 5"), None);
+    }
+}
