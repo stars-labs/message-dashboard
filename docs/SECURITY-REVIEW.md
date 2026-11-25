@@ -467,9 +467,9 @@ defeat `HttpOnly` for no benefit.
 exercised locally without the Auth0 tenant. Verify: log in, confirm the landing URL has
 no `?token=`, confirm API calls succeed, then log out and confirm the session is dead.
 
-Two dev-only files still poke at the removed `localStorage` key and are now inert —
-`sms-dashboard/dev-mock-auth.html` and `client/debug-messages.html`. Harmless, but they
-will not authenticate anything.
+Two dev-only files that still poked at the removed `localStorage` key,
+`sms-dashboard/dev-mock-auth.html` and `client/debug-messages.html`, were deleted on
+2026-11-25.
 
 ---
 

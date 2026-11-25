@@ -792,8 +792,6 @@
                 nixfmt
                 nixd
 
-                ansible
-                ansible-lint
                 sops
                 age
 
@@ -831,9 +829,6 @@
                 echo "  • check-api-compat — breaking API changes against origin/main (fails for /api/control/)"
                 echo "  • pi-route      — route Pi subnet past the VPN (sudo; run when on VPN)"
                 echo ""
-
-                # Ensure Ansible finds collections installed by ansible-galaxy (SOPS, general)
-                export ANSIBLE_COLLECTIONS_PATHS="$HOME/.ansible/collections:/usr/share/ansible/collections:/etc/ansible/collections:''${ANSIBLE_COLLECTIONS_PATHS:-}"
               '';
             };
 
