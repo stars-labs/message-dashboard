@@ -4,6 +4,25 @@ use crate::message_store::{MessageStore, Segment};
 use crate::types::{Message, SmsStorage};
 use crate::wire::Direction;
 
+#[test]
+fn iccids_over_local_message_limit_counts_only_undeleted_rows() {
+    let store = MessageStore::new(":memory:").unwrap();
+    store
+        .conn()
+        .execute_batch(
+            "INSERT INTO sim_storage (iccid, total_messages, deleted_messages) VALUES
+                ('89860000000000000001', 210, 9),
+                ('89860000000000000002', 210, 10),
+                ('89860000000000000003', 199, 0);",
+        )
+        .unwrap();
+
+    assert_eq!(
+        store.iccids_over_local_message_limit().unwrap(),
+        [Iccid::try_from("89860000000000000001").unwrap()]
+    );
+}
+
 // Helper function to create test message
 fn create_test_message(iccid: &str, content: &str, timestamp: &str) -> Message {
     Message {

@@ -333,7 +333,7 @@ impl MessageStore {
 
     /// ICCIDs with more than 200 undeleted rows in this database; says nothing
     /// about the physical SIM's storage.
-    pub fn check_sim_storage(&self) -> Result<Vec<Iccid>> {
+    pub fn iccids_over_local_message_limit(&self) -> Result<Vec<Iccid>> {
         let conn = self.conn();
 
         let mut stmt = conn.prepare(
@@ -342,18 +342,18 @@ impl MessageStore {
              WHERE (total_messages - deleted_messages) > 200",
         )?;
 
-        let full_sims = stmt
+        let iccids = stmt
             .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<Iccid>, _>>()?;
 
-        if !full_sims.is_empty() {
+        if !iccids.is_empty() {
             warn!(
                 "⚠️ Database has >200 old messages for SIMs (NOT on physical SIM cards): {:?}",
-                full_sims.iter().map(Iccid::as_str).collect::<Vec<_>>()
+                iccids.iter().map(Iccid::as_str).collect::<Vec<_>>()
             );
         }
 
-        Ok(full_sims)
+        Ok(iccids)
     }
 
     /// Uploaded messages older than an hour are marked deleted: their SMS paths

@@ -132,12 +132,9 @@ pub(crate) fn spawn_statistics_logger(store: Arc<MessageStore>) {
                 }
             }
 
-            if let Ok(full_sims) = store.check_sim_storage() {
-                if !full_sims.is_empty() {
-                    warn!(
-                        "⚠️  SIMs with >200 messages in DB: {} cards",
-                        full_sims.len()
-                    );
+            if let Ok(iccids) = store.iccids_over_local_message_limit() {
+                if !iccids.is_empty() {
+                    warn!("⚠️  SIMs with >200 messages in DB: {} cards", iccids.len());
                 }
             }
         }
