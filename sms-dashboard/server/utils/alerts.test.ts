@@ -38,30 +38,20 @@ function heartbeatAt(at: number): void {
     .run(sqlTime(at));
 }
 
-function insertSim(index: number, modem: 'connected' | 'disconnected' | 'no-sim' | 'none'): void {
+function insertOfflineSim(index: number): void {
   const iccid = `8965000000000000${String(index).padStart(3, '0')}`;
-  const imei = modem === 'none' ? null : `imei-${String(index)}`;
+  const imei = `imei-${String(index)}`;
   sqlite
     .query(
       `INSERT INTO sims (iccid, sim_index, phone_number, carrier, country_code, imei)
        VALUES (?, ?, ?, 'Singtel', 'SG', ?)`,
     )
     .run(iccid, index, `+6580000${String(index).padStart(3, '0')}`, imei);
-  if (imei !== null) {
-    sqlite
-      .query(`INSERT INTO modems (equipment_id, status, detected_iccid) VALUES (?, ?, ?)`)
-      .run(
-        imei,
-        modem === 'disconnected' ? 'disconnected' : 'connected',
-        modem === 'no-sim' ? null : iccid,
-      );
-  }
-}
-
-function setModem(index: number, status: 'connected' | 'disconnected'): void {
   sqlite
-    .query(`UPDATE modems SET status = ? WHERE equipment_id = ?`)
-    .run(status, `imei-${String(index)}`);
+    .query(
+      `INSERT INTO modems (equipment_id, status, detected_iccid) VALUES (?, 'disconnected', ?)`,
+    )
+    .run(imei, iccid);
 }
 
 function alertRows(): unknown[] {
@@ -114,51 +104,13 @@ describe('daemon heartbeat alert', () => {
   });
 });
 
-describe('SIM reconciliation alert', () => {
-  beforeEach(() => {
+describe('offline SIMs', () => {
+  test('never email, however long they stay offline', async () => {
     heartbeatAt(START + 90 * MINUTE);
-    insertSim(1, 'connected');
-    insertSim(12, 'disconnected');
-    insertSim(40, 'no-sim');
-    insertSim(77, 'none');
-  });
+    insertOfflineSim(66);
+    insertOfflineSim(67);
 
-  test('runs only on the quarter hour', async () => {
-    await run(START + 5 * MINUTE);
-
-    expect(alertRows()).toEqual([]);
-  });
-
-  test('emails the assigned SIMs that stay off for 30 minutes, then reports recovery', async () => {
-    await run(START);
-    expect(sent).toEqual([]);
-    expect(alertRows()).toEqual([{ alert: 'sims_offline', notified: 0 }]);
-
-    await run(START + 15 * MINUTE);
-    expect(sent).toEqual([]);
-
-    await run(START + 30 * MINUTE);
-    expect(sent.map((email) => email.subject)).toEqual(['[SMS 告警] 2 张卡不在线：S12、S40']);
-    expect(sent[0]?.text).toContain('S12 offline');
-    expect(sent[0]?.text).toContain('S40 sim_error');
-    expect(sent[0]?.text).not.toContain('S77');
-
-    setModem(12, 'connected');
-    sqlite
-      .query(`UPDATE modems SET detected_iccid = '8965000000000000040' WHERE equipment_id = ?`)
-      .run('imei-40');
-    await run(START + 45 * MINUTE);
-    expect(sent[1]?.subject).toBe('[SMS 恢复] 所有已分配的卡都已在线');
-    expect(alertRows()).toEqual([]);
-  });
-
-  test('forgets a SIM outage that clears before 30 minutes, without any email', async () => {
-    await run(START);
-    setModem(12, 'connected');
-    sqlite
-      .query(`UPDATE modems SET detected_iccid = '8965000000000000040' WHERE equipment_id = ?`)
-      .run('imei-40');
-    await run(START + 15 * MINUTE);
+    for (let quarter = 0; quarter <= 4; quarter++) await run(START + quarter * 15 * MINUTE);
 
     expect(sent).toEqual([]);
     expect(alertRows()).toEqual([]);

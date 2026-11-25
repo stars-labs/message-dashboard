@@ -15,8 +15,8 @@ the 采集服务 status and the health panel.
 - refusals: a non-JSON body, an unsupported schema version, a wrong key
   (`shared/control-fixtures/daemon/heartbeat.*.json`).
 - alert emails (`server/utils/alerts.ts`, five-minute cron): no heartbeat for 20
-  minutes, assigned SIMs offline for 30 minutes, the check itself failing; state in
-  the `alert_state` table.
+  minutes, and the check itself failing; state in the `alert_state` table. Offline
+  SIMs deliberately send no email.
 
 ## How to get to it (user POV)
 
@@ -44,9 +44,9 @@ The stack runs `wrangler dev --test-scheduled` with `ALERT_RECIPIENTS` set to a 
 address; `notified_at` is written only after `EMAIL.send()` resolved.
 
 ```ts
-const at = Math.ceil((Date.now() + 25 * 60_000) / 900_000) * 900_000; // a quarter hour, seed heartbeat 25+ min old
+const at = Date.now() + 25 * 60_000; // the seeded heartbeat looks 25 minutes old
 const r = await fetch(`${stack.baseUrl}/cdn-cgi/local/scheduled?cron=${encodeURIComponent('*/5 * * * *')}&time=${at}&format=json`);
-// body {"outcome":"ok",…}; then: daemon_offline notified, sims_offline open for S03
+// body {"outcome":"ok",…}; then: daemon_offline notified
 await stack.d1('SELECT alert, first_seen_at, notified_at FROM alert_state');
 ```
 
