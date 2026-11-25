@@ -26,7 +26,7 @@
 <div
   class="px-4 py-2.5 lg:px-5 border-b border-stone-100 flex flex-wrap items-center gap-2 lg:flex-nowrap lg:flex-none"
 >
-  <div class="relative w-full order-first lg:order-last lg:w-[220px] shrink-0">
+  <div class="relative w-full order-first lg:order-last lg:w-64 shrink-0">
     <svg
       class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400"
       fill="none"
@@ -56,7 +56,7 @@
         onclick={() => {
           statusFilter = value;
         }}
-        class="shrink-0 px-2.5 py-1.5 text-sm rounded-lg font-medium transition-colors tabular-nums
+        class="shrink-0 whitespace-nowrap px-2.5 py-1.5 text-sm rounded-lg font-medium transition-colors tabular-nums
                 {statusFilter === value
           ? value === 'payment' || value === 'query_failed' || value === 'expiry'
             ? 'bg-red-600 text-white'
