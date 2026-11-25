@@ -103,6 +103,13 @@ pub(crate) fn spawn_device_sync(
     });
 }
 
+fn age_text(age_seconds: Option<u64>) -> String {
+    match age_seconds {
+        Some(seconds) => format!("{seconds}s"),
+        None => "none".to_string(),
+    }
+}
+
 pub(crate) fn spawn_statistics_logger(store: Arc<MessageStore>) {
     tokio::spawn(async move {
         loop {
@@ -110,11 +117,11 @@ pub(crate) fn spawn_statistics_logger(store: Arc<MessageStore>) {
 
             if let Ok(queue) = store.get_queue_stats() {
                 info!(
-                    "📊 Queue stats: {} pending, {} in flight, {} dead letter, oldest unacknowledged {:?}s",
+                    "📊 Queue stats: {} pending, {} in flight, {} dead letter, oldest unacknowledged {}",
                     queue.pending,
                     queue.in_flight,
                     queue.dead_letter,
-                    queue.oldest_unacknowledged_age_seconds
+                    age_text(queue.oldest_unacknowledged_age_seconds)
                 );
                 if queue.dead_letter > 0 {
                     error!(
@@ -296,3 +303,6 @@ pub(crate) fn spawn_voice_bridge(
         info!("📞 Voice bridge disabled (VOICE_BRIDGE_DOMAIN not set)");
     }
 }
+
+#[cfg(test)]
+mod tests;
