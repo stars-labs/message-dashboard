@@ -62,9 +62,7 @@ const journey: Journey = async ({ stack, ai, daemon, agent, page, evidence }) =>
   await dialog.getByRole('button', { name: '保存' }).click();
   await dialog.waitFor({ state: 'hidden' });
 
-  // The query. The balance page keeps the SIM list it loaded before the edit (GRA-229); reload.
   await p.getByRole('button', { name: '余额' }).nth(0).click();
-  await p.reload();
   await p
     .getByRole('row')
     .filter({ hasText: 'S03' })

@@ -49,9 +49,6 @@ Proof: the notice, the check and job rows, and the history row.
   S02 (M1 prepaid, browser profile) is the only SIM you can query as seeded.
   [agent-sms-ai-run](agent-sms-ai-run.md) makes S03 queryable through production
   paths.
-- The page keeps the SIM list it loaded: a SIM edited on 设备与卡 keeps its old role
-  and 查询 state here until the page reloads
-  ([GRA-229](https://linear.app/gray-arrow/issue/GRA-229)).
 - A query whose method needs the Balance Agent opens 查询助手未就绪 when none is
   signed in; 仍然排队 queues it anyway.
 - Notices are inline and dismissible (`关闭提示`), not the toast stack.

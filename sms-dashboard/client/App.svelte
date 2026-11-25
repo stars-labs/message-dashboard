@@ -57,6 +57,7 @@
   let showPhoneList = $state(false);
   let messageDetail = $state<ApiMessage | null>(null);
   let phoneNumbers = $state<ViewPhone[]>([]);
+  let phoneInventoryRevision = 0;
   let user = $state<MeResponse['user'] | null>(null);
   let loading = $state(true);
   let dataLoading = $state(true);
@@ -158,12 +159,28 @@
     if (user) handleHashChange();
   });
 
+  function setPhoneNumbers(phones: readonly Phone[]) {
+    phoneNumbers = phones.map((phone) => ({ ...phone, flag: getPhoneFlag(phone) }));
+    updateSelectedPhone();
+  }
+
+  async function refreshPhoneNumbers() {
+    const revision = ++phoneInventoryRevision;
+    try {
+      const { data } = await contractApi.messages.phones();
+      if (revision === phoneInventoryRevision) setPhoneNumbers(data);
+    } catch (error) {
+      toasts.show(errorMessage(error, '卡片列表刷新失败'), 'error');
+    }
+  }
+
   async function loadData() {
     if (!user) {
       dataLoading = false;
       return;
     }
 
+    const inventoryRevision = phoneInventoryRevision;
     try {
       const balanceRequest =
         currentView === 'balances' ? api.getBalanceChecks({ limit: 100 }) : Promise.resolve([]);
@@ -173,11 +190,7 @@
         balanceRequest,
       ]);
 
-      phoneNumbers = phonesResponse.map((phone) => ({
-        ...phone,
-        flag: getPhoneFlag(phone),
-      }));
-      updateSelectedPhone();
+      if (inventoryRevision === phoneInventoryRevision) setPhoneNumbers(phonesResponse);
 
       feed.applyFirstPage(messagesResponse);
 
@@ -427,7 +440,10 @@
         {:else if currentView === 'iccid-mappings'}
           <ErrorBoundary componentName="IccidMappings">
             <div class="px-0 py-0 sm:px-4 sm:py-6 lg:px-8 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-              <IccidMappings initialStatusFilter={iccidMappingsFilter} />
+              <IccidMappings
+                initialStatusFilter={iccidMappingsFilter}
+                onMappingsChanged={refreshPhoneNumbers}
+              />
             </div>
           </ErrorBoundary>
         {:else if currentView === 'balances'}

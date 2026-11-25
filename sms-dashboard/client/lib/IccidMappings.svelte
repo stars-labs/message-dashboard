@@ -23,9 +23,10 @@
 
   interface Props {
     initialStatusFilter?: StatusFilter;
+    onMappingsChanged?: () => Promise<void>;
   }
 
-  let { initialStatusFilter = 'all' }: Props = $props();
+  let { initialStatusFilter = 'all', onMappingsChanged }: Props = $props();
 
   let allMappingsCache = $state<IccidMapping[]>([]);
   let mappings = $state<IccidMapping[]>([]);
@@ -182,6 +183,7 @@
       };
       if (current.mode === 'add') await api.iccidMappings.create(payload);
       else await api.iccidMappings.update(current.mapping.id, payload);
+      await onMappingsChanged?.();
       closePanel();
       await loadMappings();
     } catch (err) {
@@ -201,6 +203,7 @@
       return;
     try {
       await api.iccidMappings.delete(id);
+      await onMappingsChanged?.();
       closePanel();
       await loadMappings();
     } catch (err) {

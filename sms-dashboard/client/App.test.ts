@@ -8,6 +8,7 @@ import type { MeResponse } from '../shared/api/auth.js';
 import type { BalanceChecksResponse } from '../shared/api/balance-checks.js';
 import type { DaemonStatusResponse } from '../shared/api/daemon-status.js';
 import type { KeywordsResponse } from '../shared/api/keywords.js';
+import type { IccidMapping } from '../shared/api/iccid-mappings.js';
 import type { ApiMessage, MessagePage, SendMessageResponse } from '../shared/api/messages.js';
 import type { Phone, PhonesResponse } from '../shared/api/phones.js';
 import App from './App.svelte';
@@ -239,6 +240,87 @@ test('shows the chosen sender card and number immediately in the sent message ro
   expect(within(row).getByText('S02')).toBeTruthy();
   expect(within(row).getByTitle('+6580000002').textContent).toContain('+6580000002');
 });
+
+test('shows a saved standalone SIM as queryable when navigating to balances', async () => {
+  let role = 'secondary';
+  const mapping = (): IccidMapping => ({
+    id: phone.iccid,
+    iccid: phone.iccid,
+    sim_index: phone.sim_index,
+    phone_number: phone.number,
+    country: phone.country,
+    carrier: phone.carrier,
+    service_type: 'prepaid',
+    service_type_source: 'carrier_support',
+    service_type_verified_at: phone.updated_at,
+    sim_role: role,
+    primary_iccid: role === 'secondary' ? '8986000000000000002' : null,
+    balance_threshold: null,
+    equipment_id: null,
+    notes: null,
+    is_active: 'active',
+    signal_quality: null,
+    modem_status: null,
+    detected_iccid: null,
+    operator: null,
+    usb_path: null,
+    last_usb_path: null,
+    created_at: null,
+    updated_at: phone.updated_at,
+  });
+  stubApi((input) => {
+    const path = pathOf(input);
+    if (path === '/api/auth/me') {
+      return Response.json({
+        ...me,
+        user: { ...me.user, permissions: [...me.user.permissions, 'balances.query'] },
+      });
+    }
+    if (path === '/api/phones') {
+      const sim = mapping();
+      return Response.json({
+        ...phones,
+        data: [
+          {
+            ...phone,
+            sim_role: sim.sim_role,
+            primary_iccid: sim.primary_iccid,
+            service_type: sim.service_type,
+          },
+        ],
+      });
+    }
+    if (path === '/api/iccid-mappings') {
+      return Response.json({
+        success: true,
+        data: [mapping()],
+        pagination: { page: 1, limit: 10000, total: 1, totalPages: 1 },
+      });
+    }
+    if (path === `/api/iccid-mappings/${phone.iccid}`) {
+      role = 'standalone';
+      return Response.json({ success: true, data: mapping() });
+    }
+    return responseFor(input);
+  });
+  window.location.hash = 'iccid-mappings';
+  const view = render(App);
+  const edit = await view.findAllByRole('button', { name: /^编辑$/ });
+  await fireEvent.click(elementOf(edit[0] ?? null, 'edit button'));
+  const dialog = within(view.getByRole('dialog', { name: '编辑映射' }));
+  await fireEvent.change(dialog.getByLabelText('主副卡'), { target: { value: 'standalone' } });
+  await fireEvent.click(dialog.getByRole('button', { name: '保存' }));
+  await waitFor(() => {
+    expect(view.queryByRole('dialog', { name: '编辑映射' })).toBeNull();
+  });
+
+  const tabs = view.getAllByRole('button', { name: /^余额$/ });
+  await fireEvent.click(elementOf(tabs[0] ?? null, 'balances tab'));
+  const query = await view.findByRole('button', { name: /^查询$/ });
+  if (!(query instanceof HTMLButtonElement)) throw new Error('no balance query button');
+  expect(query.disabled).toBe(false);
+  expect(view.queryByText('副卡', { exact: true })).toBeNull();
+}, 30_000);
 
 describe('mobile detail navigation', () => {
   test('recurring dashboard refreshes avoid full-table stats and balance history reads', () => {
