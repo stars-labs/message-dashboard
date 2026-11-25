@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/svelte';
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import postcss, { Rule } from 'postcss';
 import selectorParser from 'postcss-selector-parser';
@@ -200,6 +200,156 @@ function stubApi(respond = responseFor): void {
     }),
   );
 }
+
+const quotaReset = '2026-08-27T00:00:00.000Z';
+
+function quotaResponse(quota: 'rows_read' | 'rows_written' = 'rows_read'): Response {
+  return Response.json(
+    {
+      code: 'D1_QUOTA_EXCEEDED',
+      quota,
+      retry_at: quotaReset,
+      timestamp: '2026-08-26T23:00:00.000Z',
+    },
+    { status: 503 },
+  );
+}
+
+describe('D1 quota recovery', () => {
+  test('shows the quota and the production plan link before requesting SIM data', async () => {
+    let requestedPhones = false;
+    stubApi((input) => {
+      switch (pathOf(input)) {
+        case '/api/auth/me':
+          return Response.json({
+            ...me,
+            user: { ...me.user, permissions: [...me.user.permissions, 'users.write'] },
+          });
+        case '/api/phones':
+          requestedPhones = true;
+          return new Response(null, { status: 500 });
+        case '/api/daemon/status':
+          return quotaResponse();
+        default:
+          return responseFor(input);
+      }
+    });
+    const view = render(App);
+
+    const upgrade = await view.findByRole('link', { name: '升级 Workers 套餐' });
+    expect(upgrade.getAttribute('href')).toBe(
+      'https://dash.cloudflare.com/793e3286eaca411bf1eebaf4b8c7051e/workers/plans',
+    );
+    expect(upgrade.getAttribute('target')).toBe('_blank');
+    expect(view.getByText(/数据库今日读取额度已用完/)).toBeTruthy();
+    expect(view.container.querySelector(`time[datetime="${quotaReset}"]`)).toBeTruthy();
+    expect(requestedPhones).toBe(false);
+  });
+
+  test('checks recovery on demand and reloads data when D1 is available', async () => {
+    let exhausted = true;
+    let messages = 0;
+    stubApi((input) => {
+      if (pathOf(input) === '/api/daemon/status' && exhausted) return quotaResponse();
+      if (pathOf(input) === '/api/messages') messages += 1;
+      return responseFor(input);
+    });
+    const view = render(App);
+    const check = await view.findByRole('button', { name: '检查是否恢复' });
+    expect(view.queryByRole('link', { name: '升级 Workers 套餐' })).toBeNull();
+    expect(view.getByText(/请联系管理员升级 Workers 套餐/)).toBeTruthy();
+    const before = messages;
+    await fireEvent.click(check);
+    await waitFor(() => {
+      expect(check.hasAttribute('disabled')).toBe(false);
+    });
+    expect(messages).toBe(before);
+
+    exhausted = false;
+    await fireEvent.click(check);
+    await waitFor(() => {
+      expect(view.queryByRole('button', { name: '检查是否恢复' })).toBeNull();
+      expect(messages).toBeGreaterThan(before);
+    });
+  });
+
+  test('pauses D1 polling until reset while continuing to check for calls', async () => {
+    const intervals = spyOn(globalThis, 'setInterval');
+    let exhausted = true;
+    const requests: string[] = [];
+    setSystemTime(new Date('2026-08-26T23:58:00.000Z'));
+    try {
+      stubApi((input) => {
+        const path = pathOf(input);
+        requests.push(path);
+        if (path === '/api/daemon/status' && exhausted) return quotaResponse();
+        return responseFor(input);
+      });
+      const view = render(App);
+      await view.findByText(/数据库今日读取额度已用完/);
+      await waitFor(() => {
+        expect(requests).toContain('/api/calls/state');
+      });
+      const poll: (() => unknown) | undefined = intervals.mock.calls.find(
+        ([, delay]) => delay === 60_000,
+      )?.[0];
+      if (typeof poll !== 'function') throw new Error('No dashboard polling callback');
+
+      setSystemTime(new Date('2026-08-26T23:59:00.000Z'));
+      await poll();
+      expect(requests.filter((path) => path === '/api/daemon/status')).toHaveLength(1);
+      expect(requests).not.toContain('/api/messages');
+
+      exhausted = false;
+      setSystemTime(new Date(quotaReset));
+      await poll();
+      await waitFor(() => {
+        expect(requests).toContain('/api/messages');
+      });
+      expect(view.queryByText(/数据库今日读取额度已用完/)).toBeNull();
+    } finally {
+      setSystemTime();
+      intervals.mockRestore();
+    }
+  });
+
+  test('a successful read alone does not dismiss the write quota notice', async () => {
+    let response = () => quotaResponse('rows_written');
+    stubApi((input) => (pathOf(input) === '/api/daemon/status' ? response() : responseFor(input)));
+    const view = render(App);
+    const check = await view.findByRole('button', { name: '检查是否恢复' });
+    expect(view.getByText(/数据库今日写入额度已用完/)).toBeTruthy();
+
+    response = () => Response.json(daemonStatus);
+    await fireEvent.click(check);
+    await view.findByText(/下一次心跳确认写入恢复/);
+    await waitFor(() => {
+      expect(check.hasAttribute('disabled')).toBe(false);
+    });
+
+    response = () =>
+      Response.json({
+        ...daemonStatus,
+        daemon_id: 'test-daemon',
+        last_heartbeat: '2026-08-26 23:01:00',
+      });
+    await fireEvent.click(check);
+    await waitFor(() => {
+      expect(view.queryByRole('button', { name: '检查是否恢复' })).toBeNull();
+    });
+  });
+
+  test('an unrelated 503 retains the regular status error', async () => {
+    stubApi((input) =>
+      pathOf(input) === '/api/daemon/status'
+        ? Response.json({ code: 'D1_UNAVAILABLE', retry_at: null }, { status: 503 })
+        : responseFor(input),
+    );
+    const view = render(App);
+    await view.findByText('采集服务状态检查失败');
+    expect(view.queryByRole('button', { name: '检查是否恢复' })).toBeNull();
+  });
+});
 
 function elementOf(found: Element | null, description: string): HTMLElement {
   if (!(found instanceof HTMLElement)) throw new Error(`no ${description} rendered`);

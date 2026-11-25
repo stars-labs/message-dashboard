@@ -18,6 +18,8 @@ update prompt.
   `采集服务状态` (短信读取, 消息上传, 最老积压, 待处理, 上传中, 人工处理, 版本; buttons
   `刷新状态`, `关闭`).
 - banners: red 采集服务离线|错误 with 重新连接; yellow card errors with 查看详情.
+- D1 quota banner: reports the affected read or write allowance and reset time. Admins can open
+  the production Workers Plans page, and signed-in users can click 检查是否恢复 after an upgrade.
 - toasts: top right, `role=alert`, auto-dismiss after 4s.
 - confirm dialogs: `role=dialog` named by their title (default 请确认).
 - update prompt: `role=status` 新版本已准备好 with 重新载入 / `稍后再说`.
@@ -43,6 +45,11 @@ await m.getByRole('dialog', { name: '更多' }).waitFor();
 
 Switch views with the nav buttons (`getByRole('button', { name: '余额' })`), as a
 user does; assert on `location.hash` and the view's heading.
+
+For the quota path, simulate the `D1_QUOTA_EXCEEDED` problem response from daemon status.
+Check the reset time and upgrade link, then restore the normal response and click 检查是否恢复.
+The generic verification runner records the simulated 503 as an HTTP failure, so a targeted
+browser check must explicitly expect that response. A fresh daemon heartbeat confirms writes.
 
 ## Gotchas
 

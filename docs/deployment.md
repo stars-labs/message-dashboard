@@ -27,6 +27,22 @@ bun run check:schema-drift
   production (two `d1 export` calls, which briefly hold other D1 requests).
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
 
+### Free-plan limits
+
+Keep this section accessible outside the dashboard. The Worker serves the dashboard itself.
+The [production Workers Plans page](https://dash.cloudflare.com/793e3286eaca411bf1eebaf4b8c7051e/workers/plans)
+is the upgrade entry point for the Cloudflare limits below.
+
+| Signal | Impact and recovery |
+|---|---|
+| `D1_QUOTA_EXCEEDED` | The daily row read or write allowance resets at 00:00 UTC (08:00 Singapore time). Upgrade to Workers Paid for earlier recovery, then click **检查是否恢复** in the dashboard. A newer daemon heartbeat confirms that D1 writes are working again. For urgent SMS access, see [reading from the Pi's local store](../.claude/skills/fetch-sms/SKILL.md). [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) |
+| D1 storage full | Daily reset does not free storage. Check the database size, apply the retention policy, or upgrade if the free-plan storage cap is the cause. [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
+| Cloudflare error `1027` | The Workers daily request allowance is exhausted. The dashboard may be unreachable. Wait until 00:00 UTC or upgrade to Workers Paid. [Workers request limits](https://developers.cloudflare.com/workers/platform/limits/#daily-requests) |
+| Workers KV daily allowance exhausted | Session reads or writes can fail. Check KV usage, then wait until 00:00 UTC or upgrade to Workers Paid. The same-key write limit also applies on Paid. [KV pricing](https://developers.cloudflare.com/kv/platform/pricing/) and [limits](https://developers.cloudflare.com/kv/platform/limits/) |
+| Durable Objects daily allowance exhausted | Live call state can be unavailable. Check `CALL_STATE` usage, then wait until 00:00 UTC or upgrade to Workers Paid. [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
+| Auth0 Management API `429` | Check the upstream retry time and retry the affected admin operation after it resets. If limits are repeatedly reached, check which tenant and API limit applies before changing plans. [Auth0 rate limit policy](https://auth0.com/docs/troubleshoot/customer-support/operational-policies/rate-limit-policy) |
+| Email Sending rejects an unverified destination | Verify the destination, or upgrade to Workers Paid if sending to arbitrary addresses is required. [Destination address rules](https://developers.cloudflare.com/email-service/configuration/destination-addresses/) |
+
 ### Alert emails
 
 The five-minute cron (`server/utils/alerts.ts`) emails when the daemon has sent no
