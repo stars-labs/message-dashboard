@@ -324,14 +324,8 @@ describe('SIM service type validation', () => {
 });
 
 describe('SIM primary/secondary role validation', () => {
-  function roleDatabase() {
-    const database = new Database(':memory:');
-    database.run(`CREATE TABLE sims (iccid TEXT PRIMARY KEY, sim_role TEXT, primary_iccid TEXT)`);
-    return database;
-  }
-
   test('defaults to standalone with no primary_iccid', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     const env = { DB: sqliteD1(database) };
     expect(await resolveSimRole({}, null, env)).toEqual({
       role: 'standalone',
@@ -342,7 +336,7 @@ describe('SIM primary/secondary role validation', () => {
   });
 
   test('rejects an invalid role', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     const env = { DB: sqliteD1(database) };
     const result = await resolveSimRole({ sim_role: 'backup' }, null, env);
     expect(result).toEqual({ error: 'sim_role must be standalone, primary, or secondary' });
@@ -350,7 +344,7 @@ describe('SIM primary/secondary role validation', () => {
   });
 
   test('an empty sim_role resets to standalone instead of keeping the existing role', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     const env = { DB: sqliteD1(database) };
     const result = await resolveSimRole(
       { sim_role: '' },
@@ -362,7 +356,7 @@ describe('SIM primary/secondary role validation', () => {
   });
 
   test('secondary without primary_iccid is rejected', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     const env = { DB: sqliteD1(database) };
     const result = await resolveSimRole({ sim_role: 'secondary' }, null, env);
     expect(result).toEqual({ error: 'primary_iccid is required for a secondary SIM' });
@@ -370,7 +364,7 @@ describe('SIM primary/secondary role validation', () => {
   });
 
   test('secondary pointing at a non-existent SIM is rejected', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     const env = { DB: sqliteD1(database) };
     const result = await resolveSimRole(
       {
@@ -385,9 +379,9 @@ describe('SIM primary/secondary role validation', () => {
   });
 
   test('secondary pointing at a standalone SIM is rejected', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     database.run(
-      `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('solo', 'standalone', NULL)`,
+      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('solo', 1, 'n', 'standalone', NULL)`,
     );
     const env = { DB: sqliteD1(database) };
     const result = await resolveSimRole(
@@ -403,9 +397,9 @@ describe('SIM primary/secondary role validation', () => {
   });
 
   test('secondary pointing at a real primary succeeds', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     database.run(
-      `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('main', 'primary', NULL)`,
+      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('main', 1, 'n', 'primary', NULL)`,
     );
     const env = { DB: sqliteD1(database) };
     const result = await resolveSimRole(
@@ -425,9 +419,9 @@ describe('SIM primary/secondary role validation', () => {
   });
 
   test('an existing secondary keeps its primary when the update omits the role fields', async () => {
-    const database = roleDatabase();
+    const database = await createMigratedDatabase();
     database.run(
-      `INSERT INTO sims (iccid, sim_role, primary_iccid) VALUES ('main', 'primary', NULL)`,
+      `INSERT INTO sims (iccid, sim_index, phone_number, sim_role, primary_iccid) VALUES ('main', 1, 'n', 'primary', NULL)`,
     );
     const env = { DB: sqliteD1(database) };
     const result = await resolveSimRole({}, { sim_role: 'secondary', primary_iccid: 'main' }, env);

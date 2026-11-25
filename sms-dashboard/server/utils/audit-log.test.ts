@@ -1,6 +1,8 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import * as v from 'valibot';
 import { parseJson } from '../../shared/parse-json.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { scheduleAuthAudit, writeAuditLog } from './audit-log.js';
 
@@ -13,21 +15,13 @@ const AuditRow = v.object({
   timestamp: v.nullable(v.string()),
 });
 
-function auditDatabase() {
-  const d1 = sqliteD1();
-  d1.db.run(`CREATE TABLE audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    action TEXT NOT NULL,
-    resource_type TEXT,
-    resource_id TEXT,
-    user_email TEXT,
-    details TEXT,
-    timestamp DATETIME
-  )`);
-  return d1;
+async function auditDatabase() {
+  const database = new Database(':memory:');
+  await createSchema(database);
+  return sqliteD1(database);
 }
 
-function rows(d1: ReturnType<typeof auditDatabase>) {
+function rows(d1: ReturnType<typeof sqliteD1>) {
   return v.parse(
     v.array(AuditRow),
     d1.db
@@ -40,7 +34,7 @@ function rows(d1: ReturnType<typeof auditDatabase>) {
 
 describe('writeAuditLog', () => {
   test('writes the event with its details serialized and a database timestamp', async () => {
-    const d1 = auditDatabase();
+    const d1 = await auditDatabase();
 
     await writeAuditLog(
       { DB: d1 },
@@ -66,7 +60,7 @@ describe('writeAuditLog', () => {
   });
 
   test('defaults the resource type to user, the email to null and the details to an empty object', async () => {
-    const d1 = auditDatabase();
+    const d1 = await auditDatabase();
 
     await writeAuditLog({ DB: d1 }, { action: 'login', resourceId: null });
 
@@ -88,7 +82,7 @@ describe('scheduleAuthAudit', () => {
   });
 
   test('hands the write to waitUntil and records the event', async () => {
-    const d1 = auditDatabase();
+    const d1 = await auditDatabase();
     const pending: Promise<unknown>[] = [];
 
     scheduleAuthAudit(

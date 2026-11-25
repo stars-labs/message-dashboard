@@ -1,6 +1,8 @@
+import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import * as v from 'valibot';
 import { ORPCError } from '@orpc/server';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Statement } from '../lib/d1.js';
 import { healthHandler } from './health.js';
@@ -279,23 +281,12 @@ describe('Worker health monitoring', () => {
 });
 
 describe('daemon_health lookup on SQLite', () => {
-  function databaseWith(
+  async function databaseWith(
     rows: { id: string; heartbeatSecondsAgo: number; metadata: string | null }[],
   ) {
-    const d1 = sqliteD1();
-    d1.db.run(`CREATE TABLE daemon_health (
-      daemon_id TEXT PRIMARY KEY,
-      last_heartbeat TIMESTAMP NOT NULL,
-      status TEXT DEFAULT 'online' CHECK(status IN ('online', 'offline', 'warning')),
-      last_ip TEXT,
-      version TEXT,
-      modem_count INTEGER DEFAULT 0,
-      error_count INTEGER DEFAULT 0,
-      last_error TEXT,
-      metadata TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+    const database = new Database(':memory:');
+    await createSchema(database);
+    const d1 = sqliteD1(database);
     for (const row of rows) {
       d1.db
         .query(
@@ -308,7 +299,7 @@ describe('daemon_health lookup on SQLite', () => {
   }
 
   test('a fresh heartbeat reads healthy', async () => {
-    const d1 = databaseWith([
+    const d1 = await databaseWith([
       { id: 'orange-pi-main', heartbeatSecondsAgo: 10, metadata: daemonSnapshot() },
     ]);
 
@@ -319,7 +310,7 @@ describe('daemon_health lookup on SQLite', () => {
   });
 
   test('a heartbeat older than three minutes reads offline', async () => {
-    const d1 = databaseWith([
+    const d1 = await databaseWith([
       { id: 'orange-pi-main', heartbeatSecondsAgo: 600, metadata: daemonSnapshot() },
     ]);
 
@@ -329,7 +320,7 @@ describe('daemon_health lookup on SQLite', () => {
   });
 
   test('another daemon id is ignored', async () => {
-    const d1 = databaseWith([
+    const d1 = await databaseWith([
       { id: 'someone-else', heartbeatSecondsAgo: 1, metadata: daemonSnapshot() },
     ]);
 
@@ -337,7 +328,9 @@ describe('daemon_health lookup on SQLite', () => {
   });
 
   test('a row without a stored snapshot reads unknown', async () => {
-    const d1 = databaseWith([{ id: 'orange-pi-main', heartbeatSecondsAgo: 1, metadata: null }]);
+    const d1 = await databaseWith([
+      { id: 'orange-pi-main', heartbeatSecondsAgo: 1, metadata: null },
+    ]);
 
     expect((await daemonStatus(d1)).body).toMatchObject({
       status: 'unknown',

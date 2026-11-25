@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { ErrorResponse } from '../../shared/api/error.js';
 import { parseJson, readJson, type Schema } from '../../shared/parse-json.js';
 import { callState, type CallFixture, type Fleet } from '../../test/call-state-fleet.js';
 import { memoryKv } from '../../test/memory-kv.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker, TEST_API_KEY } from '../../test/worker-harness.js';
 import type { D1, D1Batch } from '../lib/d1.js';
@@ -54,20 +55,14 @@ interface SeededCall {
   answered_at?: string;
 }
 
-function migration(name: string): string {
-  return readFileSync(new URL(`../../migrations/${name}.sql`, import.meta.url), 'utf8');
-}
-
 /**
- * Real SQLite running the real migrations, so the call log's SQL (ON CONFLICT, the
+ * Real SQLite on production's schema, so the call log's SQL (ON CONFLICT, the
  * COALESCE guards, the julianday duration) is under test rather than re-implemented.
  */
-function historyDb() {
-  const d1 = sqliteD1();
-  const { db } = d1;
-  db.run(migration('077_add_call_log'));
-  db.run(migration('078_one_open_ring_per_sim'));
-  db.run('CREATE TABLE device_view (iccid TEXT, number TEXT, carrier TEXT, sim_index INTEGER)');
+async function historyDb() {
+  const db = new Database(':memory:');
+  await createSchema(db);
+  const d1 = sqliteD1(db);
   return {
     d1,
     rows: () =>
@@ -89,7 +84,7 @@ function historyDb() {
     },
     seedSim: (sim: { iccid: string; number: string; carrier: string; sim_index: number }) => {
       db.query(
-        'INSERT INTO device_view (iccid, number, carrier, sim_index) VALUES (?, ?, ?, ?)',
+        'INSERT INTO sims (iccid, phone_number, carrier, sim_index) VALUES (?, ?, ?, ?)',
       ).run(sim.iccid, sim.number, sim.carrier, sim.sim_index);
     },
   };
@@ -183,8 +178,8 @@ async function callRoute(
   return response;
 }
 
-function setup(call: CallFixture | null = null, DB?: AppEnv['DB']) {
-  const db = historyDb();
+async function setup(call: CallFixture | null = null, DB?: AppEnv['DB']) {
+  const db = await historyDb();
   const env = envStub(callState(call));
   const store = DB ?? db.d1;
 
@@ -307,8 +302,8 @@ describe('number validation', () => {
 });
 
 describe('configuration guard', () => {
-  test('names every setting that is missing', () => {
-    expect(missingConfig(setup().env)).toEqual([]);
+  test('names every setting that is missing', async () => {
+    expect(missingConfig((await setup()).env)).toEqual([]);
     expect(missingConfig({ REALTIME_APP_ID: 'a' })).toEqual([
       'REALTIME_APP_SECRET',
       'TURN_KEY_ID',
@@ -354,7 +349,7 @@ describe('outbound media setup', () => {
   const dial = { iccid: ICCID, number: '+6592953543', offer: OFFER, mid: '0' };
 
   test('dial takes the lock, creates a bodiless session and publishes the mic', async () => {
-    const { post, env } = setup();
+    const { post, env } = await setup();
     const sfu = stubSfu({
       '/sessions/new': [201, { sessionId: 'browser' }],
       '/sessions/browser/tracks/new': [
@@ -383,7 +378,7 @@ describe('outbound media setup', () => {
   });
 
   test('dial accepts the modem ICCID with hex letters and preserves its spelling', async () => {
-    const { post, env } = setup();
+    const { post, env } = await setup();
     const iccid = '896501230605cF73985';
     const sfu = stubSfu({
       '/sessions/new': [201, { sessionId: 'browser' }],
@@ -407,7 +402,7 @@ describe('outbound media setup', () => {
   });
 
   test.each(['HTTP error', 'network error'])('an SFU %s releases the lock', async (failure) => {
-    const { post, env } = setup();
+    const { post, env } = await setup();
     stubSfu(() => {
       if (failure === 'network error') throw new TypeError('fetch failed');
       return [500, { errorCode: 'boom' }];
@@ -420,7 +415,7 @@ describe('outbound media setup', () => {
   });
 
   test('an SFU failure answers the error body the client reads, with what the SFU said', async () => {
-    const { post } = setup();
+    const { post } = await setup();
     stubSfu(() => [500, { errorCode: 'boom', errorDescription: 'no capacity' }]);
 
     const response = await post('/api/calls/dial', dial);
@@ -432,7 +427,7 @@ describe('outbound media setup', () => {
   });
 
   test('a second dial is refused while any call exists', async () => {
-    const { post } = setup(
+    const { post } = await setup(
       liveCall({ id: 'x', direction: 'inbound', state: 'ringing', iccid: 'other' }),
     );
     const sfu = stubSfu({});
@@ -449,7 +444,7 @@ describe('outbound media setup', () => {
   });
 
   test('a dial without the SFU settings answers 503 naming the missing ones', async () => {
-    const { post, env } = setup();
+    const { post, env } = await setup();
     env.TURN_API_TOKEN = '';
     const sfu = stubSfu({});
 
@@ -464,7 +459,7 @@ describe('outbound media setup', () => {
   });
 
   test('simultaneous dials publish the microphone for only one call', async () => {
-    const { post } = setup();
+    const { post } = await setup();
     const sfu = stubSfu({
       '/sessions/new': [201, { sessionId: 'browser' }],
       '/sessions/browser/tracks/new': [
@@ -483,7 +478,7 @@ describe('outbound media setup', () => {
   test.each([true, false])(
     'a late SFU response leaves the next call intact (success=%s)',
     async (success) => {
-      const { post, env } = setup();
+      const { post, env } = await setup();
       const entered = Promise.withResolvers<undefined>();
       const resume = Promise.withResolvers<undefined>();
       stubFetch(async ({ url }) => {
@@ -521,7 +516,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('an empty successful adapter response releases the call for a retry', async () => {
-    const { post, env } = setup(connecting);
+    const { post, env } = await setup(connecting);
     stubSfu({ '/adapters/websocket/new': [200, {}] });
 
     const response = await post('/api/calls/connect', {});
@@ -531,7 +526,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('a successful status without a JSON body is a failure, not a subscribed call', async () => {
-    const { post, env } = setup(connecting);
+    const { post, env } = await setup(connecting);
     stubSfu((path, n) => {
       if (path === '/adapters/websocket/new' && n === 1)
         return [200, { tracks: [{ adapterId: 'down-id' }] }];
@@ -548,7 +543,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('a missing modem session ID closes both known adapters', async () => {
-    const { post, env } = setup(connecting);
+    const { post, env } = await setup(connecting);
     const sfu = stubSfu((path, n) =>
       path === '/adapters/websocket/new'
         ? [200, { tracks: [{ adapterId: n === 1 ? 'down' : 'up' }] }]
@@ -566,7 +561,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('creates both adapters with signed endpoints and pulls the modem track', async () => {
-    const { post, env } = setup(connecting);
+    const { post, env } = await setup(connecting);
     const sfu = stubSfu((path, n) => {
       if (path === '/adapters/websocket/new' && n === 1)
         return [200, { tracks: [{ trackName: 'mic', adapterId: 'down-id' }] }];
@@ -625,7 +620,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('a per-track adapter error inside a 200 is a failure and closes what was created', async () => {
-    const { post, env } = setup(connecting);
+    const { post, env } = await setup(connecting);
     const sfu = stubSfu((path, n) => {
       if (path === '/adapters/websocket/new' && n === 1)
         return [200, { tracks: [{ adapterId: 'down-id' }] }];
@@ -646,7 +641,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('an inbound call signs an answer endpoint', async () => {
-    const { post, env } = setup({ ...connecting, direction: 'inbound', number: '92953543' });
+    const { post, env } = await setup({ ...connecting, direction: 'inbound', number: '92953543' });
     const sfu = stubSfu((path, n) => {
       if (path === '/adapters/websocket/new')
         return [200, { tracks: [{ adapterId: `a${n}`, sessionId: 'modem-session' }] }];
@@ -662,7 +657,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('connect reads a request without a body as an empty one', async () => {
-    const { post, env } = setup(connecting);
+    const { post, env } = await setup(connecting);
     stubSfu({ '/adapters/websocket/new': [200, {}] });
 
     const response = await post('/api/calls/connect');
@@ -672,7 +667,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('connect without a call answers 404', async () => {
-    const { post } = setup();
+    const { post } = await setup();
 
     const response = await post('/api/calls/connect');
 
@@ -680,7 +675,7 @@ describe('bridging to the Pi', () => {
   });
 
   test('renegotiate applies the browser answer with PUT and marks the call active', async () => {
-    const { post, env } = setup({ ...connecting, state: 'bridging' });
+    const { post, env } = await setup({ ...connecting, state: 'bridging' });
     const sfu = stubSfu({ '/sessions/browser/renegotiate': [200, {}] });
     const answer = { type: 'answer', sdp: 'v=0 answer' };
 
@@ -698,7 +693,7 @@ describe('bridging to the Pi', () => {
 
 describe('answering and hanging up', () => {
   test('only a ringing inbound call can be answered', async () => {
-    const { post } = setup(liveCall({ id: 'x', direction: 'outbound', state: 'active' }));
+    const { post } = await setup(liveCall({ id: 'x', direction: 'outbound', state: 'active' }));
     stubSfu({});
 
     const response = await post('/api/calls/answer', { offer: OFFER, mid: '0' });
@@ -707,7 +702,7 @@ describe('answering and hanging up', () => {
   });
 
   test('answering moves the call out of ringing and onto the long TTL', async () => {
-    const { post, env } = setup(
+    const { post, env } = await setup(
       liveCall({ id: 'x', direction: 'inbound', state: 'ringing', number: '92953543' }),
     );
     stubSfu({
@@ -723,7 +718,7 @@ describe('answering and hanging up', () => {
   });
 
   test('hangup closes the adapters and clears the lock, and is idempotent', async () => {
-    const { post, env } = setup(
+    const { post, env } = await setup(
       liveCall({
         id: 'x',
         direction: 'outbound',
@@ -743,7 +738,9 @@ describe('answering and hanging up', () => {
   });
 
   test('hangup reads a request without a body as an empty one', async () => {
-    const { post, env } = setup(liveCall({ id: 'x', direction: 'outbound', state: 'active' }));
+    const { post, env } = await setup(
+      liveCall({ id: 'x', direction: 'outbound', state: 'active' }),
+    );
     stubSfu({});
 
     const response = await post('/api/calls/hangup');
@@ -759,7 +756,7 @@ describe('answering and hanging up', () => {
       state: 'active',
       adapters: { up: 'u' },
     });
-    const { post, env } = setup(active);
+    const { post, env } = await setup(active);
     const sfu = stubSfu({});
 
     const response = await post('/api/calls/hangup', { call_id: 'old' });
@@ -770,7 +767,7 @@ describe('answering and hanging up', () => {
   });
 
   test('a new call created while the old adapters close keeps its lock', async () => {
-    const { post, env } = setup(
+    const { post, env } = await setup(
       liveCall({ id: 'old', direction: 'outbound', state: 'active', adapters: { up: 'u' } }),
     );
     const incoming = liveCall({ id: 'new', direction: 'inbound', state: 'ringing' });
@@ -788,7 +785,7 @@ describe('answering and hanging up', () => {
 
 describe('incoming call reporting from the daemon', () => {
   test('records a ringing call with its caller id on the ring TTL', async () => {
-    const { post, env } = setup();
+    const { post, env } = await setup();
 
     const response = await post('/api/control/calls/incoming', {
       iccid: ICCID,
@@ -804,7 +801,9 @@ describe('incoming call reporting from the daemon', () => {
   });
 
   test('a repeated RING keeps the same call id', async () => {
-    const { post } = setup(liveCall({ id: 'ring-1', direction: 'inbound', state: 'ringing' }));
+    const { post } = await setup(
+      liveCall({ id: 'ring-1', direction: 'inbound', state: 'ringing' }),
+    );
 
     const response = await post('/api/control/calls/incoming', {
       iccid: ICCID,
@@ -815,7 +814,7 @@ describe('incoming call reporting from the daemon', () => {
   });
 
   test('refuses a second ringing modem while a call is active', async () => {
-    const { post, env } = setup(
+    const { post, env } = await setup(
       liveCall({ id: 'x', direction: 'outbound', state: 'active', iccid: 'other' }),
     );
 
@@ -829,7 +828,7 @@ describe('incoming call reporting from the daemon', () => {
   });
 
   test('rejects a report without an iccid', async () => {
-    const { post } = setup();
+    const { post } = await setup();
 
     const response = await post('/api/control/calls/incoming', { from: '90421798' });
 
@@ -839,7 +838,7 @@ describe('incoming call reporting from the daemon', () => {
 
 describe('end reporting from the daemon', () => {
   test('a matching call id closes the adapters and clears the lock', async () => {
-    const { post, env } = setup(
+    const { post, env } = await setup(
       liveCall({
         id: 'call-1',
         direction: 'outbound',
@@ -857,7 +856,9 @@ describe('end reporting from the daemon', () => {
   });
 
   test('a ring that stops without a call id clears only a ringing call on that SIM', async () => {
-    const { post, env } = setup(liveCall({ id: 'r', direction: 'inbound', state: 'ringing' }));
+    const { post, env } = await setup(
+      liveCall({ id: 'r', direction: 'inbound', state: 'ringing' }),
+    );
 
     const response = await post('/api/control/calls/ended', { iccid: ICCID });
 
@@ -866,7 +867,7 @@ describe('end reporting from the daemon', () => {
   });
 
   test('a stale report for another call is ignored', async () => {
-    const { post, env } = setup(
+    const { post, env } = await setup(
       liveCall({ id: 'current', direction: 'outbound', state: 'active' }),
     );
 
@@ -881,7 +882,7 @@ describe('end reporting from the daemon', () => {
 
 describe('call history logging', () => {
   test('the first RING opens a row, repeats do not, and a late caller id fills the blank', async () => {
-    const { post, env, db } = setup();
+    const { post, env, db } = await setup();
 
     await post('/api/control/calls/incoming', { iccid: ICCID });
     const id = env.CALL_STATE.current().id;
@@ -899,7 +900,7 @@ describe('call history logging', () => {
   });
 
   test('a blank caller id on the first RING leaves the number for a later RING to fill', async () => {
-    const { post, env, db } = setup();
+    const { post, env, db } = await setup();
 
     await post('/api/control/calls/incoming', { iccid: ICCID, from: '' });
     const id = env.CALL_STATE.current().id;
@@ -911,7 +912,9 @@ describe('call history logging', () => {
   });
 
   test('a ring the daemon reports as over is a missed call', async () => {
-    const { post, db } = setup(liveCall({ id: 'ring-1', direction: 'inbound', state: 'ringing' }));
+    const { post, db } = await setup(
+      liveCall({ id: 'ring-1', direction: 'inbound', state: 'ringing' }),
+    );
     db.seedCall({ id: 'ring-1', remote_number: '92953543' });
     stubSfu({});
 
@@ -926,7 +929,9 @@ describe('call history logging', () => {
   });
 
   test('hanging up on a ringing call is a rejection, not a missed call', async () => {
-    const { post, db } = setup(liveCall({ id: 'ring-2', direction: 'inbound', state: 'ringing' }));
+    const { post, db } = await setup(
+      liveCall({ id: 'ring-2', direction: 'inbound', state: 'ringing' }),
+    );
     db.seedCall({ id: 'ring-2' });
     stubSfu({});
 
@@ -936,7 +941,9 @@ describe('call history logging', () => {
   });
 
   test('an answered call records talk time from the answer, not from the first ring', async () => {
-    const { post, db } = setup(liveCall({ id: 'call-9', direction: 'inbound', state: 'active' }));
+    const { post, db } = await setup(
+      liveCall({ id: 'call-9', direction: 'inbound', state: 'active' }),
+    );
     db.seedCall({
       id: 'call-9',
       started_at: STARTED_AT,
@@ -958,7 +965,7 @@ describe('call history logging', () => {
   });
 
   test('answering records who answered, and reaching active keeps that timestamp', async () => {
-    const { post, env, db } = setup(
+    const { post, env, db } = await setup(
       liveCall({ id: 'call-10', direction: 'inbound', state: 'ringing', number: '92953543' }),
     );
     db.seedCall({ id: 'call-10' });
@@ -979,7 +986,9 @@ describe('call history logging', () => {
   });
 
   test('an outbound call the daemon could not set up is a failure, not a missed call', async () => {
-    const { post, db } = setup(liveCall({ id: 'out-1', direction: 'outbound', state: 'bridging' }));
+    const { post, db } = await setup(
+      liveCall({ id: 'out-1', direction: 'outbound', state: 'bridging' }),
+    );
     db.seedCall({ id: 'out-1', direction: 'outbound' });
     stubSfu({});
 
@@ -993,7 +1002,7 @@ describe('call history logging', () => {
   });
 
   test('a dial that the SFU refuses is logged as a failed attempt', async () => {
-    const { post, db } = setup();
+    const { post, db } = await setup();
     stubSfu({ '/sessions/new': [500, { errorCode: 'boom' }] });
 
     await post('/api/calls/dial', {
@@ -1014,7 +1023,9 @@ describe('call history logging', () => {
   });
 
   test('whoever reports the end first wins; the second report changes nothing', async () => {
-    const { post, db } = setup(liveCall({ id: 'call-11', direction: 'inbound', state: 'active' }));
+    const { post, db } = await setup(
+      liveCall({ id: 'call-11', direction: 'inbound', state: 'active' }),
+    );
     db.seedCall({ id: 'call-11', answered_at: '2026-09-17T10:00:10.000Z' });
     stubSfu({});
 
@@ -1030,7 +1041,7 @@ describe('call history logging', () => {
   });
 
   test('a row left open by a lost end report is swept when the next call starts', async () => {
-    const { post, db } = setup();
+    const { post, db } = await setup();
     db.seedCall({
       id: 'orphan',
       started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
@@ -1044,7 +1055,7 @@ describe('call history logging', () => {
   });
 
   test('a D1 failure never blocks a hangup', async () => {
-    const { post, env } = setup(
+    const { post, env } = await setup(
       liveCall({
         id: 'x',
         direction: 'outbound',
@@ -1072,7 +1083,7 @@ describe('live call state that does not match the schema', () => {
   };
 
   test('the state route fails instead of passing a call without an iccid on', async () => {
-    const { get, env } = setup();
+    const { get, env } = await setup();
     env.CALL_STATE.replace(unreadable);
 
     const response = await get('/api/calls/state');
@@ -1082,7 +1093,7 @@ describe('live call state that does not match the schema', () => {
   });
 
   test('hangup fails instead of clearing a call it cannot read', async () => {
-    const { post, env } = setup();
+    const { post, env } = await setup();
     env.CALL_STATE.replace(unreadable);
     stubSfu({});
 
@@ -1107,7 +1118,7 @@ describe('outcome of a call that never carried audio', () => {
 
 describe('one ring, one row', () => {
   test('repeat reports share a single row', async () => {
-    const { post, db } = setup();
+    const { post, db } = await setup();
 
     // RING, then the caller ID a moment later.
     const first = await post('/api/control/calls/incoming', { iccid: ICCID });
@@ -1124,7 +1135,7 @@ describe('one ring, one row', () => {
   });
 
   test('the two reports still share a row when neither has committed first', async () => {
-    const { post, db } = setup();
+    const { post, db } = await setup();
 
     // Truly concurrent: the second request starts before the first has written.
     await Promise.all([
@@ -1136,7 +1147,7 @@ describe('one ring, one row', () => {
   });
 
   test('a second SIM cannot replace the current ringing call', async () => {
-    const { post, env, db } = setup();
+    const { post, env, db } = await setup();
 
     await post('/api/control/calls/incoming', { iccid: ICCID });
     await post('/api/control/calls/incoming', { iccid: OTHER_ICCID });
@@ -1146,7 +1157,7 @@ describe('one ring, one row', () => {
   });
 
   test('a later ring on the same SIM is a new call, not a rejoin', async () => {
-    const { post, db } = setup();
+    const { post, db } = await setup();
     db.seedCall({
       id: 'old',
       iccid: ICCID,
@@ -1160,7 +1171,7 @@ describe('one ring, one row', () => {
   });
 
   test('a ring left open is swept as missed rather than staying in progress', async () => {
-    const { post, db } = setup();
+    const { post, db } = await setup();
     db.seedCall({
       id: 'abandoned',
       iccid: OTHER_ICCID,
@@ -1178,7 +1189,7 @@ describe('one ring, one row', () => {
 });
 
 describe('call history API', () => {
-  function seedPage(db: ReturnType<typeof historyDb>, count: number) {
+  function seedPage(db: Awaited<ReturnType<typeof historyDb>>, count: number) {
     for (let i = 0; i < count; i += 1) {
       db.seedCall({
         id: `c${String(i).padStart(2, '0')}`,
@@ -1192,7 +1203,7 @@ describe('call history API', () => {
   }
 
   test('returns the newest calls first, enriched with the SIM behind each one', async () => {
-    const { get, db } = setup();
+    const { get, db } = await setup();
     db.seedSim({ iccid: ICCID, number: '+6597817169', carrier: 'Singtel', sim_index: 86 });
     seedPage(db, 3);
 
@@ -1213,7 +1224,7 @@ describe('call history API', () => {
   });
 
   test('pages with limit and offset and reports whether more remain', async () => {
-    const { get, db } = setup();
+    const { get, db } = await setup();
     seedPage(db, 5);
 
     const first = await parsed(await get('/api/calls/history', { limit: '2' }), HistoryBody);
@@ -1234,7 +1245,7 @@ describe('call history API', () => {
   });
 
   test('filters to one SIM and clamps an absurd limit', async () => {
-    const { get, db } = setup();
+    const { get, db } = await setup();
     seedPage(db, 6);
 
     const filtered = await parsed(
@@ -1247,7 +1258,7 @@ describe('call history API', () => {
   });
 
   test('pages at most 100 calls, however many the limit asks for', async () => {
-    const { get, db } = setup();
+    const { get, db } = await setup();
     for (let i = 0; i < 101; i += 1) {
       const clock = `${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
       db.seedCall({
@@ -1267,7 +1278,7 @@ describe('call history API', () => {
   });
 
   test('requires a session', async () => {
-    const { get } = setup();
+    const { get } = await setup();
 
     const response = await get('/api/calls/history', undefined, { Cookie: '' });
 
@@ -1279,7 +1290,7 @@ describe('ICE servers', () => {
   const ICE = { iceServers: [{ urls: ['stun:stun.cloudflare.com:3478'] }] };
 
   test('passes the TURN service credentials through', async () => {
-    const { get } = setup();
+    const { get } = await setup();
     stubFetch(() => Promise.resolve(Response.json(ICE)));
 
     const response = await get('/api/calls/ice');
@@ -1289,7 +1300,7 @@ describe('ICE servers', () => {
   });
 
   test('a successful status without a JSON body is an upstream failure', async () => {
-    const { get } = setup();
+    const { get } = await setup();
     stubFetch(() => Promise.resolve(new Response('upstream hiccup')));
 
     const response = await get('/api/calls/ice');
@@ -1326,7 +1337,7 @@ describe('malformed bodies', () => {
   test.each(cases)(
     '%s answers 400 to %j and leaves the call as it was',
     async (route, body, call, error) => {
-      const { post, env } = setup(call);
+      const { post, env } = await setup(call);
       const daemon = route === 'incoming' || route === 'ended';
       const path = `/api/${daemon ? 'control/' : ''}calls/${route}`;
 
@@ -1342,7 +1353,7 @@ describe('malformed bodies', () => {
   );
 
   test("ended accepts the daemon's null call id for a ring that stopped", async () => {
-    const { post, env } = setup(RINGING);
+    const { post, env } = await setup(RINGING);
 
     const response = await post('/api/control/calls/ended', {
       call_id: null,
@@ -1357,7 +1368,7 @@ describe('malformed bodies', () => {
 
 describe('authentication', () => {
   test('a wrong daemon API key is rejected before any state is touched', async () => {
-    const { post, env } = setup();
+    const { post, env } = await setup();
 
     const response = await post(
       '/api/control/calls/incoming',
@@ -1370,7 +1381,7 @@ describe('authentication', () => {
   });
 
   test('a browser route without a session is rejected', async () => {
-    const { post } = setup();
+    const { post } = await setup();
 
     const response = await post('/api/calls/dial', {}, { Cookie: '' });
 
@@ -1403,13 +1414,13 @@ describe('daemon call errors on the wire', () => {
     const { response } = await callWorker('POST', path, {
       headers: { 'Content-Type': 'application/json', 'X-API-Key': TEST_API_KEY },
       body,
-      bindings: { CALL_STATE: unreadableState, DB: historyDb().d1 },
+      bindings: { CALL_STATE: unreadableState, DB: (await historyDb()).d1 },
     });
     return response;
   }
 
   test('an empty body answers that the body must be JSON', async () => {
-    const { post } = setup();
+    const { post } = await setup();
 
     for (const path of [INCOMING, ENDED]) {
       expect([path, await wire(await post(path, ''))]).toEqual([
@@ -1421,7 +1432,7 @@ describe('daemon call errors on the wire', () => {
 
   // These pin the exact wire bytes the daemon reads.
   test('incoming answers each refused report with its exact bytes', async () => {
-    const { post } = setup();
+    const { post } = await setup();
 
     expect(await wire(await post(INCOMING, '{'))).toEqual({
       status: 400,
@@ -1451,7 +1462,7 @@ describe('daemon call errors on the wire', () => {
   });
 
   test('incoming answers 409 with its exact bytes while another call is active', async () => {
-    const { post } = setup(
+    const { post } = await setup(
       liveCall({ id: 'x', direction: 'outbound', state: 'active', iccid: 'other' }),
     );
 
@@ -1463,7 +1474,7 @@ describe('daemon call errors on the wire', () => {
   });
 
   test('ended answers each refused report with its exact bytes', async () => {
-    const { post } = setup();
+    const { post } = await setup();
 
     expect(await wire(await post(ENDED, '{'))).toEqual({
       status: 400,
@@ -1497,7 +1508,7 @@ describe('daemon call errors on the wire', () => {
   });
 
   test('a wrong API key answers 401 with its exact bytes on both routes', async () => {
-    const { post } = setup();
+    const { post } = await setup();
 
     for (const path of [INCOMING, ENDED]) {
       const response = await post(path, { iccid: ICCID }, { 'X-API-Key': 'wrong' });
