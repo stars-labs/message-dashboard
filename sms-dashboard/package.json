@@ -30,7 +30,6 @@
     "check:openapi": "bun scripts/generate-openapi.ts --check",
     "check:worker-types": "bunx wrangler types --strict-vars=false --include-runtime=false && bunx wrangler types worker-runtime.d.ts --include-env=false && git -C .. diff --exit-code -- sms-dashboard/worker-configuration.d.ts sms-dashboard/worker-runtime.d.ts",
     "dev": "bunx vite",
-    "dev:api": "bunx wrangler dev",
     "build": "bunx vite build",
     "build:unified": "bun run build && bun scripts/build-unified.ts",
     "deploy": "bun run build:unified && bunx wrangler deploy",
