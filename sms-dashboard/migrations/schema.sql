@@ -2,7 +2,7 @@
 --   wrangler d1 export sms-dashboard --remote --no-data --output migrations/schema.sql
 -- then restore this header. Regenerate after applying a migration to production,
 -- and set `through` to that migration's number.
--- through: 080
+-- through: 081
 PRAGMA defer_foreign_keys=TRUE;
 CREATE TABLE audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +57,7 @@ CREATE TABLE modems (
     last_error TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-, verification_status TEXT DEFAULT 'unverified', last_verified_session TEXT, current_iccid TEXT, detected_phone_number TEXT, operator TEXT, sim_read_status TEXT DEFAULT NULL, detected_iccid TEXT, detected_operator TEXT, signal_percent INTEGER, rssi INTEGER, usb_path TEXT, last_usb_path TEXT);
+, verification_status TEXT DEFAULT 'unverified', last_verified_session TEXT, detected_phone_number TEXT, operator TEXT, sim_read_status TEXT DEFAULT NULL, detected_iccid TEXT, detected_operator TEXT, signal_percent INTEGER, rssi INTEGER, usb_path TEXT, last_usb_path TEXT);
 CREATE TABLE modem_sim_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     modem_id TEXT NOT NULL,
@@ -412,7 +412,6 @@ CREATE INDEX idx_messages_normalized_timestamp ON "messages"(timestamp);
 CREATE INDEX idx_messages_normalized_type ON "messages"(type);
 CREATE INDEX idx_messages_normalized_timestamp_type ON "messages"(timestamp, type);
 CREATE INDEX idx_messages_normalized_verification ON "messages"(verification_code) WHERE verification_code IS NOT NULL;
-CREATE INDEX idx_modems_current_iccid ON modems(current_iccid);
 CREATE INDEX idx_messages_filter_ts       ON messages(filter_status, timestamp DESC);
 CREATE INDEX idx_messages_iccid_filter_ts ON messages(phone_iccid, filter_status, timestamp DESC);
 CREATE INDEX idx_filter_rules_active      ON filter_rules(is_active);
