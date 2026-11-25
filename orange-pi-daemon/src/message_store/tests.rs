@@ -272,7 +272,6 @@ mod status {
         assert!(store.store_message(&message, "1", "at:ME:1").unwrap());
         let claimed = store.claim_messages(10, 60).unwrap();
         assert_eq!(claimed.len(), 1);
-        assert_eq!(claimed[0].status, MessageStatus::InFlight);
         assert_eq!(
             claimed[0].message.direction,
             crate::wire::Direction::Received

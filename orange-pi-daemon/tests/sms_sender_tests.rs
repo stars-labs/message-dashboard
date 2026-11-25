@@ -21,7 +21,6 @@ fn sender_at(api_url: String) -> anyhow::Result<SmsSender> {
     let config = Config {
         api_url,
         api_key: "test_key".into(),
-        check_interval_secs: 1,
     };
 
     let api_client = ApiClient::new(config)?;

@@ -25,16 +25,6 @@ impl ModemManager {
         Ok(())
     }
 
-    pub async fn send_sms(
-        &self,
-        modem_id: &str,
-        recipient: &SmsAddress,
-        content: &str,
-    ) -> Result<SmsSubmission> {
-        self.send_sms_with_short_code(modem_id, recipient, content, false)
-            .await
-    }
-
     pub async fn send_sms_with_short_code(
         &self,
         modem_id: &str,

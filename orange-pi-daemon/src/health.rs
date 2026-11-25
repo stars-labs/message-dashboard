@@ -4,8 +4,6 @@ use std::time::Instant;
 #[derive(Debug, Clone, Copy)]
 pub enum HealthTask {
     ModemReader,
-    DeviceSync,
-    OutboundPoll,
     MessageUploader,
 }
 
@@ -40,7 +38,6 @@ impl HealthTracker {
             HealthTask::MessageUploader => {
                 self.message_uploader.last_success = Some(Instant::now());
             }
-            HealthTask::DeviceSync | HealthTask::OutboundPoll => {}
         }
     }
 

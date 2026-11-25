@@ -191,13 +191,11 @@ pub(crate) fn spawn_uploader(
 mod tests {
     use super::*;
     use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
-    use orange_pi_daemon_rust::message_store::MessageStatus;
     use orange_pi_daemon_rust::types::Message;
     use orange_pi_daemon_rust::wire::Direction;
 
     fn stored(source_message_id: &str) -> StoredMessage {
         StoredMessage {
-            id: 1,
             source_message_id: source_message_id.to_string(),
             message: Message {
                 phone_iccid: Iccid::try_from("89860000000000000001").unwrap(),
@@ -206,9 +204,6 @@ mod tests {
                 timestamp: "2026-01-01T00:00:00.000Z".to_string(),
                 direction: Direction::Received,
             },
-            modem_id: "1".to_string(),
-            sms_path: "at:ME:1".to_string(),
-            status: MessageStatus::InFlight,
             attempts: 1,
             lease_token: "lease".to_string(),
         }

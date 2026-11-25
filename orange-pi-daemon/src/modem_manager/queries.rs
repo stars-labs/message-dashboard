@@ -71,13 +71,4 @@ impl ModemManager {
         let port = self.get_port(modem_id).await;
         self.at_modem.get_operator(&port).await
     }
-
-    pub async fn health_check(
-        &self,
-        modem_id: &str,
-    ) -> Result<Option<crate::at_modem::ModemHealth>> {
-        let port = self.get_port(modem_id).await;
-        let health = self.at_modem.health_check(&port).await?;
-        Ok(Some(health))
-    }
 }

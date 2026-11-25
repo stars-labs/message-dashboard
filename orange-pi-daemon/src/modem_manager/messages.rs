@@ -235,16 +235,4 @@ impl ModemManager {
             sms_path: Self::format_at_sms_path(&locations),
         }
     }
-
-    pub async fn get_new_messages(
-        &self,
-        modem_id: &str,
-        iccid: &Iccid,
-        message_store: &crate::message_store::MessageStore,
-    ) -> Result<Vec<Message>> {
-        let messages_with_paths = self
-            .get_new_messages_with_paths(modem_id, iccid, message_store)
-            .await?;
-        Ok(messages_with_paths.into_iter().map(|m| m.message).collect())
-    }
 }

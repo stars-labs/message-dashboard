@@ -1,5 +1,5 @@
 // Integration tests for ModemManager - Modem interface layer
-use orange_pi_daemon_rust::identifiers::{Iccid, SmsAddress};
+use orange_pi_daemon_rust::identifiers::Iccid;
 use orange_pi_daemon_rust::modem_manager::ModemManager;
 
 // ============================================================================
@@ -91,46 +91,8 @@ async fn test_get_operator_signature() {
 }
 
 // ============================================================================
-// Health Check Tests
-// ============================================================================
-
-#[tokio::test]
-async fn test_health_check_signature() {
-    let manager = ModemManager::new();
-
-    // Test with invalid modem
-    let result = manager.health_check("invalid_modem").await;
-
-    // Hardware-less runs are expected to error
-    match result {
-        Ok(Some(_) | None) | Err(_) => {}
-    }
-}
-
-// ============================================================================
 // Message Operations Tests
 // ============================================================================
-
-#[tokio::test]
-async fn test_get_new_messages_signature() {
-    use orange_pi_daemon_rust::message_store::MessageStore;
-
-    let manager = ModemManager::new();
-
-    // Create a dummy message store for testing
-    let store = MessageStore::new(":memory:").unwrap();
-
-    // Test with invalid modem
-    let result = manager
-        .get_new_messages(
-            "invalid_modem",
-            &Iccid::try_from("89860000000000000001").unwrap(),
-            &store,
-        )
-        .await;
-
-    assert!(result.is_err());
-}
 
 #[tokio::test]
 async fn test_get_new_messages_with_paths_signature() {
@@ -157,23 +119,6 @@ async fn test_delete_sms_signature() {
 
     // Test with invalid path
     let result = manager.delete_sms("invalid_modem", "at:999").await;
-
-    // Should error without real hardware
-    assert!(result.is_err() || result.is_ok());
-}
-
-#[tokio::test]
-async fn test_send_sms_signature() {
-    let manager = ModemManager::new();
-
-    // Test with invalid modem
-    let result = manager
-        .send_sms(
-            "invalid_modem",
-            &SmsAddress::from("+1234567890"),
-            "test message",
-        )
-        .await;
 
     // Should error without real hardware
     assert!(result.is_err() || result.is_ok());

@@ -8,7 +8,6 @@ pub mod modem_manager;
 pub mod partial_sms;
 pub mod proxy_protocol;
 pub mod signal_cache;
-pub mod sms_assembler;
 pub mod sms_sender;
 pub mod stall_watchdog;
 pub mod sync_manager;
@@ -72,7 +71,6 @@ mod tests {
         let sync_manager = SyncManager::new();
 
         assert!(sync_manager.needs_full_sync());
-        assert_eq!(sync_manager.get_sync_mode(), SyncMode::Full);
     }
 
     #[test]
@@ -91,33 +89,6 @@ mod tests {
         assert!(message.phone_number.as_str().starts_with('+'));
         assert!(!message.content.is_empty());
         assert!(message.timestamp.ends_with('Z'));
-    }
-
-    #[test]
-    fn test_modem_structure() {
-        let modem = Modem {
-            equipment_id: Imei::try_from("123456789012345").unwrap(),
-            manufacturer: Some("Quectel".to_string()),
-            model: Some("EC20".to_string()),
-            firmware_revision: Some("1.0.0".to_string()),
-            hardware_revision: None,
-            status: ModemStatus::Connected,
-            signal: Some(75),
-            rssi: Some(-65),
-            rsrq: None,
-            rsrp: None,
-            snr: None,
-            modem_index: None,
-            usb_port: None,
-            connection_status: Some("active".to_string()),
-            network_type: Some("LTE".to_string()),
-            access_tech: Some("4G".to_string()),
-            sim_read_status: Some(SimReadStatus::Ok),
-        };
-
-        assert_eq!(modem.status, ModemStatus::Connected);
-        assert_eq!(modem.signal, Some(75));
-        assert_eq!(modem.manufacturer, Some("Quectel".to_string()));
     }
 
     #[test]
@@ -165,45 +136,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sim_structure() {
-        let sim = Sim {
-            iccid: Iccid::try_from("89860121750097854321").unwrap(),
-            phone_number: Some(SimNumber::try_from("+1234567890").unwrap()),
-            current_modem_id: Some(Imei::try_from("123456789012345").unwrap()),
-            operator_name: Some("Test Operator".to_string()),
-            operator_id: Some("12345".to_string()),
-            status: SimStatus::Active,
-            sim_index: Some(0),
-        };
-
-        assert_eq!(sim.iccid.as_str().len(), 20);
-        assert_eq!(sim.status, SimStatus::Active);
-        assert_eq!(sim.operator_name, Some("Test Operator".to_string()));
-    }
-
-    #[test]
-    fn test_sim_phone_association() {
-        let sim = Sim {
-            iccid: Iccid::try_from("89860121750097854321").unwrap(),
-            phone_number: Some(SimNumber::try_from("+1234567890").unwrap()),
-            current_modem_id: Some(Imei::try_from("123456789000456").unwrap()),
-            operator_name: Some("Carrier".to_string()),
-            operator_id: None,
-            status: SimStatus::Active,
-            sim_index: Some(1),
-        };
-
-        assert!(sim.current_modem_id.is_some());
-        assert_eq!(
-            sim.current_modem_id,
-            Some(Imei::try_from("123456789000456").unwrap())
-        );
-
-        assert!(sim.phone_number.is_some());
-        assert!(sim.phone_number.unwrap().as_str().starts_with('+'));
-    }
-
-    #[test]
     fn test_timestamp_formatting() {
         let now = chrono::Utc::now();
         let formatted = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -237,7 +169,6 @@ mod tests {
         let config = Config {
             api_url: "https://test.example.com".to_string(),
             api_key: "test_key".into(),
-            check_interval_secs: 30,
         };
         let _client = ApiClient::new(config).unwrap();
     }
@@ -253,7 +184,6 @@ mod tests {
         let config = Config {
             api_url: "https://test.example.com".to_string(),
             api_key: "test_key".into(),
-            check_interval_secs: 30,
         };
         let api_client = ApiClient::new(config).unwrap();
         let modem_manager = Arc::new(ModemManager::new());

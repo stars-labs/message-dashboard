@@ -62,7 +62,6 @@ async fn main() -> Result<()> {
     let config = Config {
         api_url: api_url.clone(),
         api_key: api_key.clone(),
-        check_interval_secs: 1, // Fast 1-second check interval for dual-loop
     };
     let api_client = Arc::new(ApiClient::new(config)?);
 

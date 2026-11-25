@@ -47,7 +47,7 @@ SMS_API_URL=http://localhost:8787 SMS_API_KEY=<local key> RUST_LOG=debug cargo r
 It runs the tests under `cargo llvm-cov`, which fails when the line or function
 total falls below the floors in `flake.nix` (`check-daemon`); raise a floor when
 coverage rises, never lower one to make a change pass.
-Clippy checks all targets and features, including tests and diagnostic binaries,
+Clippy checks all targets and features, including tests and `at_debug`,
 and treats every warning as an error. Fix violations rather than suppressing them;
 any unavoidable exception must be narrowly scoped and explain the external constraint.
 

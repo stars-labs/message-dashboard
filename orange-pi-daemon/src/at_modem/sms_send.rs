@@ -29,10 +29,6 @@ impl AtModemManager {
     ///
     /// Allow-lists E.164 and rejects rather than strips: stripping would send the
     /// message to a different number than the caller asked for.
-    pub(crate) fn validate_recipient(recipient: &str) -> Result<()> {
-        Self::validate_recipient_with_short_code(recipient, false)
-    }
-
     pub(crate) fn validate_recipient_with_short_code(
         recipient: &str,
         allow_short_code: bool,
@@ -78,17 +74,6 @@ impl AtModemManager {
         }
 
         Ok(())
-    }
-
-    pub async fn send_sms(
-        &self,
-        port: &str,
-        recipient: &SmsAddress,
-        message: &str,
-    ) -> Result<SmsSubmission> {
-        Self::validate_recipient(recipient.as_str())?;
-        self.send_sms_with_short_code(port, recipient, message, false)
-            .await
     }
 
     pub async fn send_sms_with_short_code(

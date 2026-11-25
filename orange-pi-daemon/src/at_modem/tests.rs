@@ -889,17 +889,6 @@ fn validate_recipient_does_not_echo_a_value_with_control_characters() {
 }
 
 #[test]
-fn validate_recipient_without_the_short_code_option_refuses_short_codes() {
-    assert_eq!(
-        AtModemManager::validate_recipient("10086")
-            .unwrap_err()
-            .to_string(),
-        "Invalid SMS recipient: expected 6-15 digits, got 5 character(s)"
-    );
-    assert!(AtModemManager::validate_recipient("+6512345678").is_ok());
-}
-
-#[test]
 fn validate_recipient_accepts_short_codes_of_three_to_five_digits_only() {
     for accepted in ["123", "1234", "10086"] {
         assert!(

@@ -219,41 +219,6 @@ fn test_acknowledge_uploaded_removes_from_queue() {
 }
 
 #[test]
-fn test_physical_path_becomes_deletable_only_after_upload() {
-    let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
-
-    store.store_message(&msg, "modem_0", "at:ME:17").unwrap();
-    assert!(store.get_deletable_sms().unwrap().is_empty());
-
-    let claimed = store.claim_messages(10, 90).unwrap();
-    assert!(store.get_deletable_sms().unwrap().is_empty());
-
-    store.acknowledge_uploaded(&claimed).unwrap();
-    assert_eq!(
-        store.get_deletable_sms().unwrap(),
-        vec![("modem_0".to_string(), "at:ME:17".to_string())]
-    );
-}
-
-#[test]
-fn test_duplicate_preserves_first_physical_path() {
-    let store = MessageStore::new(":memory:").unwrap();
-    let msg = create_test_message("89860000000000000001", "Test", "2024-01-01T12:00:00.000Z");
-
-    assert!(store.store_message(&msg, "modem_0", "at:ME:17").unwrap());
-    assert!(!store.store_message(&msg, "modem_0", "at:SM:23").unwrap());
-
-    let claimed = store.claim_messages(10, 90).unwrap();
-    store.acknowledge_uploaded(&claimed).unwrap();
-
-    assert_eq!(
-        store.get_deletable_sms().unwrap(),
-        vec![("modem_0".to_string(), "at:ME:17".to_string())]
-    );
-}
-
-#[test]
 fn test_return_to_pending_and_retry() {
     let store = MessageStore::new(":memory:").unwrap();
 
@@ -424,7 +389,7 @@ fn test_get_segments_incomplete() {
         .unwrap();
 
     let segments = store
-        .get_segments(
+        .get_segments_with_storage(
             &Iccid::try_from("89860000000000000001").unwrap(),
             &SmsAddress::from("+1234567890"),
             42,
@@ -480,7 +445,7 @@ fn test_get_segments_complete() {
         .unwrap();
 
     let segments = store
-        .get_segments(
+        .get_segments_with_storage(
             &Iccid::try_from("89860000000000000001").unwrap(),
             &SmsAddress::from("+1234567890"),
             42,
@@ -541,18 +506,18 @@ fn test_segment_content_assembly() {
         .unwrap();
 
     let mut segments = store
-        .get_segments(
+        .get_segments_with_storage(
             &Iccid::try_from("89860000000000000001").unwrap(),
             &SmsAddress::from("+1234567890"),
             42,
             3,
         )
         .unwrap();
-    segments.sort_by_key(|(part_num, _, _, _)| *part_num);
+    segments.sort_by_key(|(part_num, _, _, _, _)| *part_num);
 
     let combined: String = segments
         .iter()
-        .map(|(_, content, _, _)| content.as_str())
+        .map(|(_, content, _, _, _)| content.as_str())
         .collect();
     assert_eq!(combined, "Hello Rust World!");
 }
@@ -597,7 +562,7 @@ fn test_delete_segments_after_assembly() {
 
     // Verify deleted
     let segments = store
-        .get_segments(
+        .get_segments_with_storage(
             &Iccid::try_from("89860000000000000001").unwrap(),
             &SmsAddress::from("+1234567890"),
             42,
@@ -669,7 +634,7 @@ fn test_multiple_multipart_messages_same_sender() {
 
     // Retrieve separately
     let msg1 = store
-        .get_segments(
+        .get_segments_with_storage(
             &Iccid::try_from("89860000000000000001").unwrap(),
             &SmsAddress::from("+1234567890"),
             10,
@@ -677,7 +642,7 @@ fn test_multiple_multipart_messages_same_sender() {
         )
         .unwrap();
     let msg2 = store
-        .get_segments(
+        .get_segments_with_storage(
             &Iccid::try_from("89860000000000000001").unwrap(),
             &SmsAddress::from("+1234567890"),
             20,
@@ -717,21 +682,6 @@ fn test_cleanup_old_segments() {
     // Clean up segments older than 0 seconds (all of them)
     let result = store.cleanup_old_segments(0);
     assert!(result.is_ok()); // Should succeed
-}
-
-#[test]
-fn test_unacknowledged_messages_survive_retention() {
-    let store = MessageStore::new(":memory:").unwrap();
-
-    let msg = create_test_message(
-        "89860000000000000001",
-        "Old message",
-        "2024-01-01T12:00:00.000Z",
-    );
-    store.store_message(&msg, "modem_0", "at:1").unwrap();
-
-    assert_eq!(store.cleanup_old_messages().unwrap(), 0);
-    assert_eq!(store.get_queue_stats().unwrap().pending, 1);
 }
 
 #[test]

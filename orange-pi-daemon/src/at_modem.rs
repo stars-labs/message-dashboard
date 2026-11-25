@@ -27,8 +27,6 @@ pub struct AtSms {
     /// CPMS mem1 storage containing this message; unset until the scan that found it records it.
     pub storage: Option<SmsStorage>,
     pub index: u32,
-    /// All SIM indices that belong to this logical message (concatenated parts)
-    pub part_indices: Vec<u32>,
     pub sender: SmsAddress,
     pub timestamp: String,
     pub text: String,
@@ -45,7 +43,6 @@ pub struct ConcatInfo {
 
 #[derive(Debug, Clone, Default)]
 pub struct AtModemInfo {
-    pub port: String,
     pub iccid: Option<Iccid>,
     pub imei: Option<Imei>,
     pub manufacturer: Option<String>,
@@ -54,57 +51,6 @@ pub struct AtModemInfo {
     pub signal_percent: Option<u32>,
     pub phone_number: Option<SimNumber>,
     pub operator: Option<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct NetworkRegStatus {
-    /// (n, stat); stat: 0=not reg, 1=reg home, 2=searching, 3=denied, 4=unknown, 5=roaming
-    pub creg: (u32, u32),
-    pub cgreg: (u32, u32),
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ImsStatus {
-    pub enabled: bool,
-    pub registration: String,
-}
-
-/// `AT+CMGF` message format.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SmsMode {
-    #[default]
-    Unknown,
-    Pdu,
-    Text,
-}
-
-impl std::fmt::Display for SmsMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Unknown => "Unknown",
-            Self::Pdu => "PDU",
-            Self::Text => "Text",
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SmsConfig {
-    pub mode: SmsMode,
-    pub storage: String,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ModemHealth {
-    pub port: String,
-    pub iccid: Option<Iccid>,
-    pub imei: Option<Imei>,
-    pub signal_percent: Option<u32>,
-    pub operator: Option<String>,
-    pub network_reg: Option<NetworkRegStatus>,
-    pub ims_status: Option<ImsStatus>,
-    pub sms_center: Option<String>,
-    pub sms_config: Option<SmsConfig>,
 }
 
 /// Serial ports a voice call needs besides the AT port.
@@ -129,7 +75,7 @@ pub struct AtModemManager {
     clippy::as_conversions,
     reason = "nix declares SpecialCharacterIndices as a repr(usize) enum with no conversion to usize, and termios::control_chars is indexed by usize"
 )]
-pub fn control_char_slot(index: termios::SpecialCharacterIndices) -> usize {
+fn control_char_slot(index: termios::SpecialCharacterIndices) -> usize {
     index as usize
 }
 
@@ -176,19 +122,16 @@ impl AtModemManager {
     }
 
     pub async fn get_modem_info(&self, port: &str) -> Result<AtModemInfo> {
-        let mut info = AtModemInfo {
-            port: port.to_string(),
-            ..Default::default()
+        let info = AtModemInfo {
+            imei: self.get_imei(port).await.unwrap_or(None),
+            iccid: self.get_iccid(port).await.unwrap_or(None),
+            manufacturer: self.get_manufacturer(port).await.unwrap_or(None),
+            model: self.get_model(port).await.unwrap_or(None),
+            revision: self.get_revision(port).await.unwrap_or(None),
+            signal_percent: self.get_signal(port).await.ok(),
+            phone_number: self.get_phone_number(port).await.unwrap_or(None),
+            operator: self.get_operator(port).await.unwrap_or(None),
         };
-
-        info.imei = self.get_imei(port).await.unwrap_or(None);
-        info.iccid = self.get_iccid(port).await.unwrap_or(None);
-        info.manufacturer = self.get_manufacturer(port).await.unwrap_or(None);
-        info.model = self.get_model(port).await.unwrap_or(None);
-        info.revision = self.get_revision(port).await.unwrap_or(None);
-        info.signal_percent = self.get_signal(port).await.ok();
-        info.phone_number = self.get_phone_number(port).await.unwrap_or(None);
-        info.operator = self.get_operator(port).await.unwrap_or(None);
 
         self.modems
             .write()

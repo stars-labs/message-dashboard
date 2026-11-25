@@ -3,8 +3,7 @@ use crate::message_store::StoredMessage;
 use crate::types::Config;
 use crate::wire::{
     CallEndReason, EndedCallRequest, HealthSnapshot, IncomingCallRequest, MessageBatchRequest,
-    ModemReport, ModemReportsRequest, PendingSms, PendingSmsResponse, SyncMode, UploadResponse,
-    UploadResult, UploadedMessage,
+    ModemReport, ModemReportsRequest, SyncMode, UploadResponse, UploadResult, UploadedMessage,
 };
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -185,25 +184,6 @@ impl ApiClient {
             total.div_ceil(BATCH_SIZE)
         );
         Ok(results)
-    }
-
-    pub async fn get_pending_sms(&self) -> Result<Vec<PendingSms>> {
-        let url = format!("{}/api/control/pending-sms", self.config.api_url);
-
-        let response = self
-            .client
-            .get(&url)
-            .header("x-api-key", self.config.api_key.expose())
-            .send()
-            .await
-            .context("Failed to get pending SMS")?;
-
-        if !response.status().is_success() {
-            anyhow::bail!("API returned error: {}", response.status());
-        }
-
-        let data: PendingSmsResponse = response.json().await?;
-        Ok(data.pending_messages)
     }
 
     /// Report a ringing SIM. Repeated while it rings; the Worker refreshes a

@@ -35,7 +35,6 @@ where
         fetch(ApiClient::new(Config {
             api_url,
             api_key: "fixture-api-key".into(),
-            check_interval_secs: 1,
         })?)
         .await
     })
@@ -51,24 +50,6 @@ where
     assert_eq!(request.header("x-daemon-session-id"), expected_session);
     assert!(request.body.is_empty());
     result
-}
-
-#[tokio::test]
-async fn api_client_decodes_the_shared_pending_sms_model() {
-    let messages = with_pending_response(
-        "200 OK",
-        json!({"pending_messages": [pending_payload()]}),
-        None,
-        |client| async move { client.get_pending_sms().await },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(messages.len(), 1);
-    assert_eq!(
-        serde_json::to_value(&messages[0]).unwrap(),
-        pending_payload()
-    );
 }
 
 #[tokio::test]
@@ -107,22 +88,6 @@ fn pending_sms_recipient_and_iccid_keep_any_text_the_worker_sends() {
         assert_eq!(sms.phone_iccid, "not-a-hex-iccid");
         assert_eq!(serde_json::to_value(&sms).unwrap(), payload);
     }
-}
-
-#[tokio::test]
-async fn pending_sms_client_rejects_obsolete_payloads_at_the_api_boundary() {
-    let result = with_pending_response(
-        "200 OK",
-        json!({"pending_messages": [{"id": 42, "message": "CXLL", "recipient": "10010", "phone_iccid": "fixture-iccid"}]}),
-        None,
-        |client| async move { client.get_pending_sms().await },
-    ).await;
-
-    assert!(result
-        .unwrap_err()
-        .downcast_ref::<reqwest::Error>()
-        .unwrap()
-        .is_decode());
 }
 
 #[test]
@@ -255,7 +220,6 @@ fn debug_output_never_contains_the_api_key() {
     let config = Config {
         api_url: "https://dashboard.example".into(),
         api_key: "fixture-api-key".into(),
-        check_interval_secs: 1,
     };
 
     assert!(!format!("{config:?}").contains("fixture-api-key"));

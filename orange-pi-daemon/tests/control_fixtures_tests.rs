@@ -2,7 +2,7 @@
 // (sms-dashboard/server/control-fixtures.test.ts): every body the daemon sends
 // must serialize to the recorded request, and every answer it reads must parse.
 use orange_pi_daemon_rust::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
-use orange_pi_daemon_rust::message_store::{MessageStatus, StoredMessage};
+use orange_pi_daemon_rust::message_store::StoredMessage;
 use orange_pi_daemon_rust::types::{Message, SmsSubmission};
 use orange_pi_daemon_rust::wire::{
     CallEndReason, Direction, EndedCallRequest, HealthSnapshot, IncomingCallRequest,
@@ -121,7 +121,6 @@ fn devices_sends_the_recorded_modem_reports() {
 fn messages_sends_the_recorded_batch_and_reads_each_result() {
     let fixture = fixture!("messages");
     let stored = StoredMessage {
-        id: 1,
         source_message_id: "018c1a55-73a0-7b9b-8c06-123456789abc".to_string(),
         message: Message {
             phone_iccid: iccid(),
@@ -130,9 +129,6 @@ fn messages_sends_the_recorded_batch_and_reads_each_result() {
             timestamp: "2026-11-15T00:00:00.000Z".to_string(),
             direction: Direction::Received,
         },
-        modem_id: "modem-1".to_string(),
-        sms_path: "ME:1".to_string(),
-        status: MessageStatus::Pending,
         attempts: 0,
         lease_token: "lease-1".to_string(),
     };

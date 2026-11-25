@@ -10,18 +10,13 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tracing::{debug, info, warn};
 
-mod housekeeping;
 mod schema;
 mod segments;
 
 #[derive(Debug, Clone)]
 pub struct StoredMessage {
-    pub id: i64,
     pub source_message_id: String,
     pub message: Message,
-    pub modem_id: String,
-    pub sms_path: String,
-    pub status: MessageStatus,
     pub attempts: u32,
     pub lease_token: String,
 }
@@ -82,19 +77,6 @@ pub struct Segment<'a> {
 
 /// Part number, content, timestamp, CPMS storage, and SMS index.
 pub type StoredSegment = (u8, String, String, SmsStorage, u32);
-/// ICCID, sender, reference, total parts, part number, content, timestamp,
-/// CPMS storage, and SMS index, as returned for startup recovery.
-pub type RecoverySegment = (
-    Iccid,
-    SmsAddress,
-    u8,
-    u8,
-    u8,
-    String,
-    String,
-    SmsStorage,
-    u32,
-);
 
 #[derive(Debug)]
 pub struct MessageStore {
@@ -242,14 +224,13 @@ impl MessageStore {
                 continue;
             };
             claimed.push(tx.query_row(
-                "SELECT id, source_message_id, phone_number, content, timestamp, direction, modem_id, sms_path, attempts, lease_token
+                "SELECT source_message_id, phone_number, content, timestamp, direction, attempts, lease_token
                  FROM messages WHERE id = ?1",
                 params![id],
                 |row| Ok(StoredMessage {
-                    id: row.get(0)?, source_message_id: row.get(1)?,
-                    message: Message { phone_iccid, phone_number: row.get(2)?, content: row.get(3)?, timestamp: row.get(4)?, direction: row.get(5)? },
-                    modem_id: row.get(6)?, sms_path: row.get(7)?, status: MessageStatus::InFlight,
-                    attempts: row.get(8)?, lease_token: row.get(9)?,
+                    source_message_id: row.get(0)?,
+                    message: Message { phone_iccid, phone_number: row.get(1)?, content: row.get(2)?, timestamp: row.get(3)?, direction: row.get(4)? },
+                    attempts: row.get(5)?, lease_token: row.get(6)?,
                 }),
             )?);
         }
@@ -315,51 +296,6 @@ impl MessageStore {
         Ok(())
     }
 
-    /// Only uploaded messages are deletable from the SIM.
-    pub fn get_deletable_sms(&self) -> Result<Vec<(String, String)>> {
-        let conn = self.conn();
-
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT modem_id, sms_path
-             FROM messages
-             WHERE status = ?1
-               AND deleted_at IS NULL
-             LIMIT 100",
-        )?;
-
-        let paths = stmt
-            .query_map(params![MessageStatus::Uploaded], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(paths)
-    }
-
-    pub fn mark_sms_deleted(&self, modem_id: &str, sms_path: &str) -> Result<()> {
-        let conn = self.conn();
-
-        conn.execute(
-            "UPDATE messages
-             SET deleted_at = CURRENT_TIMESTAMP
-             WHERE modem_id = ?1 AND sms_path = ?2",
-            params![modem_id, sms_path],
-        )?;
-
-        conn.execute(
-            "UPDATE sim_storage
-             SET deleted_messages = deleted_messages + 1
-             WHERE iccid = (
-                SELECT phone_iccid FROM messages
-                WHERE modem_id = ?1 AND sms_path = ?2
-                LIMIT 1
-             )",
-            params![modem_id, sms_path],
-        )?;
-
-        Ok(())
-    }
-
     /// Queue states that require different operator actions. Covers the complete
     /// durable local queue, with no age window.
     pub fn get_queue_stats(&self) -> Result<QueueStats> {
@@ -418,24 +354,6 @@ impl MessageStore {
         }
 
         Ok(full_sims)
-    }
-
-    pub fn cleanup_old_messages(&self) -> Result<usize> {
-        let conn = self.conn();
-
-        let deleted = conn.execute(
-            "DELETE FROM messages
-             WHERE status = ?1
-               AND deleted_at IS NOT NULL
-               AND created_at < datetime('now', '-7 days')",
-            params![MessageStatus::Uploaded],
-        )?;
-
-        if deleted > 0 {
-            info!("🧹 Cleaned up {} old messages", deleted);
-        }
-
-        Ok(deleted)
     }
 
     /// Uploaded messages older than an hour are marked deleted: their SMS paths

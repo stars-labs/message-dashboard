@@ -1,5 +1,5 @@
 use super::*;
-use crate::message_store::{MessageStatus, StoredMessage};
+use crate::message_store::StoredMessage;
 use crate::types::Message;
 use rusqlite::Connection;
 use serde_json::json;
@@ -227,7 +227,6 @@ fn modem_reports_request_matches_the_old_json_body() {
 #[test]
 fn message_batch_request_matches_the_old_json_body() {
     let stored = StoredMessage {
-        id: 7,
         source_message_id: "source-1".to_string(),
         message: Message {
             phone_iccid: iccid(),
@@ -236,9 +235,6 @@ fn message_batch_request_matches_the_old_json_body() {
             timestamp: "2026-01-02T03:04:05.678Z".to_string(),
             direction: Direction::Received,
         },
-        modem_id: "3".to_string(),
-        sms_path: "at:ME:1".to_string(),
-        status: MessageStatus::InFlight,
         attempts: 1,
         lease_token: "lease".to_string(),
     };
