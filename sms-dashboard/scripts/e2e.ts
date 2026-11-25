@@ -23,11 +23,16 @@ try {
   const browser = await chromium.launch({ channel: 'chromium' });
   try {
     const context = await browser.newContext({ viewport: VIEWPORTS.desktop });
-    await context.addCookies([
-      { name: 'auth_token', value: stack.token, url: stack.baseUrl, httpOnly: true },
-    ]);
+    const login = await context.newPage();
+    const landing = await login.goto(`${stack.baseUrl}/login`);
+    if (!landing?.ok() || login.url() !== `${stack.baseUrl}/`) {
+      throw new Error(
+        `browser login ended on ${new URL(login.url()).pathname} (${String(landing?.status())})`,
+      );
+    }
+    await login.close();
     if (!(await signedIn(context, stack.baseUrl))) {
-      throw new Error('the e2e session was not accepted');
+      throw new Error('the session created by browser login was not accepted');
     }
 
     for (const view of VIEWS) {

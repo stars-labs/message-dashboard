@@ -46,7 +46,10 @@ Authorization fails closed: if the Action is not deployed and active, nobody get
 
 - **Dashboard** (Regular Web Application): `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`.
   Its login requests `AUTH0_LOGIN_AUDIENCE`, never the runner API. Callback, logout
-  and web-origin URLs list the production hostname.
+  and web-origin URLs list the production hostname. The authorization code flow
+  uses S256 PKCE and authenticates the Worker with `client_secret_post`. Before
+  rollout, verify login on the isolated development tenant and confirm that Auth0
+  rejects an exchange with a missing or mismatched verifier.
 - **Management API client** (Machine to Machine, authorized for the Auth0
   Management API): `AUTH0_M2M_CLIENT_ID`, `AUTH0_M2M_CLIENT_SECRET`. Grant exactly
   `read:users`, `read:roles` and `update:users`, never `delete:users`. The Worker

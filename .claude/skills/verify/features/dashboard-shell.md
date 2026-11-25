@@ -52,13 +52,12 @@ user does; assert on `location.hash` and the view's heading.
   and a leftover backdrop then swallows clicks.
 - The seeded heartbeat is the stack's start time; a long journey can see the status
   age, so assert on the panel's fields, not 刚刚.
-- 使用 Auth0 登录 and 退出登录 redirect to the fake Auth0 tenant, which serves no
-  login page; drive sign-in through the seeded session, not the button.
-- The login `state` check (GRA-240) is driven over HTTP, not in a page: `fetch` the
-  stack's `/login` with `redirect: 'manual'` for the `__Host-oauth_state` cookie and
-  the `state` in `Location`, then `/callback?code=…&state=…` with and without that
-  cookie. A missing or other cookie answers 400 before Auth0 is contacted; a matching
-  one reaches the token exchange, which the fake tenant refuses with 401, since it
-  issues no authorization codes.
+- `bun run e2e` starts with an empty browser context, follows `/login` through fake
+  Auth0 and `/callback`, then checks the new session at `/api/auth/me`. To exercise
+  this in a journey, clear the seeded cookies on `page.context()` before opening
+  `/login`. Fake Auth0 automatically approves the admin and enforces S256 PKCE.
+- The Worker rejects missing or mismatched login state before contacting Auth0.
+  The fake tenant implements browser sign-in and device authorization. Its logout
+  page is unavailable.
 - The mobile tab 发送 is shown without checking `messages.send`; the `#send` view
   itself is gated.

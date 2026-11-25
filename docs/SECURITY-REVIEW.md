@@ -576,11 +576,13 @@ Recorded because each was raised during review and did **not** survive verificat
 
 **Fixed 2026-11-25 (GRA-240).** `login()` sets `state` in a 10-minute
 `__Host-oauth_state` cookie (`HttpOnly; Secure; SameSite=Lax`). `callback()` answers 400
-before contacting Auth0 unless the URL's `state` equals that cookie, and clears the cookie
-either way, so each `state` works once. The short-TTL KV entry suggested below would not
-have been enough on its own: RFC 9700 §2.1 requires `state` to be bound to the browser that
-started the login, and an attacker can mint a valid KV-stored `state` by starting a login
-of their own. PKCE is not used yet.
+before contacting Auth0 unless the URL's `state` matches the state in that cookie. RFC 9700
+§2.1 requires `state` to be bound to the browser that started the login.
+
+GRA-253 adds S256 PKCE. The same cookie holds the per-login verifier and is cleared on
+callback responses. The Worker sends the verifier and its client secret to Auth0 when
+exchanging the code. The browser E2E exercises the flow with fake Auth0. Rollout requires
+verification on the isolated development tenant.
 
 * **Severity:** MEDIUM (login CSRF / session fixation)
 * **Location:** `server/handlers/auth0.js` — `login()` sets

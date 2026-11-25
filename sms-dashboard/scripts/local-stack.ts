@@ -9,7 +9,12 @@ import { join } from 'node:path';
 import * as v from 'valibot';
 import { parseJson } from '../shared/parse-json.ts';
 import { sessionRecord } from './page-visit.ts';
-import { startFakeAuth0, type FakeAuth0 } from './e2e/fake-auth0.ts';
+import {
+  BROWSER_CLIENT,
+  BROWSER_EMAIL_DOMAIN,
+  startFakeAuth0,
+  type FakeAuth0,
+} from './e2e/fake-auth0.ts';
 
 const READY_TIMEOUT_MS = 90_000;
 const SESSION_TTL_S = 60 * 60;
@@ -87,8 +92,11 @@ async function waitUntilServing(baseUrl: string, worker: ChildProcess, log: () =
 export async function startLocalStack(): Promise<LocalStack> {
   await run(['bun', 'run', 'build:unified'], 'frontend build');
 
+  const port = await freePort();
+  const host = `localhost:${String(port)}`;
+  const baseUrl = `http://${host}`;
   const state = await mkdtemp(join(tmpdir(), 'sms-dashboard-stack-'));
-  const auth0 = await startFakeAuth0();
+  const auth0 = await startFakeAuth0(`${baseUrl}/callback`);
   let worker: ChildProcess | null = null;
   const stop = async () => {
     if (worker !== null) await stopGroup(worker);
@@ -137,8 +145,9 @@ export async function startLocalStack(): Promise<LocalStack> {
       [
         `AUTH0_DOMAIN=${auth0.domain}`,
         `AUTH0_AUDIENCE=${auth0.audience}`,
-        'AUTH0_CLIENT_ID=e2e-client',
-        'AUTH0_CLIENT_SECRET=e2e-client-secret',
+        `AUTH0_CLIENT_ID=${BROWSER_CLIENT.id}`,
+        `AUTH0_CLIENT_SECRET=${BROWSER_CLIENT.secret}`,
+        `ALLOWED_EMAIL_DOMAINS=${BROWSER_EMAIL_DOMAIN}`,
         'AUTH0_M2M_CLIENT_ID=e2e-m2m',
         'AUTH0_M2M_CLIENT_SECRET=e2e-m2m-secret',
         `API_KEY=${API_KEY}`,
@@ -147,8 +156,6 @@ export async function startLocalStack(): Promise<LocalStack> {
       ].join('\n'),
     );
 
-    const port = await freePort();
-    const baseUrl = `http://localhost:${String(port)}`;
     let workerLog = '';
     worker = spawn(
       'node',
@@ -158,6 +165,8 @@ export async function startLocalStack(): Promise<LocalStack> {
         ...local,
         '--port',
         String(port),
+        '--local-upstream',
+        host,
         '--env-file',
         envFile,
         '--show-interactive-dev-session=false',

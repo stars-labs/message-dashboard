@@ -10,7 +10,7 @@ import {
 import { memoryKv } from '../../test/memory-kv.ts';
 import { ALL_RUNNER_SCOPES } from '../../shared/api/runner-scopes.ts';
 import { auth0Origin } from '../../shared/auth0-origin.ts';
-import { startFakeAuth0, type FakeAuth0 } from './fake-auth0.ts';
+import { BROWSER_CLIENT, startFakeAuth0, type FakeAuth0 } from './fake-auth0.ts';
 
 const DeviceCode = v.object({
   device_code: v.string(),
@@ -25,12 +25,13 @@ const Tokens = v.object({
   expires_in: v.number(),
 });
 const AuthError = v.object({ error: v.string() });
+const BROWSER_REDIRECT_URI = 'http://localhost:8080/callback';
 
 let tenant: FakeAuth0;
 let otherTenant: FakeAuth0;
 
 beforeAll(async () => {
-  tenant = await startFakeAuth0();
+  tenant = await startFakeAuth0(BROWSER_REDIRECT_URI);
   otherTenant = await startFakeAuth0();
 });
 
@@ -67,6 +68,103 @@ async function deviceLogin(): Promise<v.InferOutput<typeof Tokens>> {
 function verify(token: string, of: FakeAuth0) {
   return auth0Handler.verifyToken(token, { AUTH0_DOMAIN: of.domain, AUTH0_AUDIENCE: of.audience });
 }
+
+describe('fake Auth0 browser login', () => {
+  const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+  const challenge = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+
+  function requestAuthorization(fields: Record<string, string> = {}) {
+    const url = new URL(`${auth0Origin(tenant.domain)}/authorize`);
+    url.search = new URLSearchParams({
+      response_type: 'code',
+      client_id: BROWSER_CLIENT.id,
+      redirect_uri: BROWSER_REDIRECT_URI,
+      state: 'browser-state',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      ...fields,
+    }).toString();
+    return fetch(url, { redirect: 'manual' });
+  }
+
+  async function authorize() {
+    const response = await requestAuthorization();
+    expect(response.status).toBe(302);
+    const callback = new URL(response.headers.get('Location') ?? '');
+    expect(`${callback.origin}${callback.pathname}`).toBe(BROWSER_REDIRECT_URI);
+    expect(callback.searchParams.get('state')).toBe('browser-state');
+    const code = callback.searchParams.get('code') ?? '';
+    expect(code).not.toBe('');
+    return code;
+  }
+
+  function exchange(code: string, fields: Record<string, string>) {
+    return post('/oauth/token', {
+      grant_type: 'authorization_code',
+      client_id: BROWSER_CLIENT.id,
+      client_secret: BROWSER_CLIENT.secret,
+      code,
+      redirect_uri: BROWSER_REDIRECT_URI,
+      ...fields,
+    });
+  }
+
+  test('redeems a code only once with its S256 verifier', async () => {
+    const code = await authorize();
+    expect((await exchange(code, { code_verifier: verifier })).status).toBe(200);
+    const replay = await exchange(code, { code_verifier: verifier });
+    expect(replay.status).toBe(400);
+    expect(v.parse(AuthError, await replay.json()).error).toBe('invalid_grant');
+  });
+
+  test('requires a registered callback and an S256 challenge', async () => {
+    const invalidRequests: Record<string, string>[] = [
+      { redirect_uri: 'http://localhost:8081/callback' },
+      { code_challenge: '' },
+      { code_challenge_method: 'plain' },
+    ];
+    for (const fields of invalidRequests) {
+      const response = await requestAuthorization(fields);
+      expect(response.status).toBe(400);
+      expect(response.headers.has('location')).toBe(false);
+      expect(v.parse(AuthError, await response.json()).error).toBe('invalid_request');
+    }
+  });
+
+  test('requires browser client authentication before exchanging the code', async () => {
+    const code = await authorize();
+    const response = await exchange(code, { code_verifier: verifier, client_secret: '' });
+    expect(response.status).toBe(400);
+    expect(v.parse(AuthError, await response.json()).error).toBe('invalid_client');
+  });
+
+  test('serves the verified fixture user only with a browser access token', async () => {
+    const url = `${auth0Origin(tenant.domain)}/userinfo`;
+    expect((await fetch(url)).status).toBe(401);
+    const response = await exchange(await authorize(), { code_verifier: verifier });
+    const { access_token: token } = v.parse(
+      v.object({ access_token: v.string() }),
+      await response.json(),
+    );
+    const userInfo = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    expect(userInfo.status).toBe(200);
+    expect(await userInfo.json()).toEqual({
+      sub: 'auth0|e2e-admin',
+      email: 'admin@example.test',
+      name: 'E2E Admin',
+      email_verified: true,
+    });
+  });
+
+  test.each<Record<string, string>>([{}, { code_verifier: 'x'.repeat(43) }])(
+    'rejects a code exchange with a missing or incorrect verifier',
+    async (fields) => {
+      const response = await exchange(await authorize(), fields);
+      expect(response.status).toBe(400);
+      expect(v.parse(AuthError, await response.json()).error).toBe('invalid_grant');
+    },
+  );
+});
 
 describe('fake Auth0 tenant', () => {
   test('approves a device login with a runner token the Worker accepts', async () => {

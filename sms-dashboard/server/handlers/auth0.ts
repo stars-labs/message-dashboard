@@ -1,5 +1,5 @@
 import { ORPCError } from '@orpc/server';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { base64url, createRemoteJWKSet, jwtVerify } from 'jose';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { parseJson, readJson } from '../../shared/parse-json.js';
@@ -126,7 +126,7 @@ function logAuthFailure(
   );
 }
 
-function authenticationUnavailable(): Response {
+function authenticationUnavailable(headers: Headers): Response {
   const body = `<!doctype html>
 <html lang="en">
   <head>
@@ -143,13 +143,8 @@ function authenticationUnavailable(): Response {
   </body>
 </html>`;
 
-  return new Response(body, {
-    status: 503,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  });
+  headers.set('Content-Type', 'text/html; charset=utf-8');
+  return new Response(body, { status: 503, headers });
 }
 
 export async function resolveLoginRoles({
@@ -216,7 +211,7 @@ export async function ensureDashboardLoginRole({
 }
 
 export const auth0Handler = {
-  login(request: LoginRequest): Response {
+  async login(request: LoginRequest): Promise<Response> {
     console.log('[Auth0 Handler] Login route hit');
     const { env } = request;
     const url = new URL(request.url);
@@ -238,7 +233,11 @@ export const auth0Handler = {
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('scope', 'openid profile email');
     const state = nanoid();
+    const verifier = base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
+    const challenge = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
     authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('code_challenge', base64url.encode(new Uint8Array(challenge)));
+    authUrl.searchParams.set('code_challenge_method', 'S256');
 
     // The runner API audience belongs to the Balance Agent; only a dedicated login
     // audience may be requested here.
@@ -250,7 +249,8 @@ export const auth0Handler = {
       status: 302,
       headers: {
         Location: authUrl.toString(),
-        'Set-Cookie': `${STATE_COOKIE}=${state}; ${STATE_COOKIE_ATTRIBUTES}; Max-Age=600`,
+        'Cache-Control': 'no-store',
+        'Set-Cookie': `${STATE_COOKIE}=${state}.${verifier}; ${STATE_COOKIE_ATTRIBUTES}; Max-Age=600`,
       },
     });
   },
@@ -261,6 +261,10 @@ export const auth0Handler = {
     const url = new URL(request.url);
     const code = url.searchParams.get('code');
     const error = url.searchParams.get('error');
+    const headers = new Headers({
+      'Cache-Control': 'no-store',
+      'Set-Cookie': STATE_COOKIE_CLEARED,
+    });
 
     if (error) {
       console.error(
@@ -271,39 +275,48 @@ export const auth0Handler = {
       );
       return new Response('Authentication failed', {
         status: 401,
-        headers: { 'Cache-Control': 'no-store' },
+        headers,
       });
     }
 
     const state = url.searchParams.get('state');
-    if (state === null || state !== readCookie(request.headers.get('Cookie'), STATE_COOKIE)) {
+    const loginCookie = readCookie(request.headers.get('Cookie'), STATE_COOKIE);
+    const [expectedState, verifier, extra] = (loginCookie ?? '').split('.', 3);
+    if (
+      !state ||
+      state !== expectedState ||
+      !verifier ||
+      !/^[\w-]{43}$/.test(verifier) ||
+      extra !== undefined
+    ) {
       console.error(JSON.stringify({ event: 'auth_state_mismatch' }));
       return new Response('Login expired or was not started here. Start again from /login.', {
         status: 400,
-        headers: { 'Cache-Control': 'no-store', 'Set-Cookie': STATE_COOKIE_CLEARED },
+        headers,
       });
     }
 
     if (!code) {
-      return new Response('Authorization code missing', { status: 400 });
+      return new Response('Authorization code missing', { status: 400, headers });
     }
 
     try {
       const domain = env.AUTH0_DOMAIN;
       if (!domain) throw new Error('AUTH0_DOMAIN is not configured');
+      if (!env.AUTH0_CLIENT_ID || !env.AUTH0_CLIENT_SECRET) {
+        throw new Error('Auth0 client credentials are not configured');
+      }
 
       const redirectUri = `${url.origin}/callback`;
       const tokenResponse = await fetch(`${auth0Origin(domain)}/oauth/token`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+        body: new URLSearchParams({
           grant_type: 'authorization_code',
           client_id: env.AUTH0_CLIENT_ID,
           client_secret: env.AUTH0_CLIENT_SECRET,
-          code: code,
+          code,
           redirect_uri: redirectUri,
+          code_verifier: verifier,
         }),
       });
 
@@ -316,7 +329,7 @@ export const auth0Handler = {
         );
         return new Response('Authentication failed', {
           status: 401,
-          headers: { 'Cache-Control': 'no-store' },
+          headers,
         });
       }
 
@@ -341,7 +354,7 @@ export const auth0Handler = {
         );
         return new Response('Authentication failed', {
           status: 401,
-          headers: { 'Cache-Control': 'no-store' },
+          headers,
         });
       }
 
@@ -389,7 +402,7 @@ export const auth0Handler = {
           details: { reason: emailCheck.reason, domain: emailCheck.domain },
         });
 
-        return new Response(`Access denied: ${emailCheck.reason}`, { status: 403 });
+        return new Response(`Access denied: ${emailCheck.reason}`, { status: 403, headers });
       }
 
       // Must stay after the email checks (only entitled users get provisioned) and
@@ -412,12 +425,13 @@ export const auth0Handler = {
         }
       } catch (provisionError) {
         logAuthFailure('auth_role_reconciliation_failed', provisionError);
-        return authenticationUnavailable();
+        return authenticationUnavailable(headers);
       }
 
       // Checked before the session is minted so a denied account never gets a credential.
       if (!hasAnyRole(user.roles, roleConfig)) {
-        return Response.redirect(new URL('/login?error=no_role', url.origin).toString(), 302);
+        headers.set('Location', new URL('/login?error=no_role', url.origin).toString());
+        return new Response(null, { status: 302, headers });
       }
 
       const sessionToken = nanoid();
@@ -444,16 +458,15 @@ export const auth0Handler = {
       // Cookie only: a token in the redirect URL would leak via Referer, history and logs.
       const frontendUrl = new URL('/', url.origin);
 
-      const headers = new Headers({ Location: frontendUrl.toString() });
+      headers.set('Location', frontendUrl.toString());
       headers.append(
         'Set-Cookie',
         `auth_token=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
       );
-      headers.append('Set-Cookie', STATE_COOKIE_CLEARED);
       return new Response(null, { status: 302, headers });
     } catch (exchangeError) {
       logAuthFailure('auth_callback_failed', exchangeError);
-      return authenticationUnavailable();
+      return authenticationUnavailable(headers);
     }
   },
 

@@ -61,12 +61,13 @@ function mockSuccessfulAuth(userInfo: Record<string, unknown> = {}) {
 }
 
 const STATE = 'state-from-this-browser';
+const VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
 
 function callbackRequest({
   dbRun,
   sessionPut,
   stateParam = STATE,
-  stateCookie = STATE,
+  stateCookie = `${STATE}.${VERIFIER}`,
 }: {
   dbRun?: () => Promise<D1RunResult>;
   sessionPut?: () => Promise<void>;
@@ -172,8 +173,29 @@ describe('Auth0 login role token selection', () => {
 });
 
 describe('Auth0 login', () => {
-  test('does not use the runner API audience for browser login', () => {
-    const response = auth0Handler.login({
+  test('sends a fresh S256 challenge for the verifier stored in the login cookie', async () => {
+    const request = {
+      url: 'https://sexy.itoken.world/login',
+      env: { AUTH0_DOMAIN: 'tenant.example', AUTH0_CLIENT_ID: 'dashboard-client' },
+    };
+    const response = await auth0Handler.login(request);
+    const location = new URL(response.headers.get('location') ?? '');
+    const cookie = response.headers.getSetCookie()[0] ?? '';
+    expect(location.searchParams.get('code_challenge_method')).toBe('S256');
+    const verifier = /\.([\w-]{43});/.exec(cookie)?.[1] ?? '';
+    expect(verifier).toHaveLength(43);
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    const challenge = Buffer.from(hash).toString('base64url');
+    expect(location.searchParams.get('code_challenge')).toBe(challenge);
+    expect(location.href).not.toContain(verifier);
+
+    const next = await auth0Handler.login(request);
+    const nextLocation = new URL(next.headers.get('location') ?? '');
+    expect(nextLocation.searchParams.get('code_challenge')).not.toBe(challenge);
+  });
+
+  test('does not use the runner API audience for browser login', async () => {
+    const response = await auth0Handler.login({
       url: 'https://sexy.itoken.world/login',
       env: {
         AUTH0_DOMAIN: 'tenant.example',
@@ -187,8 +209,8 @@ describe('Auth0 login', () => {
     expect(location.searchParams.has('audience')).toBe(false);
   });
 
-  test('requests the configured login audience', () => {
-    const response = auth0Handler.login({
+  test('requests the configured login audience', async () => {
+    const response = await auth0Handler.login({
       url: 'https://sexy.itoken.world/login',
       env: {
         AUTH0_DOMAIN: 'tenant.example',
@@ -200,21 +222,22 @@ describe('Auth0 login', () => {
     expect(location.searchParams.get('audience')).toBe('https://sexy.itoken.world/login-api');
   });
 
-  test('binds the state to this browser in a short-lived __Host- cookie', () => {
-    const response = auth0Handler.login({
+  test('binds the state to this browser in a short-lived __Host- cookie', async () => {
+    const response = await auth0Handler.login({
       url: 'https://sexy.itoken.world/login',
       env: { AUTH0_DOMAIN: 'tenant.example', AUTH0_CLIENT_ID: 'dashboard-client' },
     });
     const state = new URL(response.headers.get('location') ?? '').searchParams.get('state');
 
     expect(state).toBeTruthy();
-    expect(response.headers.getSetCookie()).toEqual([
-      `__Host-oauth_state=${state ?? ''}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
-    ]);
+    const cookies = response.headers.getSetCookie();
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toStartWith(`__Host-oauth_state=${state ?? ''}.`);
+    expect(cookies[0]).toEndWith('; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600');
   });
 
   test('answers 500 when Auth0 is not configured', async () => {
-    const response = auth0Handler.login({
+    const response = await auth0Handler.login({
       url: 'https://sexy.itoken.world/login',
       env: { AUTH0_DOMAIN: 'tenant.example' },
     });
@@ -224,6 +247,53 @@ describe('Auth0 login', () => {
 });
 
 describe('Auth0 callback', () => {
+  test('exchanges the code with both the stored verifier and the client secret', async () => {
+    mockSuccessfulAuth();
+    const { request, waits } = callbackRequest();
+
+    const response = await auth0Handler.callback(request);
+    await Promise.all(waits);
+
+    expect(response.status).toBe(302);
+    const [input, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(input).toBe('https://tenant.example/oauth/token');
+    expect(init?.body).toBeInstanceOf(URLSearchParams);
+    const fields = init?.body instanceof URLSearchParams ? init.body : new URLSearchParams();
+    expect(fields.get('code_verifier')).toBe(VERIFIER);
+    expect(fields.get('client_secret')).toBe('test-secret');
+    expect(fields.get('redirect_uri')).toBe('https://sexy.itoken.world/callback');
+  });
+
+  test('answers 503 before exchanging the code when the client secret is missing', async () => {
+    mockSuccessfulAuth();
+    const { request, sessionWrites } = callbackRequest();
+    delete request.env.AUTH0_CLIENT_SECRET;
+
+    const response = await auth0Handler.callback(request);
+
+    expect(response.status).toBe(503);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(sessionWrites).toHaveLength(0);
+  });
+
+  test.each([STATE, `${STATE}.short`, `${STATE}.${VERIFIER}.extra`])(
+    'rejects an incomplete or malformed login cookie before exchanging the code',
+    async (cookie) => {
+      mockSuccessfulAuth();
+      const { request, sessionWrites, waits } = callbackRequest({ stateCookie: cookie });
+
+      const response = await auth0Handler.callback(request);
+      await Promise.all(waits);
+
+      expect(response.status).toBe(400);
+      expect(response.headers.getSetCookie()).toContain(
+        '__Host-oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(sessionWrites).toHaveLength(0);
+    },
+  );
+
   test('completes the callback when userinfo contains a dashboard role', async () => {
     mockSuccessfulAuth();
     const { request, waits, sessionWrites } = callbackRequest();
@@ -312,7 +382,9 @@ describe('Auth0 callback', () => {
 
     expect(response.status).toBe(503);
     expect(response.headers.get('content-type')).toContain('text/html');
-    expect(response.headers.has('set-cookie')).toBe(false);
+    expect(response.headers.getSetCookie()).toEqual([
+      '__Host-oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
+    ]);
     expect(body).toContain('Authentication is temporarily unavailable');
     expect(body).not.toContain('sensitive KV provider detail');
     expect(loggedText()).toContain('auth_callback_failed');
@@ -360,7 +432,7 @@ describe('Auth0 callback', () => {
 
   test.each([
     ['no state cookie', { stateCookie: null }],
-    ['a state cookie from another login', { stateCookie: 'state-from-another-login' }],
+    ['a state cookie from another login', { stateCookie: `state-from-another-login.${VERIFIER}` }],
     ['no state in the URL', { stateParam: null }],
     ['neither', { stateParam: null, stateCookie: null }],
   ] as const)(
