@@ -4,23 +4,15 @@ import * as v from 'valibot';
 import { D1_MAX_BOUND_PARAMETERS, type D1, type D1Batch } from '../lib/d1.js';
 import {
   findBalanceCheckId,
-  findBalanceCheckToContinue,
-  findBalanceCheckToRetry,
-  findBalanceCheckToStop,
   listBalanceCheckMessages,
   listBalanceChecks,
   listBalanceChecksByIds,
   listBalanceCheckStatuses,
   listBalanceCheckWebEvents,
   queueSmsBalanceCheck,
-  requeueBalanceCheck,
   runBalanceStatements,
-  stopBalanceCheck,
 } from '../db/balance-checks.js';
 import {
-  findCheckPhone,
-  findEnabledBalanceProfile,
-  findRecentBalanceCheck,
   listCooldownChecks,
   listParsedChecks,
   listPlanPhones,
@@ -46,16 +38,10 @@ import {
   type BalanceQueryBody,
   type BalanceQueryPreflightQuery,
   PHONE_ICCID_REQUIRED,
-  type BalanceCheckCreateBody,
-  type BalanceCheckCreateResponse,
-  type BalanceCheckIdBody,
-  type BalanceCheckStepResponse,
-  type BalanceCheckStopResponse,
 } from '../../shared/api/balance-checks.js';
 import { errorText } from '../../shared/error-text.js';
 import {
   buildBalanceQueryPlan,
-  carrierMatchesProfile,
   describeBalanceMethod,
   filterBalancePlanByMethods,
   queryMethod,
@@ -65,9 +51,7 @@ import {
   type PlanItem,
 } from '../utils/balance-plan.js';
 import { displayBalanceStatus, toBalanceChecks } from '../utils/balance-display.js';
-import { attemptedStep, matchingNextStep } from '../utils/balance-reply-parse.js';
 import { loadBalanceRunnerStatus } from './balance-runners.js';
-import { queueBalanceFollowUp } from './balance-replies.js';
 import {
   createCarrierWebBalanceStatements,
   newCarrierWebBalanceIds,
@@ -104,19 +88,6 @@ interface QueueCall {
 function subjectOf(user: { id: string } | undefined): string {
   if (user === undefined || user.id === '') throw new ORPCError('UNAUTHORIZED');
   return user.id;
-}
-
-/** An ops route as the contract hands it over, once the API key has been checked. */
-interface OpsCall {
-  env: { DB: D1<'first' | 'run'> & D1Batch<'run'> };
-}
-
-/** A refusal the ops scripts read as { success: false, error }. */
-function refused(
-  code: 'BAD_REQUEST' | 'NOT_FOUND' | 'CONFLICT',
-  message: string,
-): ORPCError<string, undefined> {
-  return new ORPCError(code, { message });
 }
 
 async function loadBalanceQueryPlan(
@@ -397,140 +368,5 @@ export const balanceQueriesHandler = {
       checks,
       failures,
     };
-  },
-
-  async create(
-    { env }: OpsCall,
-    { phone_iccid, profile_id }: v.InferOutput<typeof BalanceCheckCreateBody>,
-  ): Promise<BalanceCheckCreateResponse> {
-    const db = env.DB;
-    const [profile, phone, recent] = await Promise.all([
-      findEnabledBalanceProfile(db, profile_id),
-      findCheckPhone(db, phone_iccid),
-      findRecentBalanceCheck(db, phone_iccid),
-    ]);
-
-    if (!profile) throw refused('NOT_FOUND', 'Balance profile is not enabled');
-    if (profile.method !== 'sms' && profile.method !== 'browser') {
-      throw refused('BAD_REQUEST', 'Profile method is not implemented');
-    }
-    if (phone?.sim_status !== 'active') throw refused('CONFLICT', 'SIM is not active');
-    if (
-      phone.country !== profile.country_code ||
-      !carrierMatchesProfile(phone.carrier, profile.carrier)
-    ) {
-      throw refused('CONFLICT', 'SIM does not match the carrier profile');
-    }
-    if (recent) {
-      throw new ORPCError('TOO_MANY_REQUESTS', {
-        data: {
-          wire: {
-            success: false,
-            error: 'This SIM has already been queried in the last 24 hours',
-            previous_check: recent,
-          },
-        },
-      });
-    }
-
-    const check = await queueBalanceCheck(
-      db,
-      { phone, profile: { ...profile, method: profile.method } },
-      null,
-    );
-    return { success: true, check };
-  },
-
-  async continue(
-    { env }: OpsCall,
-    { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
-  ): Promise<BalanceCheckStepResponse> {
-    const check = await findBalanceCheckToContinue(env.DB, check_id);
-
-    if (!check) throw refused('NOT_FOUND', 'Balance check not found');
-    if (
-      (check.status !== 'response_received' && check.status !== 'unparsed') ||
-      check.response_message_id === null ||
-      check.raw_response === null
-    ) {
-      throw refused('CONFLICT', 'Balance check cannot be continued');
-    }
-
-    const step = matchingNextStep(check, check.raw_response);
-    if (!step) throw refused('CONFLICT', 'No allowlisted next step matches the reply');
-
-    const result = await queueBalanceFollowUp(
-      env.DB,
-      check,
-      {
-        id: check.response_message_id,
-        phone_number: check.response_sender,
-        content: check.raw_response,
-      },
-      step,
-      check.status,
-    );
-
-    if (!result.queued) {
-      throw refused('CONFLICT', 'Balance check changed before it was continued');
-    }
-
-    return {
-      success: true,
-      check: {
-        id: check.id,
-        status: 'queued',
-        step_index: check.step_index + 1,
-        outbound_message_id: result.message_id,
-      },
-    };
-  },
-
-  async retry(
-    { env }: OpsCall,
-    { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
-  ): Promise<BalanceCheckStepResponse> {
-    const check = await findBalanceCheckToRetry(env.DB, check_id);
-
-    const step = check ? attemptedStep(check) : null;
-    if (
-      check?.status !== 'failed' ||
-      check.message_status !== 'failed' ||
-      check.message_content !== step?.command ||
-      check.message_recipient !== check.destination
-    ) {
-      throw refused('CONFLICT', 'No allowlisted failed step can be retried');
-    }
-
-    if (!(await requeueBalanceCheck(env.DB, check))) {
-      throw refused('CONFLICT', 'Balance check changed before retry');
-    }
-
-    return {
-      success: true,
-      check: {
-        id: check.id,
-        status: 'queued',
-        step_index: check.step_index,
-        outbound_message_id: check.message_id,
-      },
-    };
-  },
-
-  async stop(
-    { env }: OpsCall,
-    { check_id }: v.InferOutput<typeof BalanceCheckIdBody>,
-  ): Promise<BalanceCheckStopResponse> {
-    const check = await findBalanceCheckToStop(env.DB, check_id);
-    if (!check) throw refused('NOT_FOUND', 'Balance check not found');
-    if (check.status !== 'awaiting_response' && check.status !== 'response_received') {
-      throw refused('CONFLICT', 'Balance check is not stoppable');
-    }
-
-    const finalStatus = check.status === 'awaiting_response' ? 'timed_out' : 'unparsed';
-    if (!(await stopBalanceCheck(env.DB, check, finalStatus)))
-      throw refused('CONFLICT', 'Balance check changed before stop');
-
-    return { success: true, check: { id: check.id, status: finalStatus } };
   },
 };

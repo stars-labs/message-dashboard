@@ -59,9 +59,6 @@ export const router = os.router({
     uploadMessages: os.control.uploadMessages.handler(({ context, input }) =>
       controlHandler.uploadMessages(context.request, input),
     ),
-    clearMessages: os.control.clearMessages.handler(({ context }) =>
-      controlHandler.clearMessages(context.request),
-    ),
     pendingSms: os.control.pendingSms.handler(({ context, input }) =>
       controlHandler.getPendingSMS(context.request, input.headers['x-daemon-session-id']),
     ),
@@ -73,23 +70,6 @@ export const router = os.router({
     ),
     callEnded: os.control.callEnded.handler(({ context, input }) =>
       daemonCallsHandler.ended(context.request, input),
-    ),
-  },
-  balanceCheckControl: {
-    create: os.balanceCheckControl.create.handler(async ({ context, input }) => ({
-      status: 202,
-      body: await balanceQueriesHandler.create(context.request, input),
-    })),
-    continue: os.balanceCheckControl.continue.handler(async ({ context, input }) => ({
-      status: 202,
-      body: await balanceQueriesHandler.continue(context.request, input),
-    })),
-    retry: os.balanceCheckControl.retry.handler(async ({ context, input }) => ({
-      status: 202,
-      body: await balanceQueriesHandler.retry(context.request, input),
-    })),
-    stop: os.balanceCheckControl.stop.handler(({ context, input }) =>
-      balanceQueriesHandler.stop(context.request, input),
     ),
   },
   balanceRunnerControl: {

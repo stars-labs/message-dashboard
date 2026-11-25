@@ -6,7 +6,6 @@ import {
   IncomingCallResponse,
 } from '../calls.js';
 import {
-  ClearMessagesResponse,
   DevicesBody,
   DevicesResponse,
   PendingSmsHeaders,
@@ -48,7 +47,6 @@ export const control = {
   uploadMessages: route(DAEMON, 'POST', '/api/control/messages')
     .input(UploadBody)
     .output(UploadResponse),
-  clearMessages: route(DAEMON, 'DELETE', '/api/control/messages').output(ClearMessagesResponse),
   pendingSms: route(DAEMON, 'GET', '/api/control/pending-sms')
     .route({ inputStructure: 'detailed' })
     .input(v.object({ headers: PendingSmsHeaders }))

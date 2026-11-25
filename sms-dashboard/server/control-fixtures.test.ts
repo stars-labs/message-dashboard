@@ -19,10 +19,6 @@ import { callWorker, routeTable, TEST_API_KEY } from '../test/worker-harness.js'
 const ICCID = '89860123456789012345';
 const SIM_NUMBER = '+8613800000001';
 const MENU = '11.账务查询\n12.客户服务';
-const MENU_STEPS = JSON.stringify([
-  { response_contains: '1.话费与AI豆', command: '1' },
-  { response_contains: '101.查询余额', command: '101' },
-]);
 
 interface World {
   sqlite: Database;
@@ -128,37 +124,6 @@ function outbound({ sqlite }: World, status: string): void {
     .run(ICCID, SIM_NUMBER, status);
 }
 
-function check({ sqlite }: World, status: string, extra: Record<string, string> = {}): void {
-  const columns = [
-    'id',
-    'sim_iccid',
-    'profile_id',
-    'status',
-    'parser_version',
-    ...Object.keys(extra),
-  ];
-  sqlite
-    .query(
-      `INSERT INTO sim_balance_checks (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
-    )
-    .run(
-      'check-1',
-      ICCID,
-      'cn-mobile-sms-menu-v1',
-      status,
-      'cn-mobile-balance-v1',
-      ...Object.values(extra),
-    );
-}
-
-function menuProfile({ sqlite }: World): void {
-  sqlite
-    .query(
-      `UPDATE sim_balance_profiles SET conversation_steps = ? WHERE id = 'cn-mobile-sms-menu-v1'`,
-    )
-    .run(MENU_STEPS);
-}
-
 // The state each exchange starts from. A fixture without an entry starts from
 // one online SIM and nothing else.
 const SEEDS: Record<string, (world: World) => void | Promise<void>> = {
@@ -200,32 +165,6 @@ const SEEDS: Record<string, (world: World) => void | Promise<void>> = {
   'runner/carrier-web-complete': awaitingOtp,
   'runner/carrier-web-fail': claimedWebJob,
   'runner/carrier-web-release': claimedWebJob,
-  'ops/balance-checks-continue': (world) => {
-    menuProfile(world);
-    receive(world, 'menu-1', '10086', '1.话费与AI豆', '', 'CURRENT_TIMESTAMP');
-    check(world, 'response_received', {
-      response_message_id: 'menu-1',
-      response_sender: '10086',
-      raw_response: '1.话费与AI豆',
-    });
-  },
-  'ops/balance-checks-retry': (world) => {
-    menuProfile(world);
-    check(world, 'failed', { step_index: '1' });
-    world.sqlite
-      .query(
-        `INSERT INTO messages (id, phone_iccid, content, timestamp, type, recipient, status, filter_status, purpose, balance_check_id)
-       VALUES ('start-1', ?, '10086', '2026-11-14 23:00:00', 'sent', '10086', 'sent', 'filtered', 'balance_maintenance', 'check-1'),
-              ('option-1', ?, '1', '2026-11-14 23:01:00', 'sent', '10086', 'failed', 'filtered', 'balance_maintenance', 'check-1')`,
-      )
-      .run(ICCID, ICCID);
-  },
-  'ops/balance-checks-stop': (world) => {
-    check(world, 'awaiting_response');
-  },
-  'ops/messages-delete': (world) => {
-    outbound(world, 'sent');
-  },
 };
 
 async function replay(name: string, request: ControlFixture['request']): Promise<Answer> {

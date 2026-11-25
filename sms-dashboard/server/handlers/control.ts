@@ -3,7 +3,6 @@ import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import type { D1, D1Batch } from '../lib/d1.js';
 import {
-  deleteAllMessages,
   failUnsendableMessages,
   insertReceivedMessage,
   listMessagesByIds,
@@ -21,7 +20,6 @@ import type { PendingSms } from '../../shared/daemon-wire/PendingSms.js';
 import {
   INVALID_REMOVED,
   INVALID_SYNC,
-  type ClearMessagesResponse,
   type DevicesBody,
   type DevicesResponse,
   type PendingSmsResponse,
@@ -390,16 +388,6 @@ export const controlHandler = {
     } catch (error) {
       console.error('Update SMS result error:', error);
       failed(error, 'Failed to update SMS result');
-    }
-  },
-
-  async clearMessages({ env }: DaemonCall<D1<'run'>>): Promise<ClearMessagesResponse> {
-    try {
-      const changes = await deleteAllMessages(env.DB);
-      return { success: true, message: `Cleared ${String(changes)} messages` };
-    } catch (error) {
-      console.error('[control] Clear messages error:', error);
-      failed(error, `Failed to clear messages: ${errorText(error)}`);
     }
   },
 };
