@@ -1,13 +1,10 @@
 import * as v from 'valibot';
 import { HistoryRequestBody, KeywordHistoryPage } from '../history.js';
 import {
-  BatchTagsBody,
-  BatchTagsResponse,
   CreateKeywordBody,
   KeywordResponse,
   KeywordsResponse,
   KeywordWithUsage,
-  MessageTagsResponse,
   UpdateKeywordBody,
 } from '../keywords.js';
 import { SuccessResponse } from '../success.js';
@@ -43,19 +40,4 @@ export const keywords = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ params: Id, body: HistoryRequestBody }))
     .output(KeywordHistoryPage),
-  batchTags: route(
-    { kind: 'user', permission: 'messages.read' },
-    'POST',
-    '/api/messages/batch-tags',
-  )
-    .input(BatchTagsBody)
-    .output(BatchTagsResponse),
-  messageTags: route(
-    { kind: 'user', permission: 'messages.read' },
-    'GET',
-    '/api/messages/{id}/tags',
-  )
-    .route({ inputStructure: 'detailed' })
-    .input(v.object({ params: Id }))
-    .output(MessageTagsResponse),
 };

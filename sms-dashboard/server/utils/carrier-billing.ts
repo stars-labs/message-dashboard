@@ -22,7 +22,6 @@ import type { SingtelBill } from './singtel-postpaid-bill.js';
 const RECONCILIATION_PAGE_SIZE = 100;
 const SINGTEL_BILL_PREFIX = '<Singtel>Dear customer, your latest bill for Singtel a/c ';
 
-/** Also the summary keys in handlers/carrier-billing-backfill.ts. */
 export type BillOutcome =
   'detected' | 'duplicate_detected' | 'parse_conflict' | 'already_processed' | 'ignored' | 'failed';
 

@@ -10,7 +10,6 @@ import { keywords } from './keywords.js';
 import { messages } from './messages.js';
 import { runnerContract } from './runner.js';
 import { users } from './users.js';
-import { verification } from './verification.js';
 
 /** Every route served through the contract; the rest still go to the legacy Router. */
 export const contract = {
@@ -24,7 +23,6 @@ export const contract = {
   iccidMappings,
   keywords,
   filters,
-  verification,
   balanceChecks,
   balanceRunners,
   carrierBills,

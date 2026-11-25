@@ -74,14 +74,11 @@ const CooldownRow = v.object({
 // A scope larger than D1's bind limit is read in chunks.
 export async function listPlanPhones(
   db: D1<'all'>,
-  scope: readonly string[] | null,
+  scope: readonly string[],
 ): Promise<PlanPhone[]> {
   const select = `
     SELECT iccid, number, carrier, country, sim_status, sim_index, sim_role, service_type
     FROM device_view`;
-  if (scope === null) {
-    return queryAll(db.prepare(`${select} ORDER BY sim_index`), PlanPhoneRow);
-  }
   const phones: PlanPhone[] = [];
   for (let start = 0; start < scope.length; start += D1_MAX_BOUND_PARAMETERS) {
     const chunk = scope.slice(start, start + D1_MAX_BOUND_PARAMETERS);

@@ -121,7 +121,7 @@ function refused(
 
 async function loadBalanceQueryPlan(
   db: D1<'all'>,
-  { scope, allowDiscovery = false }: { scope: readonly string[] | null; allowDiscovery?: boolean },
+  { scope, allowDiscovery = false }: { scope: readonly string[]; allowDiscovery?: boolean },
 ): Promise<PlanItem[]> {
   const [phones, profiles, recentChecks, successfulChecks] = await Promise.all([
     listPlanPhones(db, scope),
@@ -265,7 +265,7 @@ export const balanceQueriesHandler = {
 
   async preview(
     { env, user }: PlanCall,
-    scope: readonly string[] | null,
+    scope: readonly string[],
   ): Promise<BalanceQueryPreviewResponse> {
     const [plan, runners] = await Promise.all([
       loadBalanceQueryPlan(env.DB, { scope }),

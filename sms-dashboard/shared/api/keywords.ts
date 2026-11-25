@@ -37,7 +37,6 @@ const PRIORITY_MESSAGE = 'priority must be an integer';
 const CASE_SENSITIVE_MESSAGE = 'case_sensitive must be true or false';
 const WHOLE_WORD_MESSAGE = 'whole_word must be true or false';
 const ACTIVE_MESSAGE = 'is_active must be true or false';
-const MESSAGE_IDS_MESSAGE = 'messageIds must be an array of strings';
 
 const Required = v.pipe(v.string(REQUIRED_MESSAGE), v.nonEmpty(REQUIRED_MESSAGE));
 
@@ -85,40 +84,3 @@ export const UpdateKeywordBody = bodyObject(
   },
   {},
 );
-
-export const BatchTagsBody = bodyObject(
-  { messageIds: v.array(v.string(MESSAGE_IDS_MESSAGE), MESSAGE_IDS_MESSAGE) },
-  { messageIds: MESSAGE_IDS_MESSAGE },
-);
-
-const BatchTag = v.object({
-  id: v.number(),
-  keyword: v.string(),
-  tag: v.string(),
-  color: v.nullable(v.string()),
-  priority: v.nullable(v.number()),
-  position: v.number(),
-  length: v.number(),
-});
-
-export const BatchTagsResponse = v.object({
-  success: v.literal(true),
-  data: v.record(v.string(), v.array(BatchTag)),
-});
-
-export type BatchTagsResponse = v.InferOutput<typeof BatchTagsResponse>;
-
-export const MessageTag = v.object({
-  message_id: v.string(),
-  keyword_tag_id: v.number(),
-  matched_text: v.string(),
-  position: v.number(),
-  created_at: v.nullable(v.string()),
-  keyword: v.string(),
-  tag: v.string(),
-  color: v.nullable(v.string()),
-});
-
-export const MessageTagsResponse = v.object({ tags: v.array(MessageTag) });
-
-export type MessageTagsResponse = v.InferOutput<typeof MessageTagsResponse>;

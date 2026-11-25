@@ -50,8 +50,6 @@ const ExistingBillRow = v.object({
   currency: v.string(),
 });
 
-const CycleRow = v.object({ amount_minor: v.number(), currency: v.string() });
-
 interface BillFilters {
   carrier: string | undefined;
   accountId: string | undefined;
@@ -260,30 +258,6 @@ export function findProcessedBill(
   );
 }
 
-export function findProcessedBillAmong(
-  db: D1<'first'>,
-  sourceMessageIds: readonly string[],
-): Promise<{ bill_id: string } | null> {
-  const placeholders = sourceMessageIds.map(() => '?').join(', ');
-  return queryFirst(
-    db
-      .prepare(
-        `
-    SELECT id AS bill_id
-    FROM carrier_bills
-    WHERE source_message_id IN (${placeholders})
-    UNION ALL
-    SELECT bill_id
-    FROM carrier_bill_events
-    WHERE source_message_id IN (${placeholders})
-    LIMIT 1
-  `,
-      )
-      .bind(...sourceMessageIds, ...sourceMessageIds),
-    PriorEventRow,
-  );
-}
-
 export function insertBillIfAbsent(
   db: D1<'run'>,
   bill: {
@@ -331,21 +305,6 @@ export function findBillForCycle(db: D1<'first'>, accountId: string, dueDate: st
       )
       .bind(accountId, dueDate),
     ExistingBillRow,
-  );
-}
-
-export function findBillAmountForCycle(db: D1<'first'>, accountId: string, dueDate: string) {
-  return queryFirst(
-    db
-      .prepare(
-        `
-    SELECT amount_minor, currency
-    FROM carrier_bills
-    WHERE billing_account_id = ? AND due_date = ?
-  `,
-      )
-      .bind(accountId, dueDate),
-    CycleRow,
   );
 }
 

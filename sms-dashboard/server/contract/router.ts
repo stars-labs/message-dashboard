@@ -8,7 +8,6 @@ import { balanceRunnersHandler } from '../handlers/balance-runners.js';
 import { balanceSkillRunnerHandler } from '../handlers/balance-skill-runner.js';
 import { callsHandler } from '../handlers/calls.js';
 import { daemonCallsHandler } from '../handlers/daemon-calls.js';
-import { carrierBillingBackfillHandler } from '../handlers/carrier-billing-backfill.js';
 import { carrierBillsHandler } from '../handlers/carrier-bills.js';
 import { carrierWebBalanceHandler } from '../handlers/carrier-web-balance.js';
 import { controlHandler, recordHeartbeat } from '../handlers/control.js';
@@ -19,7 +18,6 @@ import { keywordsHandler } from '../handlers/keywords.js';
 import { messagesHandler } from '../handlers/messages.js';
 import { phonesHandler } from '../handlers/phones.js';
 import { usersHandler } from '../handlers/users.js';
-import { verificationHandler } from '../handlers/verification.js';
 import type { AuthorizedRunner } from '../utils/runner-auth.js';
 import type { AppRequest } from '../worker-context.js';
 
@@ -225,9 +223,6 @@ export const router = os.router({
     get: os.iccidMappings.get.handler(({ context, input }) =>
       iccidMappingsHandler.get(context.request, input.params.id),
     ),
-    byIccid: os.iccidMappings.byIccid.handler(({ context, input }) =>
-      iccidMappingsHandler.getByIccid(context.request, input.params.iccid),
-    ),
     create: os.iccidMappings.create.handler(({ context, input }) =>
       iccidMappingsHandler.create(context.request, input),
     ),
@@ -236,9 +231,6 @@ export const router = os.router({
     ),
     remove: os.iccidMappings.remove.handler(({ context, input }) =>
       iccidMappingsHandler.delete(context.request, input.params.id),
-    ),
-    bulk: os.iccidMappings.bulk.handler(({ context, input }) =>
-      iccidMappingsHandler.bulkImport(context.request, input),
     ),
   },
   keywords: {
@@ -258,12 +250,6 @@ export const router = os.router({
     history: os.keywords.history.handler(({ context, input }) =>
       keywordsHandler.history(context.request, input.params.id, input.body),
     ),
-    batchTags: os.keywords.batchTags.handler(({ context, input }) =>
-      keywordsHandler.batchTags(context.request, input),
-    ),
-    messageTags: os.keywords.messageTags.handler(({ context, input }) =>
-      keywordsHandler.messageTags(context.request, input.params.id),
-    ),
   },
   filters: {
     list: os.filters.list.handler(({ context }) => filtersHandler.list(context.request)),
@@ -280,11 +266,6 @@ export const router = os.router({
       filtersHandler.history(context.request, input.params.id, input.body),
     ),
   },
-  verification: {
-    reprocess: os.verification.reprocess.handler(({ context, input }) =>
-      verificationHandler.reprocess(context.request, input.query),
-    ),
-  },
   balanceChecks: {
     list: os.balanceChecks.list.handler(({ context, input }) =>
       balanceQueriesHandler.list(context.request, input.query),
@@ -294,9 +275,6 @@ export const router = os.router({
     ),
     detail: os.balanceChecks.detail.handler(({ context, input }) =>
       balanceQueriesHandler.detail(context.request, input.params.id),
-    ),
-    previewAll: os.balanceChecks.previewAll.handler(({ context }) =>
-      balanceQueriesHandler.preview(context.request, null),
     ),
     preview: os.balanceChecks.preview.handler(({ context, input }) =>
       balanceQueriesHandler.preview(context.request, input.phone_iccids),
@@ -321,16 +299,6 @@ export const router = os.router({
   carrierBills: {
     accounts: os.carrierBills.accounts.handler(({ context }) =>
       carrierBillsHandler.listAccounts(context.request),
-    ),
-    backfillPreview: os.carrierBills.backfillPreview.handler(({ context, input }) =>
-      carrierBillingBackfillHandler.preview(context.request, input),
-    ),
-    backfillExecute: os.carrierBills.backfillExecute.handler(({ context, input }) =>
-      carrierBillingBackfillHandler.execute(
-        context.request,
-        input.headers['idempotency-key'],
-        input.body,
-      ),
     ),
     list: os.carrierBills.list.handler(({ context, input }) =>
       carrierBillsHandler.list(context.request, input.query),

@@ -31,11 +31,6 @@ export const balanceChecks = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ query: BalanceCheckStatusQuery }))
     .output(BalanceCheckStatusResponse),
-  previewAll: route(
-    { kind: 'user', permission: 'balances.query' },
-    'GET',
-    '/api/balance-checks/query-preview',
-  ).output(BalanceQueryPreviewResponse),
   preview: route(
     { kind: 'user', permission: 'balances.query' },
     'POST',

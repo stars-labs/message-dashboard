@@ -610,13 +610,15 @@ const PreviewBody = v.object({
 });
 
 describe('/api/balance-checks/query-preview', () => {
-  test('plans every SIM on a GET', async () => {
+  test('plans every SIM in the scope', async () => {
     enableDirectMobileProfile();
     insertSim({ iccid: 'sim-1', index: 1 });
     insertSim({ iccid: 'sim-2', index: 2, online: false });
     insertSim({ iccid: 'sim-3', index: 3, carrier: 'Singtel', country: 'SG' });
 
-    const response = await call('GET', '/api/balance-checks/query-preview');
+    const response = await call('POST', '/api/balance-checks/query-preview', {
+      body: { phone_iccids: ['sim-1', 'sim-2', 'sim-3'] },
+    });
     const body = await read(response, PreviewBody);
 
     expect(response.status).toBe(200);
@@ -683,7 +685,8 @@ describe('/api/balance-checks/query-preview', () => {
   });
 
   test('requires a signed-in user', async () => {
-    const response = await call('GET', '/api/balance-checks/query-preview', {
+    const response = await call('POST', '/api/balance-checks/query-preview', {
+      body: { phone_iccids: ['sim-1'] },
       token: null,
       database: untouchable,
     });
@@ -2295,7 +2298,9 @@ describe('row schemas', () => {
 
     const errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      const response = await call('GET', '/api/balance-checks/query-preview');
+      const response = await call('POST', '/api/balance-checks/query-preview', {
+        body: { phone_iccids: [ICCID] },
+      });
       expect(response.status).toBe(500);
     } finally {
       errorSpy.mockRestore();

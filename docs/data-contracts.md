@@ -76,13 +76,11 @@
   fixtures, and a controlled preview; it starts disabled.
 
 Browser users need `bills.read` to list accounts and read bills. Administrators need
-`bills.write` for account configuration, bill actions, and historical backfill.
+`bills.write` for account configuration and bill actions.
 
 Carrier-neutral routes:
 
 - `GET /api/carrier-billing/accounts`
-- `POST /api/carrier-billing/backfill/preview`
-- `POST /api/carrier-billing/backfill/execute`
 - `GET /api/carrier-bills`
 - `GET /api/carrier-bills/:id`
 - `POST /api/carrier-bills/:id/payment-planned`
@@ -91,6 +89,4 @@ Carrier-neutral routes:
 - `POST /api/carrier-bills/:id/reopen`
 
 Every user billing write takes the actor from the verified Auth0 identity. Bill
-actions and backfill execution require an idempotency key and the exact expected
-version. Backfill execution additionally requires the exact digest returned by a
-read-only preview.
+actions require an idempotency key and the exact expected version.

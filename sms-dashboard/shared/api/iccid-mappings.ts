@@ -152,25 +152,3 @@ export const UpdateIccidMappingBody = bodyObject(
   { phone_number: UPDATE_REQUIRED_MESSAGE, sim_index: UPDATE_REQUIRED_MESSAGE },
   UPDATE_REQUIRED_MESSAGE,
 );
-
-const MAPPINGS_MESSAGE = 'Mappings must be an array';
-
-/** Each mapping is checked on its own, so one bad row fails alone. */
-export const BulkIccidMappingsBody = bodyObject(
-  { mappings: v.array(v.unknown(), MAPPINGS_MESSAGE) },
-  { mappings: MAPPINGS_MESSAGE },
-  MAPPINGS_MESSAGE,
-);
-
-export const BulkIccidMappingsResponse = v.object({
-  success: v.literal(true),
-  summary: v.object({
-    total: v.number(),
-    created: v.number(),
-    updated: v.number(),
-    failed: v.number(),
-  }),
-  errors: v.optional(v.array(v.string())),
-});
-
-export type BulkIccidMappingsResponse = v.InferOutput<typeof BulkIccidMappingsResponse>;
