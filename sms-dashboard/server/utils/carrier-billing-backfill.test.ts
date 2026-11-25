@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Statement } from '../lib/d1.js';
 import { AccountNotReadyError, previewCarrierBillBackfill } from './carrier-billing-backfill.js';
@@ -29,40 +30,20 @@ let database: Database;
 let db: D1;
 let preparedSql: string[];
 
-async function applyMigration(name: string) {
-  database.run(await Bun.file(new URL(`../../migrations/${name}`, import.meta.url)).text());
-}
-
 beforeEach(async () => {
   preparedSql = [];
   database = new Database(':memory:');
+  await createSchema(database);
   database.run(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE sims (
-      iccid TEXT PRIMARY KEY,
-      sim_index INTEGER,
-      service_type TEXT NOT NULL,
-      country_code TEXT,
-      carrier TEXT
-    );
-    CREATE VIEW device_view AS SELECT
-      iccid, sim_index, service_type, country_code AS country, carrier
-    FROM sims;
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      phone_iccid TEXT,
-      phone_number TEXT,
-      content TEXT NOT NULL,
-      timestamp TIMESTAMP,
-      type TEXT
-    );
-    INSERT INTO sims VALUES
-      ('notification-sim', 79, 'postpaid', 'SG', 'Singtel'),
-      ('other-sim', 80, 'postpaid', 'SG', 'Singtel'),
-      ('prepaid-sim', 81, 'prepaid', 'SG', 'Singtel');
+    INSERT INTO sims (iccid, sim_index, phone_number, service_type, service_type_source,
+      service_type_verified_at, country_code, carrier) VALUES
+      ('notification-sim', 79, '+6590000079', 'postpaid', 'contract_or_bill', '2026-01-01',
+        'SG', 'Singtel'),
+      ('other-sim', 80, '+6590000080', 'postpaid', 'contract_or_bill', '2026-01-01',
+        'SG', 'Singtel'),
+      ('prepaid-sim', 81, '+6590000081', 'prepaid', 'carrier_account', '2026-01-01',
+        'SG', 'Singtel')
   `);
-  await applyMigration('066_add_carrier_billing.sql');
-  await applyMigration('067_add_carrier_billing_account_events.sql');
   database
     .query(
       `
@@ -82,7 +63,7 @@ beforeEach(async () => {
       billing_account_id, sim_iccid, verification_source, verified_at, verified_by
     ) VALUES (
       'account-1', 'notification-sim', 'contract_or_bill', '2026-01-01', 'auth0|admin'
-    );
+    )
   `);
   const real = sqliteD1(database);
   db = {

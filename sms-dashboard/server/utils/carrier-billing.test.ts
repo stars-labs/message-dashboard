@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Statement } from '../lib/d1.js';
 import {
@@ -26,39 +27,17 @@ let preparedSql: string[];
 beforeEach(async () => {
   preparedSql = [];
   database = new Database(':memory:');
+  await createSchema(database);
   database.run(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE sims (
-      iccid TEXT PRIMARY KEY,
-      service_type TEXT NOT NULL,
-      country_code TEXT,
-      carrier TEXT,
-      sim_index INTEGER
-    );
-    CREATE VIEW device_view AS
-      SELECT iccid, service_type, country_code AS country, carrier, sim_index FROM sims;
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      phone_iccid TEXT,
-      phone_number TEXT,
-      content TEXT NOT NULL,
-      timestamp TIMESTAMP,
-      type TEXT
-    );
-    INSERT INTO sims VALUES
-      ('notification-sim', 'postpaid', 'SG', 'Singtel', 79),
-      ('prepaid-sim', 'prepaid', 'SG', 'Singtel', 80),
-      ('wrong-carrier', 'postpaid', 'SG', 'StarHub', 81),
-      ('unnumbered-sim', 'postpaid', 'SG', 'Singtel', NULL);
+    INSERT INTO sims (iccid, service_type, service_type_source, service_type_verified_at,
+      country_code, carrier, sim_index, phone_number) VALUES
+      ('notification-sim', 'postpaid', 'contract_or_bill', '2026-08-01 00:00:00',
+        'SG', 'Singtel', 79, '+6590000079'),
+      ('prepaid-sim', 'prepaid', 'carrier_account', '2026-08-01 00:00:00',
+        'SG', 'Singtel', 80, '+6590000080'),
+      ('wrong-carrier', 'postpaid', 'contract_or_bill', '2026-08-01 00:00:00',
+        'SG', 'StarHub', 81, '+6590000081');
   `);
-  const migration = await Bun.file(
-    new URL('../../migrations/066_add_carrier_billing.sql', import.meta.url),
-  ).text();
-  database.run(migration);
-  const streamMigration = await Bun.file(
-    new URL('../../migrations/069_unique_active_billing_stream_per_sim.sql', import.meta.url),
-  ).text();
-  database.run(streamMigration);
   const real = sqliteD1(database);
   db = {
     prepare: (sql) => {
@@ -194,12 +173,6 @@ describe('carrier bill SMS processing', () => {
       },
     ]);
     expect(events()).toEqual([{ event_type: 'detected', source_message_id: 'message-1' }]);
-  });
-
-  test('names the account after a SIM without an index', async () => {
-    await processCarrierBillMessage(db, insertMessage({ iccid: 'unnumbered-sim' }));
-
-    expect(accounts()).toMatchObject([{ display_name: 'S00 Singtel postpaid' }]);
   });
 
   test('is idempotent when the same source message is retried', async () => {

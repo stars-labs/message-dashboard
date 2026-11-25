@@ -22,7 +22,7 @@ const AccountMemberRow = v.object({
   ...CarrierBillingLinkedSim.entries,
 });
 
-const ReceivingSimRow = v.object({ iccid: v.string(), sim_index: v.nullable(v.number()) });
+const ReceivingSimRow = v.object({ iccid: v.string(), sim_index: v.number() });
 
 export type ReceivingSim = v.InferOutput<typeof ReceivingSimRow>;
 

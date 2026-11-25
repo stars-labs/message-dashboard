@@ -55,7 +55,7 @@ async function ensureBillingStream(
   }
 
   const accountId = crypto.randomUUID();
-  const displayIndex = String(sim.sim_index ?? '').padStart(2, '0');
+  const displayIndex = String(sim.sim_index).padStart(2, '0');
   await insertSingtelAccountIfAbsent(db, {
     id: accountId,
     displayName: `S${displayIndex} Singtel postpaid`,
