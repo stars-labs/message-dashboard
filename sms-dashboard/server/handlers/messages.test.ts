@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import { memoryKv } from '../../test/memory-kv.js';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
 import type { D1Statement } from '../lib/d1.js';
@@ -45,41 +47,19 @@ interface MessageSeed {
   created_at?: string;
   updated_at?: string;
   filter_status?: string;
-  filter_rule_id?: string;
   purpose?: string;
 }
 
-function database(messages: MessageSeed[] = []) {
-  const d1 = sqliteD1();
-  d1.db.run(`CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    phone_iccid TEXT,
-    phone_number TEXT,
-    content TEXT NOT NULL,
-    timestamp DATETIME,
-    type TEXT,
-    status TEXT,
-    recipient TEXT,
-    verification_code TEXT,
-    created_at DATETIME,
-    updated_at DATETIME,
-    error_message TEXT,
-    sms_id TEXT,
-    filter_status TEXT NOT NULL DEFAULT 'pending',
-    filter_rule_id INTEGER,
-    purpose TEXT NOT NULL DEFAULT 'user',
-    balance_check_id TEXT,
-    processing_session_id TEXT
-  )`);
-  d1.db.run(`CREATE TABLE device_view (
-    iccid TEXT, number TEXT, carrier TEXT, sim_status TEXT, sim_index INTEGER, country TEXT
-  )`);
+async function database(messages: MessageSeed[] = []) {
+  const sqlite = new Database(':memory:');
+  await createSchema(sqlite);
+  const d1 = sqliteD1(sqlite);
   for (const message of messages) {
     d1.db
       .query(
         `INSERT INTO messages (id, phone_iccid, phone_number, content, timestamp, type,
-           created_at, updated_at, filter_status, filter_rule_id, purpose)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           created_at, updated_at, filter_status, purpose)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -91,7 +71,6 @@ function database(messages: MessageSeed[] = []) {
         message.created_at ?? '2026-09-02 00:00:00',
         message.updated_at ?? '2026-09-02 00:00:00',
         message.filter_status ?? 'clean',
-        message.filter_rule_id ?? null,
         message.purpose ?? 'user',
       );
   }
@@ -121,18 +100,21 @@ function database(messages: MessageSeed[] = []) {
   };
 }
 
-type TestDb = ReturnType<typeof database>;
+type TestDb = Awaited<ReturnType<typeof database>>;
 
+// device_view reports the SIM active while its modem is connected and reads it,
+// offline once the modem disconnects.
 function addDevice(
   { db }: TestDb,
-  device: { iccid: string; number: string; carrier: string; sim_status: string; country: string },
+  device: { iccid: string; number: string; carrier: string; online: boolean; country: string },
 ) {
-  db.query(`INSERT INTO device_view VALUES (?, ?, ?, ?, 1, ?)`).run(
+  db.query(
+    `INSERT INTO sims (iccid, sim_index, phone_number, country_code, carrier, imei)
+     VALUES (?, 1, ?, ?, ?, 'imei-1')`,
+  ).run(device.iccid, device.number, device.country, device.carrier);
+  db.query(`INSERT INTO modems (equipment_id, status, detected_iccid) VALUES ('imei-1', ?, ?)`).run(
+    device.online ? 'connected' : 'disconnected',
     device.iccid,
-    device.number,
-    device.carrier,
-    device.sim_status,
-    device.country,
   );
 }
 
@@ -140,7 +122,7 @@ const SINGTEL = {
   iccid: 'iccid-1',
   number: '+6512345678',
   carrier: 'Singtel',
-  sim_status: 'active',
+  online: true,
   country: 'SG',
 };
 
@@ -216,7 +198,7 @@ function stamp(index: number): string {
 
 describe('message list D1 reads', () => {
   test('incremental sync bounds the list by ingestion time without a joined device scan', async () => {
-    const db = database([{ id: 'message-1' }]);
+    const db = await database([{ id: 'message-1' }]);
     const since = '2026-09-02T00:00:00.000Z';
 
     const response = await list(
@@ -240,7 +222,7 @@ describe('message list D1 reads', () => {
   });
 
   test('full sync uses one extra row instead of scanning exact inbox counts', async () => {
-    const db = database(
+    const db = await database(
       Array.from({ length: 101 }, (_, index) => ({
         id: `message-${String(index)}`,
         timestamp: stamp(index),
@@ -262,7 +244,7 @@ describe('message list D1 reads', () => {
   });
 
   test('enriches only the returned page ICCIDs after the bounded message query', async () => {
-    const db = database([
+    const db = await database([
       { id: 'message-1', phone_iccid: 'iccid-1', phone_number: 'sender-1', timestamp: stamp(3) },
       { id: 'message-2', phone_iccid: 'iccid-1', phone_number: 'sender-2', timestamp: stamp(2) },
       { id: 'message-3', phone_iccid: null, phone_number: 'sender-3', timestamp: stamp(1) },
@@ -290,7 +272,7 @@ describe('message list D1 reads', () => {
   });
 
   test('returns a stable keyset cursor for every incremental backlog page', async () => {
-    const db = database(
+    const db = await database(
       Array.from({ length: 101 }, (_, index) => ({
         id: `message-${String(index).padStart(3, '0')}`,
         created_at: stamp(index),
@@ -313,7 +295,7 @@ describe('message list D1 reads', () => {
   });
 
   test('continues incremental pages strictly before the last delivered key', async () => {
-    const db = database();
+    const db = await database();
     const beforeCreatedAt = '2026-09-02 00:00:10';
     const beforeId = 'message-100';
 
@@ -330,7 +312,7 @@ describe('message list D1 reads', () => {
   });
 
   test('chunks device enrichment below D1s 100-bound-parameter limit', async () => {
-    const db = database(
+    const db = await database(
       Array.from({ length: 205 }, (_, index) => ({
         id: `message-${String(index)}`,
         phone_iccid: `iccid-${String(index)}`,
@@ -347,7 +329,7 @@ describe('message list D1 reads', () => {
   });
 
   test('rejects incremental requests with a bad timestamp, offset or cursor', async () => {
-    const db = database();
+    const db = await database();
     const cases = [
       ['?since=garbage', 'Invalid since timestamp'],
       ['?since=2026-09-02T00:00:00Z&offset=5', 'Incremental sync uses a keyset cursor, not offset'],
@@ -367,7 +349,8 @@ describe('message list D1 reads', () => {
   });
 
   test('answers 500 when a row does not match the messages schema', async () => {
-    const db = database([{ id: 'message-1', filter_rule_id: 'x' }]);
+    const db = await database([{ id: 'message-1' }]);
+    db.db.run(`UPDATE messages SET content = X'00' WHERE id = 'message-1'`);
 
     const response = await list(db);
 
@@ -381,21 +364,21 @@ describe('message list D1 reads', () => {
 
 describe('GET /api/messages authorization', () => {
   test('a viewer may read messages', async () => {
-    expect((await list(database(), '', VIEWER)).status).toBe(200);
+    expect((await list(await database(), '', VIEWER)).status).toBe(200);
   });
 
   test('answers 401 without a credential the middleware accepts', async () => {
-    expect((await list(database(), '', 'unknown')).status).toBe(401);
+    expect((await list(await database(), '', 'unknown')).status).toBe(401);
   });
 });
 
 describe('message list on SQLite', () => {
   test('hides spam and carrier maintenance traffic unless spam is requested', async () => {
-    const db = database([
+    const db = await database([
       { id: 'clean', filter_status: 'clean', timestamp: '2026-09-02 00:00:03' },
       { id: 'pending', filter_status: 'pending', timestamp: '2026-09-02 00:00:02' },
       { id: 'spam', filter_status: 'spam', timestamp: '2026-09-02 00:00:01' },
-      { id: 'balance', purpose: 'balance', filter_status: 'clean' },
+      { id: 'balance', purpose: 'balance_maintenance', filter_status: 'clean' },
     ]);
 
     expect(await idsOf(db, '')).toEqual(['clean', 'pending']);
@@ -403,7 +386,7 @@ describe('message list on SQLite', () => {
   });
 
   test('pages by offset, newest first, and reports the next offset', async () => {
-    const db = database(
+    const db = await database(
       ['a', 'b', 'c'].map((id, index) => ({
         id,
         timestamp: `2026-09-02 00:00:0${String(3 - index)}`,
@@ -419,7 +402,7 @@ describe('message list on SQLite', () => {
   });
 
   test('filters by SIM and fills in the device columns', async () => {
-    const db = database([
+    const db = await database([
       { id: 'mine', phone_iccid: 'iccid-1' },
       { id: 'other', phone_iccid: 'iccid-2' },
     ]);
@@ -437,7 +420,7 @@ describe('message list on SQLite', () => {
   });
 
   test('incremental pages walk the keyset cursor without repeating a row', async () => {
-    const db = database(
+    const db = await database(
       ['m1', 'm2', 'm3'].map((id, index) => ({
         id,
         created_at: `2026-09-02 00:00:0${String(index)}`,
@@ -457,7 +440,7 @@ describe('message list on SQLite', () => {
   });
 
   test('an incremental sync also delivers a sent row whose status moved', async () => {
-    const db = database([
+    const db = await database([
       {
         id: 'sent-earlier',
         type: 'sent',
@@ -493,7 +476,7 @@ describe('outbound status changes reach the dashboard', () => {
   }
 
   test('an incremental sync carries an already-known row whose status moved', async () => {
-    const db = database([
+    const db = await database([
       { id: 'new-inbound', content: 'code 1234', created_at: '2026-09-02 00:00:10' },
       {
         id: 'sent-earlier',
@@ -518,7 +501,7 @@ describe('outbound status changes reach the dashboard', () => {
   });
 
   test('a row already in the page is not sent twice', async () => {
-    const db = database([
+    const db = await database([
       {
         id: 'same-row',
         type: 'sent',
@@ -534,7 +517,7 @@ describe('outbound status changes reach the dashboard', () => {
   });
 
   test('a full load does not run the refresh query', async () => {
-    const db = database([
+    const db = await database([
       {
         id: 'x',
         type: 'sent',
@@ -575,7 +558,7 @@ describe('POST /api/messages/send', () => {
   });
 
   test('stores a sending message addressed to the normalised recipient', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
 
     const response = await send(db, valid);
@@ -607,14 +590,14 @@ describe('POST /api/messages/send', () => {
   });
 
   test('a viewer may send', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
 
     expect((await send(db, valid, VIEWER)).status).toBe(200);
   });
 
   test('answers 401 without a credential the middleware accepts', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
 
     expect((await send(db, valid, 'unknown')).status).toBe(401);
@@ -622,7 +605,7 @@ describe('POST /api/messages/send', () => {
   });
 
   test('answers 400 when a required field is missing or empty', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
 
     for (const bad of [
@@ -642,7 +625,7 @@ describe('POST /api/messages/send', () => {
   });
 
   test('answers 400 for a recipient that is not a phone number', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
 
     const response = await send(db, { ...valid, recipient: '+65123\r\nAT+CMGD=1' });
@@ -653,7 +636,7 @@ describe('POST /api/messages/send', () => {
   });
 
   test('answers 400 when the SIM is unknown', async () => {
-    const response = await send(database(), valid);
+    const response = await send(await database(), valid);
 
     expect(response.status).toBe(400);
     expect(await problemOf(response)).toMatchObject({
@@ -663,8 +646,8 @@ describe('POST /api/messages/send', () => {
   });
 
   test('answers 400 when the SIM is not active', async () => {
-    const db = database();
-    addDevice(db, { ...SINGTEL, sim_status: 'offline' });
+    const db = await database();
+    addDevice(db, { ...SINGTEL, online: false });
 
     const response = await send(db, valid);
 
@@ -676,7 +659,7 @@ describe('POST /api/messages/send', () => {
   });
 
   test('answers 500 when the message cannot be stored', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
     db.db.run('DROP TABLE messages');
 
@@ -690,7 +673,7 @@ describe('POST /api/messages/send', () => {
   });
 
   test('answers 400 for a body that is not JSON', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
 
     const response = await send(db, 'not json');
@@ -700,7 +683,7 @@ describe('POST /api/messages/send', () => {
   });
 
   test('answers 400 for fields that are not strings instead of sending their text', async () => {
-    const db = database();
+    const db = await database();
     addDevice(db, SINGTEL);
 
     for (const bad of [

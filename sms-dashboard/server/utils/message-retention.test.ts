@@ -1,4 +1,6 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { countExpiredMessages, purgeExpiredMessages } from './message-retention.js';
 
@@ -6,18 +8,26 @@ function isoDaysAgo(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-function databaseWith(messages: { id: string; daysAgo: number; tags?: number }[]) {
-  const d1 = sqliteD1();
-  d1.db.run('CREATE TABLE messages (id TEXT PRIMARY KEY, timestamp DATETIME)');
-  d1.db.run(
-    'CREATE TABLE message_tags (message_id TEXT NOT NULL, keyword_tag_id INTEGER NOT NULL, position INTEGER NOT NULL)',
-  );
+async function databaseWith(messages: { id: string; daysAgo: number; tags?: number }[]) {
+  const database = new Database(':memory:');
+  await createSchema(database);
+  const d1 = sqliteD1(database);
+  const tagCount = Math.max(0, ...messages.map((message) => message.tags ?? 0));
+  for (let tag = 1; tag <= tagCount; tag++) {
+    d1.db
+      .query('INSERT INTO keyword_tags (id, keyword, tag) VALUES (?, ?, ?)')
+      .run(tag, `keyword-${String(tag)}`, `tag-${String(tag)}`);
+  }
   for (const message of messages) {
     d1.db
-      .query('INSERT INTO messages (id, timestamp) VALUES (?, ?)')
-      .run(message.id, isoDaysAgo(message.daysAgo));
-    for (let tag = 0; tag < (message.tags ?? 0); tag++) {
-      d1.db.query('INSERT INTO message_tags VALUES (?, ?, 0)').run(message.id, tag);
+      .query('INSERT INTO messages (id, content, timestamp) VALUES (?, ?, ?)')
+      .run(message.id, 'body', isoDaysAgo(message.daysAgo));
+    for (let tag = 1; tag <= (message.tags ?? 0); tag++) {
+      d1.db
+        .query(
+          'INSERT INTO message_tags (message_id, keyword_tag_id, matched_text, position) VALUES (?, ?, ?, 0)',
+        )
+        .run(message.id, tag, 'body');
     }
   }
   return d1;
@@ -33,7 +43,7 @@ function ids(d1: ReturnType<typeof sqliteD1>, table: 'messages' | 'message_tags'
 
 describe('countExpiredMessages', () => {
   test('counts only messages older than twelve months', async () => {
-    const d1 = databaseWith([
+    const d1 = await databaseWith([
       { id: 'old-1', daysAgo: 400 },
       { id: 'old-2', daysAgo: 370 },
       { id: 'recent', daysAgo: 300 },
@@ -42,13 +52,13 @@ describe('countExpiredMessages', () => {
   });
 
   test('is zero for an empty table', async () => {
-    expect(await countExpiredMessages(databaseWith([]))).toBe(0);
+    expect(await countExpiredMessages(await databaseWith([]))).toBe(0);
   });
 });
 
 describe('purgeExpiredMessages', () => {
   test('deletes expired messages with their tags and keeps the rest', async () => {
-    const d1 = databaseWith([
+    const d1 = await databaseWith([
       { id: 'old-1', daysAgo: 400, tags: 2 },
       { id: 'old-2', daysAgo: 370, tags: 1 },
       { id: 'recent', daysAgo: 30, tags: 1 },
@@ -59,7 +69,7 @@ describe('purgeExpiredMessages', () => {
   });
 
   test('works through several batches', async () => {
-    const d1 = databaseWith(
+    const d1 = await databaseWith(
       Array.from({ length: 5 }, (_, i) => ({ id: `old-${String(i)}`, daysAgo: 400 + i })),
     );
     expect(await purgeExpiredMessages(d1, { batchSize: 2 })).toEqual({
@@ -71,7 +81,7 @@ describe('purgeExpiredMessages', () => {
   });
 
   test('reports exhaustion when the batch cap stops it with work left', async () => {
-    const d1 = databaseWith(
+    const d1 = await databaseWith(
       Array.from({ length: 5 }, (_, i) => ({ id: `old-${String(i)}`, daysAgo: 400 + i })),
     );
     expect(await purgeExpiredMessages(d1, { batchSize: 2, maxBatches: 1 })).toEqual({
@@ -83,7 +93,7 @@ describe('purgeExpiredMessages', () => {
   });
 
   test('deletes the oldest messages first', async () => {
-    const d1 = databaseWith([
+    const d1 = await databaseWith([
       { id: 'older', daysAgo: 500 },
       { id: 'old', daysAgo: 400 },
     ]);

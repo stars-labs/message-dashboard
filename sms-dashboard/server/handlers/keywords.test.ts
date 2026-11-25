@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 
 let errorSpy: Mock<typeof console.error>;
@@ -12,42 +14,10 @@ afterEach(() => {
   errorSpy.mockRestore();
 });
 
-function database() {
-  const d1 = sqliteD1();
-  d1.db.run(`
-    CREATE TABLE keyword_tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      keyword TEXT NOT NULL,
-      tag TEXT NOT NULL,
-      color TEXT DEFAULT '#3B82F6',
-      priority INTEGER DEFAULT 0,
-      is_active BOOLEAN DEFAULT TRUE,
-      case_sensitive BOOLEAN DEFAULT FALSE,
-      whole_word BOOLEAN DEFAULT FALSE,
-      created_by TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      type TEXT,
-      content TEXT NOT NULL,
-      verification_code TEXT,
-      filter_status TEXT NOT NULL DEFAULT 'pending',
-      purpose TEXT NOT NULL DEFAULT 'user',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE message_tags (
-      message_id TEXT NOT NULL,
-      keyword_tag_id INTEGER NOT NULL,
-      matched_text TEXT NOT NULL,
-      position INTEGER NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (message_id, keyword_tag_id, position),
-      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-      FOREIGN KEY (keyword_tag_id) REFERENCES keyword_tags(id) ON DELETE CASCADE
-    );
-  `);
+async function database() {
+  const sqlite = new Database(':memory:');
+  await createSchema(sqlite);
+  const d1 = sqliteD1(sqlite);
   const statements: string[] = [];
   const recorded = {
     ...d1,
@@ -59,7 +29,7 @@ function database() {
   return { d1: recorded, db: d1.db, statements };
 }
 
-type TestDb = ReturnType<typeof database>;
+type TestDb = Awaited<ReturnType<typeof database>>;
 
 import { memoryKv } from '../../test/memory-kv.js';
 import { callWorker } from '../../test/worker-harness.js';
@@ -174,7 +144,7 @@ function keywordRows({ db }: TestDb) {
 
 describe('keyword rule D1 reads', () => {
   test('creating a keyword never scans or writes historical messages', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await call(db, 'POST', '/api/keywords', {
       body: JSON.stringify({
@@ -193,7 +163,7 @@ describe('keyword rule D1 reads', () => {
   });
 
   test('updates metadata only and rejects changes to matching identity', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
 
     const update = (body: unknown) =>
@@ -211,7 +181,7 @@ describe('keyword rule D1 reads', () => {
   });
 
   test('batch tag reads hide inactive keyword rules', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code', tag: 'Active' });
     addKeyword(db, { keyword: 'pin', tag: 'Inactive', is_active: 0 });
     addMessage(db, { id: 'm-1' });
@@ -245,26 +215,26 @@ describe('authorization', () => {
 
   for (const { method, path, viewerAllowed } of guarded) {
     test(`${method} ${path} answers 401 without a credential the middleware accepts`, async () => {
-      const response = await call(database(), method, path, { token: 'unknown' });
+      const response = await call(await database(), method, path, { token: 'unknown' });
       expect(response.status).toBe(401);
     });
 
     if (!viewerAllowed) {
       test(`${method} ${path} answers 403 to a role without the permission`, async () => {
-        const response = await call(database(), method, path, { token: VIEWER });
+        const response = await call(await database(), method, path, { token: VIEWER });
         expect(response.status).toBe(403);
       });
     }
   }
 
   test('a viewer may read message tags', async () => {
-    const db = database();
+    const db = await database();
     const response = await call(db, 'GET', '/api/messages/m-1/tags', { token: VIEWER });
     expect(response.status).toBe(200);
   });
 
   test('a viewer may read batch tags', async () => {
-    const db = database();
+    const db = await database();
     const response = await call(db, 'POST', '/api/messages/batch-tags', {
       token: VIEWER,
       body: '{"messageIds":["m-1"]}',
@@ -275,7 +245,7 @@ describe('authorization', () => {
 
 describe('GET /api/keywords', () => {
   test('lists every keyword with its usage count, highest priority first', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'beta', priority: 1 });
     addKeyword(db, { keyword: 'alpha', priority: 1 });
     addKeyword(db, { keyword: 'gamma', priority: 5 });
@@ -299,7 +269,7 @@ describe('GET /api/keywords', () => {
   });
 
   test('answers every column of the row', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code', tag: 'OTP', priority: 3, case_sensitive: 1 });
 
     const body = await bodyOf(await call(db, 'GET', '/api/keywords'));
@@ -323,7 +293,7 @@ describe('GET /api/keywords', () => {
   });
 
   test('answers 500 when the read fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE message_tags');
 
     const response = await call(db, 'GET', '/api/keywords');
@@ -342,7 +312,7 @@ describe('GET /api/keywords/:id', () => {
   }
 
   test('answers the keyword with its usage count', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
     addMessage(db, { id: 'm-1' });
     addTag(db, { message_id: 'm-1', keyword_tag_id: 1, position: 0 });
@@ -356,7 +326,7 @@ describe('GET /api/keywords/:id', () => {
   });
 
   test('answers 404 to a keyword that does not exist', async () => {
-    const response = await fetchOne(database(), '9');
+    const response = await fetchOne(await database(), '9');
 
     expect(response.status).toBe(404);
     expect(await problemOf(response)).toMatchObject({
@@ -366,14 +336,14 @@ describe('GET /api/keywords/:id', () => {
   });
 
   test('answers 404 to an id that is not a number', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
 
     expect((await fetchOne(db, 'abc')).status).toBe(404);
   });
 
   test('answers 500 when the read fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE keyword_tags');
 
     const response = await fetchOne(db, '1');
@@ -392,7 +362,7 @@ describe('POST /api/keywords', () => {
   }
 
   test('stores the keyword and answers the stored row', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await create(
       db,
@@ -423,7 +393,7 @@ describe('POST /api/keywords', () => {
   });
 
   test('an omitted colour, priority and options take the defaults', async () => {
-    const db = database();
+    const db = await database();
 
     await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP' }));
 
@@ -442,7 +412,7 @@ describe('POST /api/keywords', () => {
   });
 
   test('a blank or null colour takes the default', async () => {
-    const db = database();
+    const db = await database();
 
     await create(db, JSON.stringify({ keyword: 'a1', tag: 'T', color: '' }));
     await create(db, JSON.stringify({ keyword: 'a2', tag: 'T', color: null }));
@@ -451,7 +421,7 @@ describe('POST /api/keywords', () => {
   });
 
   test('a null priority is stored as 0', async () => {
-    const db = database();
+    const db = await database();
 
     await create(db, JSON.stringify({ keyword: 'a1', tag: 'T', priority: null }));
 
@@ -459,7 +429,7 @@ describe('POST /api/keywords', () => {
   });
 
   test('case_sensitive and whole_word are stored as given', async () => {
-    const db = database();
+    const db = await database();
 
     await create(
       db,
@@ -501,7 +471,7 @@ describe('POST /api/keywords', () => {
 
   for (const [name, body, message] of malformed) {
     test(`answers 400 to ${name} and writes nothing`, async () => {
-      const db = database();
+      const db = await database();
 
       const response = await create(db, JSON.stringify(body));
 
@@ -512,7 +482,7 @@ describe('POST /api/keywords', () => {
   }
 
   test('a keyword that only an inactive keyword uses can be created again', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code', is_active: 0 });
 
     const response = await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP' }));
@@ -531,7 +501,7 @@ describe('POST /api/keywords', () => {
 
   for (const [name, body] of required) {
     test(`answers 400 to ${name} and writes nothing`, async () => {
-      const db = database();
+      const db = await database();
 
       const response = await create(db, JSON.stringify(body));
 
@@ -560,7 +530,7 @@ describe('POST /api/keywords', () => {
 
   for (const [name, color, message] of badColors) {
     test(`answers 400 to ${name} and writes nothing`, async () => {
-      const db = database();
+      const db = await database();
 
       const response = await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP', color }));
 
@@ -571,7 +541,7 @@ describe('POST /api/keywords', () => {
   }
 
   test('answers 409 to a keyword that is already active', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
 
     const response = await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP' }));
@@ -584,7 +554,7 @@ describe('POST /api/keywords', () => {
   });
 
   test('answers 400 when the body is not JSON', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await create(db, 'not json');
 
@@ -594,7 +564,7 @@ describe('POST /api/keywords', () => {
   });
 
   test('answers 500 with the detail when the write fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE keyword_tags');
 
     const response = await create(db, JSON.stringify({ keyword: 'code', tag: 'OTP' }));
@@ -612,14 +582,14 @@ describe('PUT /api/keywords/:id', () => {
     return call(db, 'PUT', `/api/keywords/${id}`, { body });
   }
 
-  function seeded(overrides: Parameters<typeof addKeyword>[1] = { keyword: 'code' }) {
-    const db = database();
+  async function seeded(overrides: Parameters<typeof addKeyword>[1] = { keyword: 'code' }) {
+    const db = await database();
     addKeyword(db, overrides);
     return db;
   }
 
   test('changes the tag, colour, priority and state, and answers the stored row', async () => {
-    const db = seeded();
+    const db = await seeded();
 
     const response = await update(
       db,
@@ -640,7 +610,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('answers 404 when the keyword is deleted before the update lands', async () => {
-    const db = seeded();
+    const db = await seeded();
     const racing: TestDb = {
       ...db,
       d1: {
@@ -662,7 +632,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('an empty tag keeps the stored one', async () => {
-    const db = seeded();
+    const db = await seeded();
 
     await update(db, JSON.stringify({ tag: '' }));
 
@@ -670,7 +640,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('omitted fields keep the stored values', async () => {
-    const db = seeded({ keyword: 'code', priority: 4, is_active: 0, color: '#112233' });
+    const db = await seeded({ keyword: 'code', priority: 4, is_active: 0, color: '#112233' });
 
     await update(db, JSON.stringify({ tag: 'Login' }));
 
@@ -680,7 +650,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('is_active turns a keyword on', async () => {
-    const db = seeded({ keyword: 'code', is_active: 0 });
+    const db = await seeded({ keyword: 'code', is_active: 0 });
 
     await update(db, JSON.stringify({ is_active: true }));
 
@@ -688,7 +658,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('a null priority is stored as 0', async () => {
-    const db = seeded({ keyword: 'code', priority: 4 });
+    const db = await seeded({ keyword: 'code', priority: 4 });
 
     await update(db, JSON.stringify({ priority: null }));
 
@@ -696,7 +666,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('a null tag keeps the stored one', async () => {
-    const db = seeded();
+    const db = await seeded();
 
     await update(db, JSON.stringify({ tag: null }));
 
@@ -721,7 +691,7 @@ describe('PUT /api/keywords/:id', () => {
 
   for (const [name, body, message] of malformed) {
     test(`answers 400 to ${name} and changes nothing`, async () => {
-      const db = seeded({ keyword: 'code', priority: 4, is_active: 0 });
+      const db = await seeded({ keyword: 'code', priority: 4, is_active: 0 });
 
       const response = await update(db, JSON.stringify(body));
 
@@ -732,7 +702,7 @@ describe('PUT /api/keywords/:id', () => {
   }
 
   test('an omitted, empty or null colour keeps the stored one', async () => {
-    const db = seeded({ keyword: 'code', color: '#112233' });
+    const db = await seeded({ keyword: 'code', color: '#112233' });
 
     await update(db, JSON.stringify({ tag: 'A' }));
     await update(db, JSON.stringify({ color: '' }));
@@ -742,7 +712,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('a stored colour that is not hex falls back to the default instead of failing', async () => {
-    const db = seeded({ keyword: 'code', color: 'red" onmouseover="x' });
+    const db = await seeded({ keyword: 'code', color: 'red" onmouseover="x' });
 
     const response = await update(db, JSON.stringify({ tag: 'A' }));
 
@@ -751,7 +721,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('a stored empty-string colour falls back to the default', async () => {
-    const db = seeded({ keyword: 'code', color: '' });
+    const db = await seeded({ keyword: 'code', color: '' });
 
     await update(db, JSON.stringify({ tag: 'A' }));
 
@@ -759,7 +729,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('a null stored colour falls back to the default', async () => {
-    const db = seeded({ keyword: 'code', color: null });
+    const db = await seeded({ keyword: 'code', color: null });
 
     await update(db, JSON.stringify({ tag: 'A' }));
 
@@ -777,7 +747,7 @@ describe('PUT /api/keywords/:id', () => {
 
   for (const [name, color, message] of badColors) {
     test(`answers 400 to ${name} and changes nothing`, async () => {
-      const db = seeded({ keyword: 'code', color: '#112233' });
+      const db = await seeded({ keyword: 'code', color: '#112233' });
 
       const response = await update(db, JSON.stringify({ color }));
 
@@ -788,7 +758,7 @@ describe('PUT /api/keywords/:id', () => {
   }
 
   test('accepts the stored keyword and options', async () => {
-    const db = seeded({ keyword: 'code', case_sensitive: 1 });
+    const db = await seeded({ keyword: 'code', case_sensitive: 1 });
 
     const response = await update(
       db,
@@ -806,7 +776,7 @@ describe('PUT /api/keywords/:id', () => {
 
   for (const [name, body] of immutable) {
     test(`answers 400 to ${name}`, async () => {
-      const db = seeded();
+      const db = await seeded();
 
       const response = await update(db, JSON.stringify(body));
 
@@ -819,7 +789,7 @@ describe('PUT /api/keywords/:id', () => {
   }
 
   test('answers 404 to a keyword that does not exist', async () => {
-    const response = await update(database(), JSON.stringify({ color: '#10B981' }), '9');
+    const response = await update(await database(), JSON.stringify({ color: '#10B981' }), '9');
 
     expect(response.status).toBe(404);
     expect(await problemOf(response)).toMatchObject({
@@ -829,7 +799,7 @@ describe('PUT /api/keywords/:id', () => {
   });
 
   test('answers 400 when the body is not JSON', async () => {
-    const response = await update(seeded(), 'not json');
+    const response = await update(await seeded(), 'not json');
 
     expect(response.status).toBe(400);
     expect(await problemOf(response)).toMatchObject({ code: 'BAD_REQUEST' });
@@ -838,13 +808,13 @@ describe('PUT /api/keywords/:id', () => {
   // The contract checks the body before the handler looks the keyword up.
   test('answers 400 to a body it rejects, whether or not the keyword exists', async () => {
     for (const body of ['not json', JSON.stringify({ color: 'blue' })]) {
-      const response = await update(database(), body, '9');
+      const response = await update(await database(), body, '9');
       expect([body, response.status]).toEqual([body, 400]);
     }
   });
 
   test('answers 500 when the write fails', async () => {
-    const db = seeded();
+    const db = await seeded();
     db.db.run('DROP TABLE keyword_tags');
 
     const response = await update(db, JSON.stringify({ tag: 'A' }));
@@ -859,7 +829,7 @@ describe('DELETE /api/keywords/:id', () => {
   }
 
   test('deletes an unreferenced keyword', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
 
     const response = await remove(db);
@@ -870,7 +840,7 @@ describe('DELETE /api/keywords/:id', () => {
   });
 
   test('answers 409 to a keyword that historical messages reference, and keeps it', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
     addMessage(db, { id: 'm-1' });
     addTag(db, { message_id: 'm-1', keyword_tag_id: 1, position: 0 });
@@ -886,7 +856,7 @@ describe('DELETE /api/keywords/:id', () => {
   });
 
   test('answers 404 to a keyword that does not exist', async () => {
-    const response = await remove(database(), '9');
+    const response = await remove(await database(), '9');
 
     expect(response.status).toBe(404);
     expect(await problemOf(response)).toMatchObject({
@@ -896,7 +866,7 @@ describe('DELETE /api/keywords/:id', () => {
   });
 
   test('answers 500 when the read fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE keyword_tags');
 
     const response = await remove(db);
@@ -915,7 +885,7 @@ describe('POST /api/messages/batch-tags', () => {
   }
 
   test('groups the active tags by message, in position order', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code', tag: 'OTP', priority: 2 });
     addKeyword(db, { keyword: 'pin', tag: 'PIN', color: null, priority: 1 });
     addMessage(db, { id: 'm-1' });
@@ -958,7 +928,7 @@ describe('POST /api/messages/batch-tags', () => {
   });
 
   test('reads only the first 100 message ids', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
     addMessage(db, { id: 'm-first' });
     addMessage(db, { id: 'm-late' });
@@ -977,7 +947,7 @@ describe('POST /api/messages/batch-tags', () => {
   });
 
   test('answers an empty result to no ids without reading', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await batch(db, JSON.stringify({ messageIds: [] }));
 
@@ -995,7 +965,7 @@ describe('POST /api/messages/batch-tags', () => {
 
   for (const [name, body, message] of malformed) {
     test(`answers 400 to ${name} without reading`, async () => {
-      const db = database();
+      const db = await database();
 
       const response = await batch(db, JSON.stringify(body));
 
@@ -1006,7 +976,7 @@ describe('POST /api/messages/batch-tags', () => {
   }
 
   test('answers 500 when the read fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE message_tags');
 
     const response = await batch(db, JSON.stringify({ messageIds: ['m-1'] }));
@@ -1019,7 +989,7 @@ describe('POST /api/messages/batch-tags', () => {
   });
 
   test('answers 400 when the body is not JSON', async () => {
-    const db = database();
+    const db = await database();
 
     const response = await batch(db, 'not json');
 
@@ -1044,7 +1014,7 @@ describe('POST /api/keywords/:id/history', () => {
   }
 
   test('tags the matching messages in range', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
     addMessage(db, { id: 'm1', content: 'your code, code' });
     addMessage(db, { id: 'm2', content: 'nothing' });
@@ -1068,7 +1038,7 @@ describe('POST /api/keywords/:id/history', () => {
   });
 
   test('honours the stored case and whole-word options', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'Code', case_sensitive: 1, whole_word: 1 });
     addMessage(db, { id: 'm1', content: 'Code' });
     addMessage(db, { id: 'm2', content: 'code' });
@@ -1082,7 +1052,7 @@ describe('POST /api/keywords/:id/history', () => {
   });
 
   test('answers the cursor of the next page', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'zzz' });
     for (let index = 0; index < 201; index++) {
       addMessage(db, {
@@ -1102,7 +1072,7 @@ describe('POST /api/keywords/:id/history', () => {
   });
 
   test('answers 404 to a keyword that does not exist', async () => {
-    const response = await history(database(), JSON.stringify(range), '9');
+    const response = await history(await database(), JSON.stringify(range), '9');
 
     expect(response.status).toBe(404);
     expect(await problemOf(response)).toMatchObject({
@@ -1112,7 +1082,7 @@ describe('POST /api/keywords/:id/history', () => {
   });
 
   test('answers 409 to an inactive keyword', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code', is_active: 0 });
 
     const response = await history(db, JSON.stringify(range));
@@ -1136,7 +1106,7 @@ describe('POST /api/keywords/:id/history', () => {
 
   for (const [name, body] of badRanges) {
     test(`answers 400 to ${name}`, async () => {
-      const db = database();
+      const db = await database();
       addKeyword(db, { keyword: 'code' });
 
       const response = await history(db, JSON.stringify(body));
@@ -1159,7 +1129,7 @@ describe('POST /api/keywords/:id/history', () => {
 
   for (const [name, cursor] of badCursors) {
     test(`answers 400 to ${name}`, async () => {
-      const db = database();
+      const db = await database();
       addKeyword(db, { keyword: 'code' });
 
       const response = await history(db, JSON.stringify({ ...range, cursor }));
@@ -1173,7 +1143,7 @@ describe('POST /api/keywords/:id/history', () => {
   }
 
   test('answers 400 when the body is not JSON', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
 
     const response = await history(db, 'not json');
@@ -1183,7 +1153,7 @@ describe('POST /api/keywords/:id/history', () => {
   });
 
   test('answers 400 when the body is not an object', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
 
     const response = await history(db, 'null');
@@ -1196,7 +1166,7 @@ describe('POST /api/keywords/:id/history', () => {
   });
 
   test('accepts a null cursor as the first page', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code' });
 
     const response = await history(db, JSON.stringify({ ...range, cursor: null }));
@@ -1211,7 +1181,7 @@ describe('GET /api/messages/:id/tags', () => {
   }
 
   test('answers the active tags of one message with the keyword fields, in position order', async () => {
-    const db = database();
+    const db = await database();
     addKeyword(db, { keyword: 'code', tag: 'OTP' });
     addKeyword(db, { keyword: 'pin', tag: 'PIN', is_active: 0 });
     addKeyword(db, { keyword: 'bank', tag: 'Bank', color: null });
@@ -1250,14 +1220,14 @@ describe('GET /api/messages/:id/tags', () => {
   });
 
   test('answers an empty list for a message without tags', async () => {
-    const response = await tagsOf(database(), 'm-1');
+    const response = await tagsOf(await database(), 'm-1');
 
     expect(response.status).toBe(200);
     expect(await bodyOf(response)).toEqual({ tags: [] });
   });
 
   test('answers 500 when the read fails', async () => {
-    const db = database();
+    const db = await database();
     db.db.run('DROP TABLE message_tags');
 
     const response = await tagsOf(db, 'm-1');

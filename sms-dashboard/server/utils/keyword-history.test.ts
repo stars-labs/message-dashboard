@@ -1,5 +1,7 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
+import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import type { D1, D1Batch, D1Statement } from '../lib/d1.js';
 import { processKeywordHistoryPage, type HistoryKeyword } from './keyword-history.js';
@@ -24,24 +26,13 @@ const Tag = v.object({
 const keyword: HistoryKeyword = { id: 7, keyword: 'code', case_sensitive: 0, whole_word: 0 };
 const window = { since: '2026-09-01T00:00:00.000Z', until: '2026-09-30T00:00:00.000Z' };
 
-function database(messages: Seed[]) {
-  const real = sqliteD1();
-  real.db.run(`CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    content TEXT NOT NULL,
-    filter_status TEXT NOT NULL DEFAULT 'pending',
-    verification_code TEXT,
-    purpose TEXT NOT NULL DEFAULT 'user',
-    created_at TIMESTAMP
-  )`);
-  real.db.run(`CREATE TABLE message_tags (
-    message_id TEXT NOT NULL,
-    keyword_tag_id INTEGER NOT NULL,
-    matched_text TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    PRIMARY KEY (message_id, keyword_tag_id, position)
-  )`);
+async function database(messages: Seed[]) {
+  const sqlite = new Database(':memory:');
+  await createSchema(sqlite);
+  const real = sqliteD1(sqlite);
+  real.db
+    .query('INSERT INTO keyword_tags (id, keyword, tag) VALUES (?, ?, ?)')
+    .run(keyword.id, keyword.keyword, keyword.keyword);
   const insert = real.db.query(
     `INSERT INTO messages (id, type, content, filter_status, verification_code, purpose, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -96,7 +87,7 @@ function database(messages: Seed[]) {
 
 describe('bounded keyword history processing', () => {
   test('reads one indexed page, skips ineligible messages, and inserts matches idempotently', async () => {
-    const { db, reads, writes, tags } = database([
+    const { db, reads, writes, tags } = await database([
       { id: 'm-1', content: 'Your code is 1234', created_at: '2026-09-01 00:00:00' },
       {
         id: 'm-2',
@@ -175,7 +166,7 @@ describe('bounded keyword history processing', () => {
   });
 
   test('continues strictly after the cursor until the window is drained', async () => {
-    const { db, tags } = database([
+    const { db, tags } = await database([
       { id: 'a', created_at: '2026-09-01 00:00:00' },
       { id: 'b', created_at: '2026-09-01 00:00:00' },
       { id: 'c', created_at: '2026-09-02 00:00:00' },
@@ -202,7 +193,7 @@ describe('bounded keyword history processing', () => {
   });
 
   test('inserts nothing new when the same page is applied again', async () => {
-    const { db, tags } = database([{ id: 'a', created_at: '2026-09-01 00:00:00' }]);
+    const { db, tags } = await database([{ id: 'a', created_at: '2026-09-01 00:00:00' }]);
 
     expect(await processKeywordHistoryPage(db, keyword, window)).toMatchObject({ inserted: 1 });
     expect(await processKeywordHistoryPage(db, keyword, window)).toMatchObject({
@@ -214,7 +205,7 @@ describe('bounded keyword history processing', () => {
   });
 
   test('records every occurrence of the keyword in a message', async () => {
-    const { db, tags } = database([
+    const { db, tags } = await database([
       { id: 'a', content: 'code, then CODE, then code', created_at: '2026-09-01 00:00:00' },
     ]);
 
@@ -232,7 +223,7 @@ describe('bounded keyword history processing', () => {
     const matched = async (content: string, flags: Partial<HistoryKeyword>) =>
       (
         await processKeywordHistoryPage(
-          database([{ id: 'a', content, created_at: '2026-09-01 00:00:00' }]).db,
+          (await database([{ id: 'a', content, created_at: '2026-09-01 00:00:00' }])).db,
           { ...keyword, ...flags },
           window,
         )
@@ -249,7 +240,7 @@ describe('bounded keyword history processing', () => {
   });
 
   test('skips messages the keyword is not applied to', async () => {
-    const { db, tags } = database([
+    const { db, tags } = await database([
       { id: 'sent', type: 'sent', created_at: '2026-09-01 00:00:00' },
       { id: 'untyped', type: null, created_at: '2026-09-01 00:00:01' },
       { id: 'code', verification_code: '1234', created_at: '2026-09-01 00:00:02' },
@@ -267,7 +258,7 @@ describe('bounded keyword history processing', () => {
   });
 
   test('counts an eligible message without a match as eligible only', async () => {
-    const { db } = database([
+    const { db } = await database([
       { id: 'a', content: 'nothing here', created_at: '2026-09-01 00:00:00' },
     ]);
 
@@ -282,7 +273,7 @@ describe('bounded keyword history processing', () => {
   });
 
   test('answers an empty window without writing', async () => {
-    const { db, writes } = database([]);
+    const { db, writes } = await database([]);
 
     expect(await processKeywordHistoryPage(db, keyword, window)).toEqual({
       processed: 0,
@@ -296,7 +287,7 @@ describe('bounded keyword history processing', () => {
   });
 
   test('bounds the page size to between 1 and 200 and defaults a bad one', async () => {
-    const { db, reads } = database([]);
+    const { db, reads } = await database([]);
     const limitFor = async (pageSize: unknown) => {
       reads.length = 0;
       await processKeywordHistoryPage(db, keyword, { ...window, pageSize });
