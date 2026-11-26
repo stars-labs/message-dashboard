@@ -77,16 +77,11 @@ impl AtModemManager {
         }
     }
 
-    /// The USB interface number a `/dev/ttyUSBN` port is bound to, e.g. `2` for `:1.2`.
-    ///
-    /// The interface number is a property of the device, unlike the ttyUSB number,
-    /// which the kernel hands out in enumeration order. `root` is the sysfs mount,
-    /// so the ancestor walk can be tested without a modem.
+    /// The USB interface a `/dev/ttyUSBN` port is bound to, e.g. `2` for `:1.2`.
     pub fn usb_interface_for_port_in(root: &std::path::Path, port: &str) -> Option<u8> {
         let name = port.trim_start_matches("/dev/");
         let link = root.join(format!("sys/class/tty/{name}/device"));
         let canon = fs::canonicalize(&link).ok()?;
-        // Ancestors look like `2-1.3.4.3.4:1.2`; the interface number is the suffix.
         canon
             .ancestors()
             .filter_map(|dir| dir.file_name())
@@ -95,17 +90,11 @@ impl AtModemManager {
             .and_then(|n| n.parse::<u8>().ok())
     }
 
-    /// Order a modem's ttyUSB ports so the real AT command port is tried first.
+    /// Order a modem's ttyUSB ports so the AT port is tried first.
     ///
-    /// The default 4-port layout is DIAG/NMEA/AT/MODEM on interfaces 1.0/1.1/1.2/1.3,
-    /// so interface 1.2 is the AT port. Picking it by interface number is what makes
-    /// this stable: the kernel does not guarantee that a device's ttyUSB numbers sort
-    /// in interface order, and enumerating by sorted position instead once cached a
-    /// DIAG port as the AT port on modems whose numbers came back out of order.
-    ///
-    /// The MODEM/PPP port also answers a bare "AT", so a wrong choice is not caught
-    /// by probing: it must be avoided by construction. Positions are only a fallback
-    /// for when sysfs is unreadable (tests, or a device mid-enumeration).
+    /// The kernel does not hand out ttyUSB numbers in interface order, so the AT
+    /// port is chosen by interface. The MODEM port also answers a bare "AT", so a
+    /// wrong choice is not caught by probing and must be avoided here.
     pub fn at_probe_order(ports: &[String]) -> Vec<String> {
         Self::at_probe_order_in(std::path::Path::new("/"), ports)
     }
@@ -115,11 +104,7 @@ impl AtModemManager {
         let at_slot = ports
             .iter()
             .position(|p| Self::usb_interface_for_port_in(root, p) == Some(2))
-            .or_else(|| {
-                // Slimmed AT+MODEM layout has AT on interface 1.0, which also sorts
-                // first, so position 2 of a 4-port device is the legacy guess.
-                (ports.len() >= 3).then_some(2)
-            });
+            .or_else(|| (ports.len() == 4).then_some(2));
         let mut order: Vec<String> = Vec::with_capacity(ports.len());
         if let Some(slot) = at_slot.and_then(|i| ports.get(i)) {
             order.push(slot.clone());
@@ -217,10 +202,8 @@ impl AtModemManager {
         let ports = groups
             .values()
             .find(|ports| ports.iter().any(|p| p == at_port))?;
-        // Pick by interface number, not by position: sorted ttyUSB numbers do not
-        // follow interface order on every device (see `at_probe_order`). A device
-        // with no NMEA interface (slimmed) has no interface 1, so this is also what
-        // makes voice unavailable there.
+        // A slimmed modem has no NMEA interface, so this falls through to the
+        // layout check below and voice stays unavailable there.
         let by_interface = |wanted: u8| {
             ports
                 .iter()
@@ -230,10 +213,9 @@ impl AtModemManager {
         if let (Some(nmea), Some(modem)) = (by_interface(1), by_interface(3)) {
             return Some(VoicePorts { nmea, modem });
         }
-        // Sysfs is unreadable (tests, or a device mid-enumeration): fall back to
-        // the 4-port layout of DIAG/NMEA/AT/MODEM.
+        // Sysfs unreadable: assume the default DIAG/NMEA/AT/MODEM layout.
         let at_index = ports.iter().position(|p| p == at_port)?;
-        if at_index != 2 || ports.len() < 4 {
+        if at_index != 2 || ports.len() != 4 {
             return None;
         }
         Some(VoicePorts {

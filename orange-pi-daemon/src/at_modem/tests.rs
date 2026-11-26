@@ -706,10 +706,16 @@ fn test_decode_bcd_phone_with_hex_nibbles() {
     assert_eq!(result, "*#");
 }
 
-/// Real sysfs reports a ttyUSB port's interface as a `2-1.3.4.3.4:1.2` ancestor, so
-/// this exercises the interface lookup against a directory tree shaped like sysfs.
+/// A directory tree shaped like sysfs, where each port's `device` link resolves
+/// through a `…:1.N` ancestor.
 fn sysfs_with_ports(ports: &[(u8, &str)]) -> std::path::PathBuf {
-    let root = std::env::temp_dir().join(format!("at-discovery-{}", std::process::id()));
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "at-discovery-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_dir_all(&root);
     let class_dir = root.join("sys/class/tty");
     for (interface, tty) in ports {
@@ -730,26 +736,26 @@ fn sysfs_with_ports(ports: &[(u8, &str)]) -> std::path::PathBuf {
 
 #[test]
 fn at_probe_order_follows_interface_number_not_tty_number() {
-    // ttyUSB208 is interface 1.1 and 216 is 1.2 on this real device, so sorted
-    // position 2 would pick the NMEA port and leave SMS sending to a wrong interface.
+    // The AT port has the lowest ttyUSB number, so sorting puts it first and a
+    // positional guess lands on the NMEA port.
     let root = sysfs_with_ports(&[
-        (0, "/dev/ttyUSB138"),
-        (1, "/dev/ttyUSB208"),
-        (2, "/dev/ttyUSB216"),
-        (3, "/dev/ttyUSB224"),
+        (2, "/dev/ttyUSB100"),
+        (0, "/dev/ttyUSB101"),
+        (1, "/dev/ttyUSB102"),
+        (3, "/dev/ttyUSB103"),
     ]);
-    let ports: Vec<String> = [
-        "/dev/ttyUSB138",
-        "/dev/ttyUSB208",
-        "/dev/ttyUSB216",
-        "/dev/ttyUSB224",
+    let mut ports: Vec<String> = [
+        "/dev/ttyUSB100",
+        "/dev/ttyUSB101",
+        "/dev/ttyUSB102",
+        "/dev/ttyUSB103",
     ]
     .map(String::from)
     .to_vec();
-    assert_eq!(
-        AtModemManager::at_probe_order_in(&root, &ports).first(),
-        Some(&"/dev/ttyUSB216".to_string())
-    );
+    ports.sort_unstable();
+
+    let order = AtModemManager::at_probe_order_in(&root, &ports);
+    assert_eq!(order.first(), Some(&"/dev/ttyUSB100".to_string()));
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -769,6 +775,21 @@ fn usb_interface_for_port_reads_the_sysfs_ancestor() {
         None
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn at_probe_order_does_not_guess_position_2_for_a_three_port_device() {
+    // DIAG/AT/MODEM without NMEA sorts AT into position 1; position 2 is the MODEM
+    // port, which answers a bare "AT".
+    let ports: Vec<String> = (0..3).map(|n| format!("/dev/ttyUSB{n}")).collect();
+    assert_ne!(AtModemManager::at_probe_order(&ports).first(), ports.get(2));
+}
+
+#[test]
+fn at_probe_order_keeps_the_legacy_guess_for_the_default_four_port_layout() {
+    // The default DIAG/NMEA/AT/MODEM layout keeps AT at position 2.
+    let ports: Vec<String> = (0..4).map(|n| format!("/dev/ttyUSB{n}")).collect();
+    assert_eq!(AtModemManager::at_probe_order(&ports).first(), ports.get(2));
 }
 
 #[test]
