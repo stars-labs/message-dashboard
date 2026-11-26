@@ -131,9 +131,9 @@ export function matchesPhoneQuery(
     .some((field) => String(field).toLowerCase().includes(q));
 }
 
-// Each poll costs two KV reads (session and call lock) in the namespace that also holds
-// every login session; a flat 3 s would spend 57,600 reads a day per tab against the
-// 100,000 free-tier limit. Rings last 30 s or more, so idle polling can be slow.
+// Each poll costs a KV read for the session and a request to the CALL_STATE Durable
+// Object; a flat 3 s would spend 28,800 KV reads a day per tab against the 100,000
+// free-tier limit. Rings last 30 s or more, so idle polling can be slow.
 export const CALL_POLL_ACTIVE_MS = intervalMs('dashboardLiveCallState');
 export const CALL_POLL_IDLE_MS = intervalMs('dashboardCallState');
 
