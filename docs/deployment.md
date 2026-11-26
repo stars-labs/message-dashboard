@@ -26,6 +26,10 @@ bun run check:schema-drift
   `through`, so step 4 cannot be skipped for long. `check:schema-drift` reads
   production (two `d1 export` calls, which briefly hold other D1 requests).
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
+  A change to a recurring path is checked a few hours later with
+  `bun run d1:hot-queries -- --period 1d`: it lists the statements that run at least
+  96 times a day and read at least 50 rows a run, from Query Insights (read-only).
+  Insights lags by minutes, and a window shorter than an hour can come back empty.
 - A migration that rebuilds tables (`084` rebuilds `messages` and nine other
   tables) is not documented as atomic when run with `d1 execute --file`. Before
   applying one, record a Time Travel bookmark, and keep it until the counts match:
