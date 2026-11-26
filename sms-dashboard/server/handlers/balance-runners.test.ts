@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
+import { LATEST_BALANCE_AGENT } from '../../shared/balance-agent-release.js';
 import { memoryKv } from '../../test/memory-kv.js';
 import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
@@ -170,7 +171,11 @@ describe('runner heartbeat', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, runner_id: 'workstation-legacy' });
+    expect(await response.json()).toEqual({
+      success: true,
+      runner_id: 'workstation-legacy',
+      latest_agent: LATEST_BALANCE_AGENT,
+    });
     expect(
       sqlite.query('SELECT id, auth_mode, auth_subject FROM balance_runner_installations').get(),
     ).toEqual({ id: 'workstation-legacy', auth_mode: 'legacy_api_key', auth_subject: null });

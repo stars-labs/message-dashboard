@@ -4,6 +4,7 @@ import { access } from 'node:fs/promises';
 import * as v from 'valibot';
 import type { BalanceRunnerCapability } from '../../shared/api/balance-runners.js';
 import { errorText } from '../../shared/error-text.js';
+import { isNewerAgentVersion } from './agent-version.js';
 import { textOr } from '../../shared/text.js';
 import {
   testAIConnection,
@@ -60,6 +61,7 @@ export const INITIAL_SERVICE_STATE: ServiceState = Object.freeze({
   browserDetail: 'browser_runtime_unavailable',
   login: null,
   error: null,
+  update: null,
 });
 
 export function requiredSettings(
@@ -225,6 +227,10 @@ export function createAgentService({
       platform,
       logger,
       capabilities: [...enabled],
+      onLatestAgent: (latest) => {
+        const update = isNewerAgentVersion(latest.version, appVersion) ? latest : null;
+        if (update?.version !== state.update?.version) publish({ update });
+      },
     });
     runnerPresence = presence;
     await presence.start();

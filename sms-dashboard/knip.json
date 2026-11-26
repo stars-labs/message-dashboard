@@ -23,7 +23,8 @@
         "src/preload.ts!",
         "src/cli.ts!",
         "src/renderer/renderer.ts!",
-        "src/renderer/balance-agent.d.ts!"
+        "src/renderer/balance-agent.d.ts!",
+        "scripts/release-tag.ts"
       ],
       "project": ["**/*.ts!", "!{scripts,src/test-support}/**!"],
       "ignoreBinaries": ["electron"]

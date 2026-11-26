@@ -7,7 +7,9 @@ credentials encrypted by Electron `safeStorage` in its user-data dir.
 ## Sub-features
 
 - tray menu: status rows, 显示验证窗口 (only while a carrier portal waits for a human),
-  打开 Dashboard, 设置..., 登录系统后自动启动, 退出 (`src/menu-model.ts`).
+  打开 Dashboard, 设置..., 登录系统后自动启动, 退出 (`src/menu-model.ts`). Under the
+  header, 有新版本 x.y.z · 打开下载页 when a heartbeat answer announces a release newer
+  than the app; it opens the GitHub release page.
 - 状态 tab: 登录 / 退出登录, Dashboard, SMS AI and 浏览器查询 states, device code.
 - 设置 tab: 设备名称, Dashboard URL, Auth0 issuer, Auth0 client ID, Auth0 audience,
   AI URL, 模型, 协议, AI token, 登录系统后自动启动; buttons 测试全部配置, 测试连接,

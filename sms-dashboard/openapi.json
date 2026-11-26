@@ -1141,6 +1141,23 @@
                     },
                     "runner_id": {
                       "type": "string"
+                    },
+                    "latest_agent": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "string",
+                          "pattern": "^(\\d+)\\.(\\d+)\\.(\\d+)$"
+                        },
+                        "release_url": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "release_url"
+                      ]
                     }
                   },
                   "required": [

@@ -9,6 +9,8 @@ import {
   test,
 } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import * as v from 'valibot';
+import { LATEST_BALANCE_AGENT, LatestBalanceAgent } from '../shared/balance-agent-release.js';
 import type { ControlFixture } from '../shared/control-fixtures/fixture.js';
 import { callState, type CallFixture, type Fleet } from '../test/call-state-fleet.js';
 import { registerRunnerSession } from '../test/runner-session.js';
@@ -205,6 +207,25 @@ async function replay(name: string, request: ControlFixture['request']): Promise
   return { status: response.status, contentType: response.headers.get('Content-Type'), text };
 }
 
+/** A heartbeat announces the Agent version this Worker ships with; the recording holds a fixed one. */
+function asDeployed(
+  name: string,
+  response: ControlFixture['response'],
+): ControlFixture['response'] {
+  if (name !== 'runner/balance-runners-heartbeat') return response;
+  v.parse(v.looseObject({ latest_agent: LatestBalanceAgent }), response.body);
+  const recorded = v.parse(v.record(v.string(), v.unknown()), response.body);
+  return {
+    ...response,
+    body: Object.fromEntries(
+      Object.entries(recorded).map(([key, value]) => [
+        key,
+        key === 'latest_agent' ? LATEST_BALANCE_AGENT : value,
+      ]),
+    ),
+  };
+}
+
 function onTheWire({ status, body }: ControlFixture['response']): Answer {
   return body === undefined
     ? { status, contentType: null, text: '' }
@@ -220,7 +241,6 @@ function next(): number {
 }
 
 await mock.module('nanoid', () => ({ nanoid: () => `id${String(next())}` }));
-
 beforeEach(() => {
   setSystemTime(new Date('2026-11-15T00:00:00.000Z'));
   generated = 0;
@@ -256,7 +276,9 @@ describe('control route fixtures', () => {
 
   for (const { name, fixture } of fixtures) {
     test(`the Worker answers ${name} as recorded`, async () => {
-      expect(await replay(name, fixture.request)).toEqual(onTheWire(fixture.response));
+      expect(await replay(name, fixture.request)).toEqual(
+        onTheWire(asDeployed(name, fixture.response)),
+      );
     });
   }
 });

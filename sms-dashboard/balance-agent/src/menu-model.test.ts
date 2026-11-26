@@ -34,6 +34,24 @@ function statusItems(model: MenuBarModel) {
 }
 
 describe('Balance Agent menu bar model', () => {
+  test('offers a newer release right under the header, and nothing when up to date', () => {
+    const model = createMenuBarModel(
+      readyState({
+        update: {
+          version: '0.2.0',
+          release_url:
+            'https://github.com/stars-labs/message-dashboard/releases/tag/balance-agent-v0.2.0',
+        },
+      }),
+    );
+    expect(labelled(model)[1]).toMatchObject({
+      id: 'update-available',
+      label: '有新版本 0.2.0 · 打开下载页',
+      indicator: 'attention',
+    });
+    expect(item(createMenuBarModel(readyState()), 'update-available')).toBeUndefined();
+  });
+
   test('shows a compact ready menu with the actual launch-at-login state', () => {
     const model = createMenuBarModel(readyState(), { openAtLogin: true });
     expect(model.appearance).toBe('ready');

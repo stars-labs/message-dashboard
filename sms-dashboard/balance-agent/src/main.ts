@@ -138,6 +138,18 @@ async function openDashboard() {
   }
 }
 
+async function openReleasePage() {
+  const value = latestState.update?.release_url;
+  if (!value) return;
+  try {
+    const url = new URL(value);
+    if (url.origin !== 'https://github.com') throw new Error(`Not a GitHub release page: ${value}`);
+    await shell.openExternal(url.toString());
+  } catch (error) {
+    log.error(`Could not open the release page: ${errorText(error)}`);
+  }
+}
+
 async function showVerificationWindow() {
   try {
     if (await service?.showVerification()) return;
@@ -160,6 +172,9 @@ function setOpenAtLogin(enabled: boolean): boolean {
 function menuTemplate(model: MenuBarModel): MenuItemConstructorOptions[] {
   const actions: Readonly<Record<MenuItemId, (item: ElectronMenuItem) => void>> = {
     'agent-header': showWindow,
+    'update-available': () => {
+      void openReleasePage();
+    },
     'status-dashboard': () => {
       if (latestState.settings.dashboardUrl) void openDashboard();
       else showWindow();

@@ -23,7 +23,11 @@
     "status": 200,
     "body": {
       "success": true,
-      "runner_id": "runner-1"
+      "runner_id": "runner-1",
+      "latest_agent": {
+        "version": "1.2.0",
+        "release_url": "https://github.com/stars-labs/message-dashboard/releases/tag/balance-agent-v1.2.0"
+      }
     }
   }
 }

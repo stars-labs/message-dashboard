@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import { RUNNER_STATES } from '../../../shared/api/balance-runners.js';
+import { LatestBalanceAgent } from '../../../shared/balance-agent-release.js';
 
 export const CHANNEL = Object.freeze({
   getState: 'agent:get-state',
@@ -51,6 +52,8 @@ export const AgentState = v.object({
   settings: Settings,
   hasAiToken: v.boolean(),
   openAtLogin: v.boolean(),
+  /** A release newer than this app, as the Dashboard last announced it. */
+  update: v.nullable(LatestBalanceAgent),
 });
 
 export type AgentState = v.InferOutput<typeof AgentState>;

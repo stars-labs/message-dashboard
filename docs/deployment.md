@@ -155,12 +155,24 @@ nix shell nixpkgs#ssh-to-age -c ssh-to-age < ssh_host_ed25519_key.pub   # a new 
 
 ## Balance Agent Release
 
+The version is `sms-dashboard/balance-agent/package.json`'s, and nothing else: the app
+reports it, the release is tagged with it, and the Worker announces it.
+
 ```bash
-# From repo root — builds .app, zips, emits SHA-256:
-nix run .#release-balance-agent -- <version>
-# Artifacts: sms-dashboard/balance-agent/release/<version>/
+# 1. Bump "version" in sms-dashboard/balance-agent/package.json; merge to main.
+# 2. From repo root, on that commit of main (needs `gh auth login`):
+nix run .#release-balance-agent
+# 3. Deploy the Worker from the same commit (Cloudflare Worker + Frontend above).
 ```
 
-- Publish artifacts as a private GitHub prerelease. Users authenticate to download.
+- The command refuses uncommitted changes, a commit not on `origin/main`, and a
+  version already released. It runs `bun run check`, builds and zips the app with its
+  SHA-256 into `sms-dashboard/balance-agent/release/<version>/`, and publishes them as
+  the private prerelease `balance-agent-v<version>`. Users sign in to GitHub to
+  download.
+- Every heartbeat answer carries the version the deployed Worker was built with.
+  An app older than it shows 有新版本 x.y.z · 打开下载页 in its menu, which opens the
+  release page. Release before deploying, or that link leads to a release that does
+  not exist yet.
 - Ad-hoc signed only (not Developer ID / notarized) — internal team use.
 - No silent auto-updates.

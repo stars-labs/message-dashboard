@@ -1,4 +1,5 @@
 import type { BalanceRunnerCapability } from '../../../shared/api/balance-runners.js';
+import type { LatestBalanceAgent } from '../../../shared/balance-agent-release.js';
 import { ControlError, type ControlClient } from './control-client.js';
 import { errorText } from '../../../shared/error-text.js';
 
@@ -35,6 +36,7 @@ export function createRunnerPresence({
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
   logger = console,
+  onLatestAgent,
 }: {
   controlClient: ControlClient;
   runnerId: string;
@@ -50,6 +52,8 @@ export function createRunnerPresence({
   ) => ReturnType<typeof setInterval>;
   clearIntervalFn?: (timer: ReturnType<typeof setInterval>) => void;
   logger?: Logger;
+  /** The Agent release the Dashboard announces with each accepted heartbeat. */
+  onLatestAgent?: (latest: LatestBalanceAgent) => void;
 }) {
   const states = new Map<RunnerCapabilityName, CapabilityState>(
     capabilities.map((capability) => [
@@ -78,7 +82,7 @@ export function createRunnerPresence({
     const capabilitySnapshots = snapshots(selected);
     pending = pending
       .then(async () => {
-        await controlClient.balanceRunnerControl
+        const answer = await controlClient.balanceRunnerControl
           .heartbeat({
             runner_id: runnerId,
             session_id: sessionId,
@@ -92,6 +96,7 @@ export function createRunnerPresence({
             throw new Error(`heartbeat rejected (${String(error.status)})`, { cause: error });
           });
         lastError = null;
+        if (answer.latest_agent !== undefined) onLatestAgent?.(answer.latest_agent);
       })
       .catch((error: unknown) => {
         const message = errorText(error);

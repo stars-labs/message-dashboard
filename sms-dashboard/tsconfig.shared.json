@@ -11,6 +11,6 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/shared-declarations"
   },
-  "include": ["shared/**/*.ts", "config/**/*.ts"],
+  "include": ["shared/**/*.ts", "config/**/*.ts", "balance-agent/package.json"],
   "exclude": ["**/*.test.ts"]
 }

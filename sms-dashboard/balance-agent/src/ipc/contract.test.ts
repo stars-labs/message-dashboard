@@ -30,10 +30,14 @@ describe('IPC contract', () => {
       settings: BLANK_SETTINGS,
       hasAiToken: false,
       openAtLogin: false,
+      update: null,
     };
     expect(v.safeParse(AgentState, state).success).toBe(true);
     expect(v.safeParse(AgentState, { ...state, auth: 'root' }).success).toBe(false);
     expect(v.safeParse(AgentState, { ...state, hasAiToken: 'yes' }).success).toBe(false);
+    expect(
+      v.safeParse(AgentState, { ...state, update: { version: 'next', release_url: 'x' } }).success,
+    ).toBe(false);
   });
 
   test('tells a successful AI check from a failed one by its ok flag', () => {

@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { LatestBalanceAgent } from '../balance-agent-release.js';
 import { bodyObject } from './body.js';
 
 export const RUNNER_CAPABILITIES = ['sms_ai', 'carrier_browser'] as const;
@@ -157,6 +158,8 @@ export const RunnerHeartbeatBody = bodyObject(
 export const RunnerHeartbeatResponse = v.object({
   success: v.literal(true),
   runner_id: v.string(),
+  /** Absent from a Worker deployed before it existed, which shipped Agents still meet. */
+  latest_agent: v.optional(LatestBalanceAgent),
 });
 
 export type RunnerHeartbeatResponse = v.InferOutput<typeof RunnerHeartbeatResponse>;

@@ -10,5 +10,6 @@
     "declaration": true,
     "outDir": "./node_modules/.tmp/tooling-declarations"
   },
-  "include": ["scripts/**/*.ts"]
+  "include": ["scripts/**/*.ts"],
+  "references": [{ "path": "../tsconfig.shared.json" }]
 }

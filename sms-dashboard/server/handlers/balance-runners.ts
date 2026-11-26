@@ -11,6 +11,7 @@ import {
   runnerSessionAdmitted,
 } from '../db/balance-runners.js';
 import type { AuthorizedRunner } from '../utils/runner-auth.js';
+import { LATEST_BALANCE_AGENT } from '../../shared/balance-agent-release.js';
 import {
   BalanceRunnerCapability,
   RUNNER_CAPABILITIES,
@@ -110,7 +111,7 @@ export const balanceRunnersHandler = {
     }
 
     await recordRunnerHeartbeat(env.DB, heartbeat, auth);
-    return { success: true, runner_id: heartbeat.runner_id };
+    return { success: true, runner_id: heartbeat.runner_id, latest_agent: LATEST_BALANCE_AGENT };
   },
 
   /** GET /api/balance-runners: the signed-in user's own runners. */

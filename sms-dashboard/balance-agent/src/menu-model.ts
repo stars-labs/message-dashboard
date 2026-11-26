@@ -9,10 +9,13 @@ export interface MenuState {
   browserDetail?: string | null;
   error?: string | null;
   settings: { installationName?: string; dashboardUrl?: string };
+  /** A newer release than this app, when the Dashboard announced one. */
+  update?: AgentState['update'];
 }
 
 export type MenuItemId =
   | 'agent-header'
+  | 'update-available'
   | 'status-dashboard'
   | 'status-sms-ai'
   | 'status-browser'
@@ -68,6 +71,17 @@ const APPEARANCE_META: Readonly<Record<Appearance, { fallbackTitle: string; tool
     idle: { fallbackTitle: 'BA', tooltip: 'Balance Agent · 未就绪' },
   });
 
+function updateItems(update: MenuState['update']): MenuItem[] {
+  if (!update) return [];
+  return [
+    {
+      id: 'update-available',
+      label: `有新版本 ${update.version} · 打开下载页`,
+      indicator: 'attention',
+    },
+  ];
+}
+
 export function createMenuBarModel(
   state: MenuState,
   { openAtLogin = false }: { openAtLogin?: boolean } = {},
@@ -94,6 +108,7 @@ export function createMenuBarModel(
       id: 'agent-header',
       label: installationName ? `Balance Agent · ${installationName}` : 'Balance Agent',
     },
+    ...updateItems(state.update),
     { type: 'separator' },
     {
       id: 'status-dashboard',

@@ -424,21 +424,44 @@
           };
 
           # Ad-hoc signed (unsigned, unnotarized); Developer ID signing is not set up.
+          # Releases the version in balance-agent/package.json from a commit on main: the
+          # Worker deployed from that commit announces it to every running Agent.
           release-balance-agent = pkgs.writeShellApplication {
             name = "release-balance-agent";
             runtimeInputs = with pkgs; [
               git
+              gh
               bun
               coreutils
               zip
             ];
             text = ''
-              version="''${1:?usage: release-balance-agent <version>}"
               repo_root="$(git rev-parse --show-toplevel)"
-              # balance-agent is a workspace of sms-dashboard, whose lockfile pins it.
-              (cd "$repo_root/sms-dashboard" && bun install --frozen-lockfile)
-              cd "$repo_root/sms-dashboard/balance-agent"
+              cd "$repo_root"
+              if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+                echo "Commit your changes first: the release is built from HEAD." >&2
+                exit 1
+              fi
+              git fetch --quiet origin main
+              if ! git merge-base --is-ancestor HEAD origin/main; then
+                echo "HEAD is not on origin/main; release only what main will deploy." >&2
+                exit 1
+              fi
+              commit="$(git rev-parse HEAD)"
 
+              # balance-agent is a workspace of sms-dashboard, whose lockfile pins it.
+              cd "$repo_root/sms-dashboard"
+              bun install --frozen-lockfile
+              read -r version tag < <(bun balance-agent/scripts/release-tag.ts)
+              if gh release view "$tag" >/dev/null 2>&1; then
+                echo "$tag is already released; bump balance-agent/package.json first." >&2
+                exit 1
+              fi
+
+              echo "==> Checking (dashboard, Worker and Balance Agent)"
+              bun run check
+
+              cd "$repo_root/sms-dashboard/balance-agent"
               echo "==> Building Balance Agent v''${version}"
               PLAYWRIGHT_BROWSERS_PATH=0 bun run browser:install
               bun run build
@@ -452,8 +475,13 @@
                 "Balance-Agent-''${version}-macos-arm64.zip" > \
                 "Balance-Agent-''${version}-macos-arm64.zip.sha256")
 
-              echo "==> Artifacts:"
-              ls -1 "release/''${version}"
+              echo "==> Publishing $tag as a prerelease"
+              gh release create "$tag" --prerelease --target "$commit" \
+                --title "Balance Agent ''${version}" \
+                --notes "Balance Agent ''${version} for Apple silicon, built from ''${commit}. Ad-hoc signed: on first launch, right-click the app and choose Open." \
+                "release/''${version}/Balance-Agent-''${version}-macos-arm64.zip" \
+                "release/''${version}/Balance-Agent-''${version}-macos-arm64.zip.sha256"
+              echo "==> Deploy the Worker from main now, so running Agents learn of ''${version}."
             '';
           };
 

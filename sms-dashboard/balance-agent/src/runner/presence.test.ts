@@ -60,6 +60,53 @@ describe('runner presence client', () => {
     expect(JSON.stringify(sent)).not.toContain('API_KEY');
   });
 
+  test('passes on the Agent version the Dashboard announces', async () => {
+    const latest = {
+      version: '0.2.0',
+      release_url:
+        'https://github.com/stars-labs/message-dashboard/releases/tag/balance-agent-v0.2.0',
+    };
+    const { client } = fakeControlClient(() =>
+      jsonAnswer({ success: true, runner_id: 'workstation', latest_agent: latest }),
+    );
+    const announced: unknown[] = [];
+    const presence = createRunnerPresence({
+      controlClient: client,
+      runnerId: 'workstation',
+      sessionId: 'session-1',
+      displayName: 'Workstation',
+      capabilities: ['sms_ai'],
+      platform: 'darwin',
+      onLatestAgent: (value) => {
+        announced.push(value);
+      },
+    });
+
+    await presence.start();
+
+    expect(announced).toEqual([latest]);
+  });
+
+  test('announces nothing when an older Dashboard leaves the version out', async () => {
+    const { client } = accepting();
+    const announced: unknown[] = [];
+    const presence = createRunnerPresence({
+      controlClient: client,
+      runnerId: 'workstation',
+      sessionId: 'session-1',
+      displayName: 'Workstation',
+      capabilities: ['sms_ai'],
+      platform: 'darwin',
+      onLatestAgent: (value) => {
+        announced.push(value);
+      },
+    });
+
+    await presence.start();
+
+    expect(announced).toEqual([]);
+  });
+
   test('periodic liveness omits unchanged capability state', async () => {
     const { client, sent } = accepting();
     let heartbeat: (() => Promise<void>) | undefined;
