@@ -64,7 +64,8 @@ The five-minute cron (`server/utils/alerts.ts`) emails when the daemon has sent 
 heartbeat for 20 minutes, and when the check itself fails. It emails again every 6
 hours while the daemon stays silent, and once more when it reports again. State lives
 in the `alert_state` table, written only when an alert opens, is emailed or clears,
-and always before the email goes out. When D1 refuses that write, the check fails
+and always before the email goes out; an email that fails to send puts the state
+back, so the next run retries it. When D1 refuses that write, the check fails
 instead: it emails once per 6 hours (deduplicated in KV), and for a D1 quota error
 the email names the quota and its reset time, because a daemon whose heartbeats
 cannot be recorded looks silent from D1. Offline SIMs send no email by decision: they

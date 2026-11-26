@@ -41,7 +41,7 @@ export async function openAlert(
 export async function markAlertNotified(
   db: D1<'run'>,
   alert: AlertName,
-  at: string,
+  at: string | null,
 ): Promise<void> {
   await db.prepare(`UPDATE alert_state SET notified_at = ? WHERE alert = ?`).bind(at, alert).run();
 }

@@ -106,10 +106,17 @@ export async function runAlertChecks({ db, kv, mail, recipients, now }: AlertChe
     const notifiedAt = canDeliver ? at : null;
     if (state === null) await openAlert(db, 'daemon_offline', at, notifiedAt);
     else if (notifiedAt !== null) await markAlertNotified(db, 'daemon_offline', notifiedAt);
-    await deliver({
-      subject: `[SMS 告警] 采集服务 ${String(Math.floor(silentMs / MINUTE_MS))} 分钟没有心跳`,
-      text: `Orange Pi 上的采集服务最后一次心跳在 ${heartbeat ?? ''} (UTC)。\n收不到短信、发不出短信，直到它恢复。\n\n${DASHBOARD_URL}`,
-    });
+    try {
+      await deliver({
+        subject: `[SMS 告警] 采集服务 ${String(Math.floor(silentMs / MINUTE_MS))} 分钟没有心跳`,
+        text: `Orange Pi 上的采集服务最后一次心跳在 ${heartbeat ?? ''} (UTC)。\n收不到短信、发不出短信，直到它恢复。\n\n${DASHBOARD_URL}`,
+      });
+    } catch (error) {
+      if (notifiedAt !== null) {
+        await markAlertNotified(db, 'daemon_offline', state?.notified_at ?? null);
+      }
+      throw error;
+    }
   } catch (error) {
     console.error('[alerts] check failed:', error);
     if ((await kv.get(CHECK_FAILED_KEY)) !== null) return;

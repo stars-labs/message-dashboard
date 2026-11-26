@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { errorText } from '../../shared/error-text.js';
 import { createSchema } from '../../test/schema.js';
 import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
@@ -195,6 +196,33 @@ describe('delivery', () => {
       '[SMS 告警] D1 写入额度已用完',
       '[SMS 告警] 采集服务 30 分钟没有心跳',
     ]);
+    expect(alertRows()).toEqual([{ alert: 'daemon_offline', notified: 1 }]);
+  });
+
+  test('retries an alert on the next run when its email fails to send', async () => {
+    heartbeatAt(START);
+    let refuse = true;
+    const mail = {
+      send: (email: AlertEmail) => {
+        if (refuse) return Promise.reject(new Error('Email Sending refused the destination'));
+        sent.push(email);
+        return Promise.resolve();
+      },
+    };
+    const check = (at: number) =>
+      runAlertChecks({ db: sqliteD1(sqlite), kv, mail, recipients: RECIPIENTS, now: at });
+
+    const failure = await check(START + 21 * MINUTE).then(
+      () => 'sent',
+      (error: unknown) => errorText(error),
+    );
+    expect(failure).toBe('Email Sending refused the destination');
+    expect(alertRows()).toEqual([{ alert: 'daemon_offline', notified: 0 }]);
+
+    refuse = false;
+    await check(START + 26 * MINUTE);
+
+    expect(sent.map((email) => email.subject)).toEqual(['[SMS 告警] 采集服务 26 分钟没有心跳']);
     expect(alertRows()).toEqual([{ alert: 'daemon_offline', notified: 1 }]);
   });
 });
