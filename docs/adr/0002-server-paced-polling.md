@@ -54,7 +54,9 @@ interval is written down.
 
 Every response on a recurring `/api/control/*` route carries
 `X-Poll-Interval: <seconds>`, read from the registry. A header, not a body
-field, because the idle claim answers `204 No Content`, which has no body.
+field, because the idle claim answers `204 No Content`, which has no body. The
+contract declares it (`PollHeaders` in each route's detailed output), so
+OpenAPI documents it and the Agent reads it typed.
 
 - The daemon and the Balance Agent wait that long before the next call. They
   hold no interval constant of their own beyond one default for a response
