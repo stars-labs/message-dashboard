@@ -33,7 +33,7 @@
     if (revoking !== null) return;
     const confirmed = await confirmAction({
       title: '撤销查询助手',
-      message: `撤销后「${runner.display_name}」不能再领取余额查询任务，也不能重新登记。确定撤销？`,
+      message: `撤销后「${runner.display_name}」不能再领取或继续执行余额查询任务。电脑丢失时还需在 Auth0 撤销该用户的登录。确定撤销？`,
       confirmLabel: '撤销',
       danger: true,
     });

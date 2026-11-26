@@ -460,6 +460,18 @@ describe('POST /api/control/balance-skills/jobs/:id/decision', () => {
     }
   });
 
+  test('refuses a decision from a revoked installation holding the lease', async () => {
+    sqlite.run(
+      "UPDATE balance_runner_installations SET revoked_at = CURRENT_TIMESTAMP WHERE id = 'installation-runner-1'",
+    );
+
+    const response = await decide(REPLY);
+
+    expect(response.status).toBe(403);
+    expect(await errorOf(response)).toBe(RUNNER_NOT_ADMITTED);
+    expect(jobState().status).toBe('leased');
+  });
+
   test('requires a runner_id and a decision', async () => {
     for (const body of [{ runner_id: 1 }, { decision: null }, { decision: 0 }, { decision: '' }]) {
       const response = await decide(REPLY, body);
@@ -495,12 +507,21 @@ describe('POST /api/control/balance-skills/jobs/:id/decision', () => {
     expect(await errorOf(missing)).toBe('Skill job not found');
 
     sqlite.run(`UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'`);
-    const foreign = await decide(REPLY, {}, { headers: signInDevice('auth0|bob') });
+    registerRunnerSession(sqlite, 'bob-session', {
+      authMode: 'auth0_device',
+      subject: 'auth0|bob',
+    });
+    const foreign = await decide(
+      REPLY,
+      { runner_id: 'bob-session' },
+      { headers: signInDevice('auth0|bob') },
+    );
     expect(foreign.status).toBe(403);
     expect(await errorOf(foreign)).toBe('Skill job belongs to another account');
   });
 
   test('refuses a decision without this runner holding a live lease', async () => {
+    registerRunnerSession(sqlite, 'runner-2');
     const other = await decide(REPLY, { runner_id: 'runner-2' });
     expect(other.status).toBe(409);
     expect(await errorOf(other)).toBe('Skill job lease is not active for this runner');

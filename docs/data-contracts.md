@@ -45,12 +45,17 @@
   that work.
 - `NULL` ownership is reserved for legacy API-key jobs. Do not weaken this
   compatibility boundary.
-- A claim's `runner_id` is the Agent's session ID. A claim is refused (403) unless a
-  heartbeat has registered that session under an unrevoked installation signed in
-  the same way (same API key mode, or same Auth0 `sub`). An admin with
-  `runners.write` revokes an installation (`balance_runner_installations.revoked_at`);
-  its heartbeats and claims are refused from then on, and a restart cannot re-register
-  it.
+- A job call's `runner_id` is the Agent's session ID. A claim, and every call that
+  reads or advances a leased job (decision, OTP request and poll, job heartbeat,
+  complete), is refused (403) unless a heartbeat has registered that session under an
+  unrevoked installation signed in the same way (same API key mode, or same Auth0
+  `sub`). Fail and release stay open, so a revoked runner can still give a job back.
+- An admin with `runners.write` revokes an installation
+  (`balance_runner_installations.revoked_at`): its heartbeats and job calls are
+  refused from then on. The installation ID is the Agent's own, so revocation stops
+  that installation, not the account's credential: whoever holds the Mac and resets
+  the Agent's settings gets a new installation ID. Cutting off a lost Mac completely
+  still means revoking the user's Auth0 sessions.
 
 ## Carrier billing contracts
 

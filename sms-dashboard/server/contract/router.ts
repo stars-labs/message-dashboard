@@ -39,6 +39,13 @@ function runnerOf({ runner }: ContractContext): AuthorizedRunner {
   return runner;
 }
 
+/** The runner, once `sessionId` is a live session of one of its unrevoked installations. */
+async function sessionRunner(context: ContractContext, sessionId: string) {
+  const runner = runnerOf(context);
+  await requireAdmittedRunnerSession(context.request.env.DB, sessionId, runner);
+  return runner;
+}
+
 function billMutation(input: {
   params: { id: string };
   headers: { 'idempotency-key'?: string | undefined };
@@ -83,22 +90,17 @@ export const router = os.router({
   },
   balanceSkillJobs: {
     claim: os.balanceSkillJobs.claim.handler(async ({ context, input }) => {
-      await requireAdmittedRunnerSession(
-        context.request.env.DB,
-        input.query.runner_id,
-        runnerOf(context),
-      );
       const job = await balanceSkillRunnerHandler.claim(
         context.request,
-        runnerOf(context),
+        await sessionRunner(context, input.query.runner_id),
         input.query.runner_id,
       );
       return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
     }),
-    decision: os.balanceSkillJobs.decision.handler(({ context, input }) =>
+    decision: os.balanceSkillJobs.decision.handler(async ({ context, input }) =>
       balanceSkillRunnerHandler.decide(
         context.request,
-        runnerOf(context),
+        await sessionRunner(context, input.body.runner_id),
         input.params.id,
         input.body,
       ),
@@ -114,22 +116,17 @@ export const router = os.router({
   },
   carrierWebJobs: {
     claim: os.carrierWebJobs.claim.handler(async ({ context, input }) => {
-      await requireAdmittedRunnerSession(
-        context.request.env.DB,
-        input.query.runner_id,
-        runnerOf(context),
-      );
       const job = await carrierWebBalanceHandler.claim(
         context.request,
-        runnerOf(context),
+        await sessionRunner(context, input.query.runner_id),
         input.query.runner_id,
       );
       return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
     }),
-    otpRequested: os.carrierWebJobs.otpRequested.handler(({ context, input }) =>
+    otpRequested: os.carrierWebJobs.otpRequested.handler(async ({ context, input }) =>
       carrierWebBalanceHandler.otpRequested(
         context.request,
-        runnerOf(context),
+        await sessionRunner(context, input.body.runner_id),
         input.params.id,
         input.body,
       ),
@@ -137,24 +134,24 @@ export const router = os.router({
     otp: os.carrierWebJobs.otp.handler(async ({ context, input }) => {
       const otp = await carrierWebBalanceHandler.otp(
         context.request,
-        runnerOf(context),
+        await sessionRunner(context, input.query.runner_id),
         input.params.id,
         input.query,
       );
       return otp === null ? { status: 204 as const } : { status: 200 as const, body: otp };
     }),
-    heartbeat: os.carrierWebJobs.heartbeat.handler(({ context, input }) =>
+    heartbeat: os.carrierWebJobs.heartbeat.handler(async ({ context, input }) =>
       carrierWebBalanceHandler.heartbeat(
         context.request,
-        runnerOf(context),
+        await sessionRunner(context, input.body.runner_id),
         input.params.id,
         input.body,
       ),
     ),
-    complete: os.carrierWebJobs.complete.handler(({ context, input }) =>
+    complete: os.carrierWebJobs.complete.handler(async ({ context, input }) =>
       carrierWebBalanceHandler.complete(
         context.request,
-        runnerOf(context),
+        await sessionRunner(context, input.body.runner_id),
         input.params.id,
         input.body,
       ),

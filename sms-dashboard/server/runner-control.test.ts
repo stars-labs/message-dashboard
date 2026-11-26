@@ -553,7 +553,7 @@ describe('runner refusals on the wire', () => {
     ).toEqual(answer(404, '{"error":"Web balance job not found"}'));
     lease('sim_balance_web_jobs');
     expect(await send('GET', `${otp}?runner_id=`, {})).toEqual(
-      answer(409, '{"error":"Web balance job lease is not active for this runner"}'),
+      answer(403, '{"error":"Runner session is not registered or its installation is revoked"}'),
     );
     expect(await send('GET', `${otp}?runner_id=runner-1`, {})).toEqual(
       answer(409, '{"error":"OTP has not been requested"}'),

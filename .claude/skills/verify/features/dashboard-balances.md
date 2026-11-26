@@ -20,7 +20,8 @@ Locally neither runs unless a journey starts the agent, so checks stay queued.
 - runner admin (`runners.write` only): 管理 (`aria-label="管理查询助手"`) in the runner
   status bar opens dialog `管理查询助手`, every installation with owner, version, last
   heartbeat and 在线 / 离线 / 已撤销; `撤销 <name>` → confirm 撤销. A revoked runner's
-  heartbeat and claims answer 403; other runners keep working. Checked in:
+  heartbeat, claims and calls on its leased jobs (except fail / release) answer 403;
+  other runners keep working. Checked in:
   `scripts/verify/journeys/revoke-runner.ts`.
 
 ## How to get to it (user POV)

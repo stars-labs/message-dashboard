@@ -1186,6 +1186,44 @@ describe('job ownership', () => {
     sqlite.run('UPDATE sim_balance_checks SET requested_by_subject = ?', [subject]);
   }
 
+  function revokeRunner1() {
+    sqlite.run(
+      "UPDATE balance_runner_installations SET revoked_at = CURRENT_TIMESTAMP WHERE id = 'installation-runner-1'",
+    );
+  }
+
+  test.each<BodyHandlerName>(['otpRequested', 'heartbeat', 'complete'])(
+    '%s refuses a revoked installation holding the lease',
+    async (name) => {
+      revokeRunner1();
+
+      const response = await callBodyHandler(name, { id: 'job-1', body: VALID_BODIES[name] });
+
+      expect(response.status).toBe(403);
+      expect(jobState().status).toBe('leased');
+    },
+  );
+
+  test('the OTP poll refuses a revoked installation holding the lease', async () => {
+    revokeRunner1();
+
+    const response = await send('otp', { id: 'job-1' });
+
+    expect(response.status).toBe(403);
+  });
+
+  test.each<BodyHandlerName>(['fail', 'release'])(
+    '%s still lets a revoked installation give its job back',
+    async (name) => {
+      revokeRunner1();
+
+      const response = await callBodyHandler(name, { id: 'job-1', body: VALID_BODIES[name] });
+
+      expect(response.status).toBe(200);
+      expect(jobState().lease_owner).toBeNull();
+    },
+  );
+
   test.each(BODY_HANDLERS)('%s refuses a legacy runner on a Dashboard-owned job', async (name) => {
     ownedBy('auth0|alice');
 
@@ -1238,11 +1276,12 @@ describe('job ownership', () => {
 
   test('lets the owning account heartbeat its job', async () => {
     ownedBy('auth0|alice');
+    leaseTo('alice-session');
 
     const response = await send('heartbeat', {
       id: 'job-1',
       headers: signInDevice('auth0|alice'),
-      body: { runner_id: 'runner-1', status: 'querying' },
+      body: { runner_id: 'alice-session', status: 'querying' },
     });
 
     expect(response.status).toBe(200);
@@ -1327,10 +1366,10 @@ describe('job lease', () => {
     leaseTo('runner-1');
     sqlite.run('UPDATE sim_balance_web_jobs SET otp_requested_at = CURRENT_TIMESTAMP');
 
-    for (const runnerId of ['runner-2', '']) {
-      const response = await send('otp', { id: 'job-1', runnerId });
-      expect(response.status).toBe(409);
-    }
+    const other = await send('otp', { id: 'job-1', runnerId: 'runner-2' });
+    expect(other.status).toBe(409);
+    const blank = await send('otp', { id: 'job-1', runnerId: '' });
+    expect(blank.status).toBe(403);
   });
 
   test('otp refuses a poll that names no runner', async () => {
