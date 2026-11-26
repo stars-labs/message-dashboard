@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
+import { planDetails } from '../../test/query-plan.js';
 import { registerRunnerSession } from '../../test/runner-session.js';
 import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
@@ -1331,10 +1332,19 @@ describe('job lease', () => {
     expect(await errorOf(response)).toBe('Web balance job lease is not active for this runner');
   });
 
-  test.each(['pending', 'completed', 'failed', 'stopped'])(
-    'refuses a lease on a %s job',
+  test('refuses a lease on a pending job', async () => {
+    leaseTo('runner-1', 'pending');
+
+    const response = await send('heartbeat', { id: 'job-1', body: VALID_BODIES.heartbeat });
+
+    expect(response.status).toBe(409);
+    expect(jobState().status).toBe('pending');
+  });
+
+  test.each(['completed', 'failed', 'stopped'])(
+    'refuses a heartbeat on a %s job',
     async (status) => {
-      leaseTo('runner-1', status);
+      sqlite.run("UPDATE sim_balance_web_jobs SET status = ? WHERE id = 'job-1'", [status]);
 
       const response = await send('heartbeat', { id: 'job-1', body: VALID_BODIES.heartbeat });
 
@@ -1431,8 +1441,7 @@ describe('web job maintenance', () => {
   test('reconciles a terminal web job whose parent check is still queued', async () => {
     sqlite.run(`
       UPDATE sim_balance_web_jobs
-      SET status = 'stopped', last_error = 'Runner stopped before completion',
-          lease_owner = 'stale-runner', lease_expires_at = datetime('now', '-1 minute')
+      SET status = 'stopped', last_error = 'Runner stopped before completion'
       WHERE id = 'job-1';
     `);
 
@@ -1449,7 +1458,6 @@ describe('web job maintenance', () => {
       event_type: 'reconciled',
       detail_json: '{"web_job_status":"stopped"}',
     });
-    expect(jobState()).toMatchObject({ lease_owner: null, lease_expires_at: null });
   });
 
   test('gives a terminal job without an error message the default one', async () => {
@@ -1503,6 +1511,49 @@ describe('web job maintenance', () => {
 
     expect(result).toEqual({ expired: 0, reconciled: 1 });
     expect(checkState().status).toBe('failed');
+  });
+
+  test('reads only active jobs and queued checks, not finished history', async () => {
+    sqlite.run(`
+      WITH RECURSIVE history(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM history WHERE n < 2000)
+      INSERT INTO sim_balance_checks (id, sim_iccid, profile_id, status, parser_version)
+      SELECT 'old-check-' || n, 'iccid-1', 'cn-unicom-browser-random-password-v1',
+             CASE n % 2 WHEN 0 THEN 'parsed' ELSE 'failed' END, 'cn-unicom-web-balance-v1'
+      FROM history
+    `);
+    sqlite.run(`
+      INSERT INTO sim_balance_web_jobs (id, check_id, provider, status)
+      SELECT 'old-job-' || substr(id, 11), id, 'china_unicom',
+             CASE status WHEN 'parsed' THEN 'completed' ELSE 'stopped' END
+      FROM sim_balance_checks WHERE id LIKE 'old-check-%'
+    `);
+    const database = recording(db);
+
+    expect(await maintainWebBalanceJobs(database)).toEqual({ expired: 0, reconciled: 0 });
+
+    const accesses = database.prepared.map((sql) =>
+      planDetails(
+        sqlite
+          .query(`EXPLAIN QUERY PLAN ${sql}`)
+          .all(...Array.from(sql.matchAll(/\?/g), () => null)),
+      ).filter((detail) => /^(SCAN|SEARCH) /.test(detail)),
+    );
+    expect(accesses).toEqual([
+      [
+        'SEARCH sim_balance_checks USING INDEX idx_balance_checks_status_deadline (status=?)',
+        'SEARCH sim_balance_web_jobs USING INDEX idx_balance_web_jobs_claim (status=?)',
+      ],
+      ['SEARCH sim_balance_web_jobs USING COVERING INDEX idx_balance_web_jobs_claim (status=?)'],
+      [
+        'SEARCH c USING INDEX idx_balance_checks_status_deadline (status=?)',
+        'SEARCH j USING INDEX sqlite_autoindex_sim_balance_web_jobs_2 (check_id=?)',
+      ],
+      [
+        'SEARCH sim_balance_checks USING INDEX idx_balance_checks_status_deadline (status=?)',
+        'SEARCH j USING INDEX sqlite_autoindex_sim_balance_web_jobs_2 (check_id=?)',
+        'SEARCH j USING INDEX sqlite_autoindex_sim_balance_web_jobs_2 (check_id=?)',
+      ],
+    ]);
   });
 });
 

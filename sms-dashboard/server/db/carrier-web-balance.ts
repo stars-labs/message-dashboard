@@ -133,19 +133,10 @@ export async function reconcileTerminalWebJobs(db: D1<'run'> & D1Batch<'run'>): 
               AND j.status IN ('failed', 'stopped')
           ), 'Browser balance job ended before completion'),
           updated_at = CURRENT_TIMESTAMP
-      WHERE status = 'queued' AND id IN (
-        SELECT check_id FROM sim_balance_web_jobs
-        WHERE status IN ('failed', 'stopped')
+      WHERE status = 'queued' AND EXISTS (
+        SELECT 1 FROM sim_balance_web_jobs j
+        WHERE j.check_id = sim_balance_checks.id AND j.status IN ('failed', 'stopped')
       )
-    `,
-    ),
-    db.prepare(
-      `
-      UPDATE sim_balance_web_jobs
-      SET lease_owner = NULL, lease_expires_at = NULL,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE status IN ('failed', 'stopped')
-        AND (lease_owner IS NOT NULL OR lease_expires_at IS NOT NULL)
     `,
     ),
   ]);
