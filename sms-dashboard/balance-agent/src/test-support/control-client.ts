@@ -36,3 +36,10 @@ export function fakeControlClient(answer: (sent: Sent) => Response | Promise<Res
 export function jsonAnswer(body: unknown, status = 200): Response {
   return Response.json(body, { status });
 }
+
+/** A recurring call's answer: the Worker says when to call again. */
+export function pacedAnswer(body: unknown, seconds = '30'): Response {
+  const headers = { 'X-Poll-Interval': seconds };
+  if (body === null) return new Response(null, { status: 204, headers });
+  return Response.json(body, { headers });
+}

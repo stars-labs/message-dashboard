@@ -2,7 +2,7 @@ import { implement } from '@orpc/server';
 import type * as v from 'valibot';
 import type { CarrierBillMutationBody } from '../../shared/api/carrier-bills.js';
 import { contract } from '../../shared/api/contract/index.js';
-import { POLL_INTERVAL_HEADER, RECURRING, type RecurringName } from '../../shared/recurring.js';
+import { RECURRING, type PollHeaders, type RecurringName } from '../../shared/recurring.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { balanceBatchesHandler } from '../handlers/balance-batches.js';
 import { balanceQueriesHandler } from '../handlers/balance-queries.js';
@@ -37,10 +37,9 @@ export interface ContractContext {
 const os = implement(contract).$context<ContractContext>();
 
 /** Tells the daemon or the Balance Agent when to call again, once the call has succeeded. */
-async function paced<T>(context: ContractContext, name: RecurringName, answer: Promise<T>) {
-  const value = await answer;
-  context.resHeaders.set(POLL_INTERVAL_HEADER, String(RECURRING[name].everySeconds));
-  return value;
+async function paced<T>(name: RecurringName, answer: Promise<T>) {
+  const headers: PollHeaders = { 'x-poll-interval': String(RECURRING[name].everySeconds) };
+  return { headers, body: await answer };
 }
 
 function runnerOf({ runner }: ContractContext): AuthorizedRunner {
@@ -70,17 +69,16 @@ function billMutation(input: {
 export const router = os.router({
   control: {
     heartbeat: os.control.heartbeat.handler(({ context, input }) =>
-      paced(context, 'daemonHeartbeat', recordHeartbeat(context.request, input)),
+      paced('daemonHeartbeat', recordHeartbeat(context.request, input)),
     ),
     devices: os.control.devices.handler(({ context, input }) =>
-      paced(context, 'daemonDevices', controlHandler.updateDevices(context.request, input)),
+      paced('daemonDevices', controlHandler.updateDevices(context.request, input)),
     ),
     uploadMessages: os.control.uploadMessages.handler(({ context, input }) =>
       controlHandler.uploadMessages(context.request, input),
     ),
     pendingSms: os.control.pendingSms.handler(({ context, input }) =>
       paced(
-        context,
         'daemonPendingSms',
         controlHandler.getPendingSMS(context.request, input.headers['x-daemon-session-id']),
       ),
@@ -99,7 +97,6 @@ export const router = os.router({
     check: os.balanceRunnerControl.check.handler(() => ({ success: true }) as const),
     heartbeat: os.balanceRunnerControl.heartbeat.handler(({ context, input }) =>
       paced(
-        context,
         'runnerHeartbeat',
         balanceRunnersHandler.heartbeat(context.request, runnerOf(context), input),
       ),
@@ -107,14 +104,15 @@ export const router = os.router({
   },
   balanceSkillJobs: {
     claim: os.balanceSkillJobs.claim.handler(async ({ context, input }) => {
-      const job = await paced(
-        context,
+      const { headers, body: job } = await paced(
         'runnerSkillClaim',
         sessionRunner(context, input.query.runner_id).then((runner) =>
           balanceSkillRunnerHandler.claim(context.request, runner, input.query.runner_id),
         ),
       );
-      return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
+      return job === null
+        ? { status: 204 as const, headers }
+        : { status: 200 as const, headers, body: job };
     }),
     decision: os.balanceSkillJobs.decision.handler(async ({ context, input }) =>
       balanceSkillRunnerHandler.decide(
@@ -135,14 +133,15 @@ export const router = os.router({
   },
   carrierWebJobs: {
     claim: os.carrierWebJobs.claim.handler(async ({ context, input }) => {
-      const job = await paced(
-        context,
+      const { headers, body: job } = await paced(
         'runnerWebClaim',
         sessionRunner(context, input.query.runner_id).then((runner) =>
           carrierWebBalanceHandler.claim(context.request, runner, input.query.runner_id),
         ),
       );
-      return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
+      return job === null
+        ? { status: 204 as const, headers }
+        : { status: 200 as const, headers, body: job };
     }),
     otpRequested: os.carrierWebJobs.otpRequested.handler(async ({ context, input }) =>
       carrierWebBalanceHandler.otpRequested(

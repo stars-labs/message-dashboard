@@ -55,8 +55,8 @@ describe('runner fixtures', () => {
       capabilities: ['sms_ai'],
       version: '1.0.0',
       platform: 'darwin',
-      setIntervalFn: () => setTimeout(() => undefined, 0),
-      clearIntervalFn: () => undefined,
+      setTimeoutFn: () => setTimeout(() => undefined, 0),
+      clearTimeoutFn: () => undefined,
       logger: quiet,
     });
 

@@ -21,6 +21,7 @@ import {
   WebJobLeaseBody,
   WebJobOtpQuery,
 } from '../carrier-web-balance.js';
+import { PollHeaders } from '../../recurring.js';
 import { JobParams, RunnerIdQuery } from '../runner-jobs.js';
 import { RUNNER_SCOPES } from '../runner-scopes.js';
 import { route } from './route.js';
@@ -39,8 +40,8 @@ const balanceSkillJobs = {
     .input(v.object({ query: RunnerIdQuery }))
     .output(
       v.union([
-        v.object({ status: v.literal(200), body: BalanceSkillJob }),
-        v.object({ status: v.literal(204) }),
+        v.object({ status: v.literal(200), headers: PollHeaders, body: BalanceSkillJob }),
+        v.object({ status: v.literal(204), headers: PollHeaders }),
       ]),
     ),
   decision: route(SMS_AI, 'POST', '/api/control/balance-skills/jobs/{id}/decision')
@@ -64,8 +65,8 @@ const carrierWebJobs = {
     .input(v.object({ query: RunnerIdQuery }))
     .output(
       v.union([
-        v.object({ status: v.literal(200), body: CarrierWebBalanceJobWire }),
-        v.object({ status: v.literal(204) }),
+        v.object({ status: v.literal(200), headers: PollHeaders, body: CarrierWebBalanceJobWire }),
+        v.object({ status: v.literal(204), headers: PollHeaders }),
       ]),
     ),
   otpRequested: route(BROWSER, 'POST', `${WEB_JOBS}/{id}/otp-requested`)
@@ -103,8 +104,9 @@ const carrierWebJobs = {
 const balanceRunnerControl = {
   check: route(PRESENCE, 'GET', '/api/control/balance-runners/check').output(RunnerCheckResponse),
   heartbeat: route(PRESENCE, 'POST', '/api/control/balance-runners/heartbeat')
+    .route({ outputStructure: 'detailed' })
     .input(RunnerHeartbeatBody)
-    .output(RunnerHeartbeatResponse),
+    .output(v.object({ headers: PollHeaders, body: RunnerHeartbeatResponse })),
 };
 
 export const runnerContract = { balanceRunnerControl, balanceSkillJobs, carrierWebJobs };

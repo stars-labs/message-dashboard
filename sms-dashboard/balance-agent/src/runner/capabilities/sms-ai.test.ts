@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
 import { parseJson } from '../../../../shared/parse-json.js';
-import { fakeControlClient, jsonAnswer, type Sent } from '../../test-support/control-client.js';
+import {
+  fakeControlClient,
+  jsonAnswer,
+  pacedAnswer,
+  type Sent,
+} from '../../test-support/control-client.js';
 import { createSmsAiCapability } from './sms-ai.js';
 
 const skill = {
@@ -26,7 +31,7 @@ function createHarness({
   const states: unknown[][] = [];
   const errors: string[] = [];
   const responses = [
-    jsonAnswer({
+    pacedAnswer({
       id: 'job-1',
       check_id: 'check-1',
       step_index: 1,
@@ -78,6 +83,22 @@ function submittedBody(request: Sent | undefined): v.InferOutput<typeof Submitte
 const PromptBody = v.object({ menu_options: v.array(v.unknown()) });
 
 describe('SMS AI capability', () => {
+  test('claims again when the Worker says, once the queue is empty', async () => {
+    const capability = createSmsAiCapability({
+      controlClient: fakeControlClient(() => pacedAnswer(null, '23')).client,
+      presence: { set: () => Promise.resolve() },
+      runnerId: 'session-1',
+      aiBaseUrl: 'https://ai.example',
+      aiToken: 'not-observed',
+      aiModel: 'model',
+      callAI: () => Promise.reject(new Error('AI must not run')),
+      isAIReachable: () => Promise.resolve(true),
+      logger: { log: () => undefined, error: () => undefined },
+    });
+
+    expect(await capability.runOne()).toEqual({ handled: false, retryDelay: 23_000 });
+  });
+
   test('uses an explicit safe balance instruction without calling AI', async () => {
     const harness = createHarness({ content: '查询余额请发送 102 至 10001。' });
     const result = await harness.capability.runOne();

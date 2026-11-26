@@ -16,6 +16,7 @@ import {
   UploadResponse,
 } from '../daemon.js';
 import { NOT_JSON_MESSAGE } from '../body.js';
+import { PollHeaders } from '../../recurring.js';
 import { route } from './route.js';
 
 const DAEMON = { kind: 'daemon', errors: 'flagged' } as const;
@@ -33,24 +34,26 @@ export const control = {
   // The snapshot is read field by field (normalizeHealthSnapshot), so a daemon a version
   // ahead or behind gets the same refusal.
   heartbeat: route(DAEMON, 'POST', '/api/control/heartbeat')
+    .route({ outputStructure: 'detailed' })
     .input(
       v.pipe(
         v.unknown(),
         v.check((body) => body !== undefined, NOT_JSON_MESSAGE),
       ),
     )
-    .output(HeartbeatResponse),
+    .output(v.object({ headers: PollHeaders, body: HeartbeatResponse })),
   // Refuses a report in { error }.
   devices: route({ kind: 'daemon', errors: 'plain' }, 'POST', '/api/control/devices')
+    .route({ outputStructure: 'detailed' })
     .input(DevicesBody)
-    .output(DevicesResponse),
+    .output(v.object({ headers: PollHeaders, body: DevicesResponse })),
   uploadMessages: route(DAEMON, 'POST', '/api/control/messages')
     .input(UploadBody)
     .output(UploadResponse),
   pendingSms: route(DAEMON, 'GET', '/api/control/pending-sms')
-    .route({ inputStructure: 'detailed' })
+    .route({ inputStructure: 'detailed', outputStructure: 'detailed' })
     .input(v.object({ headers: PendingSmsHeaders }))
-    .output(PendingSmsResponse),
+    .output(v.object({ headers: PollHeaders, body: PendingSmsResponse })),
   smsResult: route(DAEMON, 'POST', '/api/control/sms-result')
     .input(SmsResultBody)
     .output(SmsResultResponse),

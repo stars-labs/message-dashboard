@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { pacedAnswer } from '../test-support/control-client.js';
 import { ControlError, createControlClient } from './control-client.js';
 
 const HEARTBEAT = {
@@ -18,7 +19,7 @@ describe('runner control client', () => {
       apiKey: 'local-secret',
       fetchImpl: (url, init) => {
         calls.push([url, init]);
-        return Promise.resolve(Response.json({ success: true, runner_id: 'desktop-1' }));
+        return Promise.resolve(pacedAnswer({ success: true, runner_id: 'desktop-1' }));
       },
     });
 
@@ -61,13 +62,13 @@ describe('runner control client', () => {
       apiKey: 'key',
       fetchImpl: (url, init) => {
         urls.push(`${String(init.method)} ${url} ${typeof init.body}`);
-        return Promise.resolve(new Response(null, { status: 204 }));
+        return Promise.resolve(pacedAnswer(null, '5'));
       },
     });
 
     expect(
       await client.balanceSkillJobs.claim({ query: { runner_id: 'desktop 1' } }),
-    ).toMatchObject({ status: 204 });
+    ).toMatchObject({ status: 204, headers: { 'x-poll-interval': '5' } });
     expect(urls).toEqual([
       'GET https://dashboard.example/api/control/balance-skills/jobs/claim?runner_id=desktop+1 undefined',
     ]);

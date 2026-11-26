@@ -9,6 +9,7 @@ import {
 import type { CompanyAIProtocol } from '../company-ai.js';
 import { ControlError, type ControlClient } from '../control-client.js';
 import { errorText } from '../../../../shared/error-text.js';
+import { pollDelayMs } from '../pace.js';
 import type { CapabilityPresence } from '../presence.js';
 import type { RunOutcome } from '../serial-runner.js';
 
@@ -111,7 +112,7 @@ export function createSmsAiCapability({
         .catch((error: unknown) => {
           throw rejected('Could not claim a skill job', error);
         });
-      if (claim.status === 204) return { handled: false, retryDelay: 5_000 };
+      if (claim.status === 204) return { handled: false, retryDelay: pollDelayMs(claim.headers) };
       const job: BalanceSkillJob = claim.body;
       await presence.set('busy', job.id);
       try {

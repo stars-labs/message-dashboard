@@ -2,8 +2,10 @@ import type { BalanceRunnerCapability } from '../../../shared/api/balance-runner
 import type { LatestBalanceAgent } from '../../../shared/balance-agent-release.js';
 import { ControlError, type ControlClient } from './control-client.js';
 import { errorText } from '../../../shared/error-text.js';
+import { pollDelayMs } from './pace.js';
 
-const HEARTBEAT_INTERVAL_MS = 30_000;
+/** The wait after a heartbeat the Worker did not answer, so it set no pace. */
+const UNPACED_HEARTBEAT_MS = 30_000;
 
 type RunnerCapabilityName = BalanceRunnerCapability['capability'];
 
@@ -32,9 +34,8 @@ export function createRunnerPresence({
   capabilities,
   version = 'development',
   platform,
-  heartbeatInterval = HEARTBEAT_INTERVAL_MS,
-  setIntervalFn = setInterval,
-  clearIntervalFn = clearInterval,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
   logger = console,
   onLatestAgent,
 }: {
@@ -45,12 +46,8 @@ export function createRunnerPresence({
   capabilities: readonly RunnerCapabilityName[];
   version?: string;
   platform: string;
-  heartbeatInterval?: number;
-  setIntervalFn?: (
-    callback: () => Promise<void>,
-    interval: number,
-  ) => ReturnType<typeof setInterval>;
-  clearIntervalFn?: (timer: ReturnType<typeof setInterval>) => void;
+  setTimeoutFn?: (callback: () => Promise<void>, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimeoutFn?: (timer: ReturnType<typeof setTimeout>) => void;
   logger?: Logger;
   /** The Agent release the Dashboard announces with each accepted heartbeat. */
   onLatestAgent?: (latest: LatestBalanceAgent) => void;
@@ -67,8 +64,9 @@ export function createRunnerPresence({
       },
     ]),
   );
-  let timer: ReturnType<typeof setInterval> | null = null;
-  let pending: Promise<void> = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let running = false;
+  let pending: Promise<number> = Promise.resolve(UNPACED_HEARTBEAT_MS);
   let lastError: string | null = null;
 
   function snapshots(selected: Iterable<RunnerCapabilityName>): CapabilityState[] {
@@ -78,7 +76,8 @@ export function createRunnerPresence({
     });
   }
 
-  function send(selected: Iterable<RunnerCapabilityName> = []): Promise<void> {
+  /** Resolves to how long to wait before the next periodic heartbeat. */
+  function send(selected: Iterable<RunnerCapabilityName> = []): Promise<number> {
     const capabilitySnapshots = snapshots(selected);
     pending = pending
       .then(async () => {
@@ -96,7 +95,8 @@ export function createRunnerPresence({
             throw new Error(`heartbeat rejected (${String(error.status)})`, { cause: error });
           });
         lastError = null;
-        if (answer.latest_agent !== undefined) onLatestAgent?.(answer.latest_agent);
+        if (answer.body.latest_agent !== undefined) onLatestAgent?.(answer.body.latest_agent);
+        return pollDelayMs(answer.headers);
       })
       .catch((error: unknown) => {
         const message = errorText(error);
@@ -104,15 +104,22 @@ export function createRunnerPresence({
           logger.error(`Runner presence unavailable: ${message}`);
           lastError = message;
         }
+        return UNPACED_HEARTBEAT_MS;
       });
     return pending;
   }
 
+  function beatAfter(ms: number) {
+    timer = setTimeoutFn(async () => {
+      if (running) beatAfter(await send());
+    }, ms);
+    timer.unref();
+  }
+
   return Object.freeze({
     async start(): Promise<void> {
-      await send(states.keys());
-      timer = setIntervalFn(() => send(), heartbeatInterval);
-      timer.unref();
+      running = true;
+      beatAfter(await send(states.keys()));
     },
     async set(
       capability: RunnerCapabilityName,
@@ -137,7 +144,8 @@ export function createRunnerPresence({
       await send([capability]);
     },
     async stop(): Promise<void> {
-      if (timer) clearIntervalFn(timer);
+      running = false;
+      if (timer) clearTimeoutFn(timer);
       timer = null;
       for (const [capability, current] of states) {
         states.set(capability, {

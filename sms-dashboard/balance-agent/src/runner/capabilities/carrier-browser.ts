@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import { CarrierWebBalanceJob } from '../../../../shared/api/carrier-web-balance.js';
 import type { ControlClient } from '../control-client.js';
+import { pollDelayMs } from '../pace.js';
 import type { CapabilityPresence } from '../presence.js';
 import type { RunOutcome } from '../serial-runner.js';
 
@@ -24,7 +25,7 @@ export function createCarrierBrowserCapability({
         { query: { runner_id: runnerId } },
         signal === null ? {} : { signal },
       );
-      if (claim.status === 204) return { handled: false, retryDelay: 5_000 };
+      if (claim.status === 204) return { handled: false, retryDelay: pollDelayMs(claim.headers) };
 
       // The wire passes the skill on as stored; each provider's fields are read here.
       const claimed = v.safeParse(CarrierWebBalanceJob, claim.body);

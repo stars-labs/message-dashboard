@@ -10,6 +10,7 @@ export function runnerFixture(name: string): ControlFixture {
 }
 
 export function recordedResponse({ response }: ControlFixture): Response {
-  if (response.body === undefined) return new Response(null, { status: response.status });
-  return Response.json(response.body, { status: response.status });
+  const init = { status: response.status, headers: response.headers ?? {} };
+  if (response.body === undefined) return new Response(null, init);
+  return Response.json(response.body, init);
 }

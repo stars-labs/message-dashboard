@@ -4,6 +4,8 @@
 // wrangler.toml's cron schedule to it. server/recurring-calls.test.ts multiplies the
 // idle calls out against the free plan.
 
+import * as v from 'valibot';
+
 /** The callers a recurring call serves at most. */
 export const CALLERS = {
   /** The Orange Pi. */
@@ -126,7 +128,10 @@ export const RECURRING = {
 
 export type RecurringName = keyof typeof RECURRING;
 
-export const POLL_INTERVAL_HEADER = 'X-Poll-Interval';
+/** The seconds to wait before the next call, on every recurring control response. */
+export const PollHeaders = v.object({ 'x-poll-interval': v.pipe(v.string(), v.regex(/^\d+$/)) });
+
+export type PollHeaders = v.InferOutput<typeof PollHeaders>;
 
 export function intervalMs(name: RecurringName): number {
   return RECURRING[name].everySeconds * 1000;

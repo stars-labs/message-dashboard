@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import * as v from 'valibot';
-import { fakeControlClient, jsonAnswer } from '../test-support/control-client.js';
+import { fakeControlClient, pacedAnswer } from '../test-support/control-client.js';
 import { createRunnerPresence } from './presence.js';
 
 const Heartbeat = v.object({
@@ -21,7 +21,7 @@ function heartbeatBody({ body }: { body: unknown }): Heartbeat {
 }
 
 function accepting() {
-  return fakeControlClient(() => jsonAnswer({ success: true, runner_id: 'workstation' }));
+  return fakeControlClient(() => pacedAnswer({ success: true, runner_id: 'workstation' }));
 }
 
 describe('runner presence client', () => {
@@ -63,7 +63,7 @@ describe('runner presence client', () => {
   test('passes on the Agent version the Dashboard announces', async () => {
     const latest = { version: '0.2.0' };
     const { client } = fakeControlClient(() =>
-      jsonAnswer({ success: true, runner_id: 'workstation', latest_agent: latest }),
+      pacedAnswer({ success: true, runner_id: 'workstation', latest_agent: latest }),
     );
     const announced: unknown[] = [];
     const presence = createRunnerPresence({
@@ -103,6 +103,62 @@ describe('runner presence client', () => {
     expect(announced).toEqual([]);
   });
 
+  test('beats again when the Worker says, and after 30 s when it does not answer', async () => {
+    const answers = [
+      pacedAnswer({ success: true, runner_id: 'workstation' }, '45'),
+      new Response('unavailable', { status: 503 }),
+    ];
+    const { client } = fakeControlClient(
+      () => answers.shift() ?? pacedAnswer({ success: true, runner_id: 'workstation' }),
+    );
+    const waits: number[] = [];
+    let heartbeat: (() => Promise<void>) | undefined;
+    const presence = createRunnerPresence({
+      controlClient: client,
+      runnerId: 'workstation',
+      sessionId: 'session-1',
+      displayName: 'Workstation',
+      capabilities: ['sms_ai'],
+      platform: 'darwin',
+      setTimeoutFn: (callback, ms) => {
+        waits.push(ms);
+        heartbeat = callback;
+        return setTimeout(() => undefined, 0);
+      },
+      clearTimeoutFn: () => undefined,
+      logger: { error: () => undefined },
+    });
+
+    await presence.start();
+    await heartbeat?.();
+
+    expect(waits).toEqual([45_000, 30_000]);
+  });
+
+  test('beats no more once stopped', async () => {
+    const { client, sent } = accepting();
+    let heartbeat: (() => Promise<void>) | undefined;
+    const presence = createRunnerPresence({
+      controlClient: client,
+      runnerId: 'workstation',
+      sessionId: 'session-1',
+      displayName: 'Workstation',
+      capabilities: ['sms_ai'],
+      platform: 'darwin',
+      setTimeoutFn: (callback) => {
+        heartbeat = callback;
+        return setTimeout(() => undefined, 0);
+      },
+      clearTimeoutFn: () => undefined,
+    });
+
+    await presence.start();
+    await presence.stop();
+    await heartbeat?.();
+
+    expect(sent).toHaveLength(2);
+  });
+
   test('periodic liveness omits unchanged capability state', async () => {
     const { client, sent } = accepting();
     let heartbeat: (() => Promise<void>) | undefined;
@@ -114,11 +170,11 @@ describe('runner presence client', () => {
       capabilities: ['carrier_browser'],
       version: '1.0.0',
       platform: 'darwin',
-      setIntervalFn: (callback) => {
+      setTimeoutFn: (callback) => {
         heartbeat = callback;
         return setTimeout(() => undefined, 0);
       },
-      clearIntervalFn: () => undefined,
+      clearTimeoutFn: () => undefined,
     });
 
     await presence.start();

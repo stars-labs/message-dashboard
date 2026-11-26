@@ -88,6 +88,15 @@
         "responses": {
           "200": {
             "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -107,8 +116,7 @@
                     "success",
                     "message",
                     "received_at"
-                  ],
-                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                  ]
                 }
               }
             }
@@ -323,6 +331,15 @@
         "responses": {
           "200": {
             "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -369,8 +386,7 @@
                     "sync_mode",
                     "session_id",
                     "processed"
-                  ],
-                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                  ]
                 }
               }
             }
@@ -531,6 +547,15 @@
         "responses": {
           "200": {
             "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -592,8 +617,7 @@
                   "required": [
                     "success",
                     "pending_messages"
-                  ],
-                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                  ]
                 }
               }
             }
@@ -1131,6 +1155,15 @@
         "responses": {
           "200": {
             "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1158,8 +1191,7 @@
                   "required": [
                     "success",
                     "runner_id"
-                  ],
-                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                  ]
                 }
               }
             }
@@ -1201,6 +1233,15 @@
         "responses": {
           "200": {
             "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1295,7 +1336,16 @@
             }
           },
           "204": {
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/DaemonError"
@@ -1546,6 +1596,15 @@
         "responses": {
           "200": {
             "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1616,7 +1675,16 @@
             }
           },
           "204": {
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "x-poll-interval": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\\d+$"
+                },
+                "required": true
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/DaemonError"
