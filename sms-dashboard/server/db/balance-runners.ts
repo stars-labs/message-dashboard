@@ -55,6 +55,84 @@ export function listUserRunnerCapabilities(db: D1<'all'>, authSubject: string) {
   );
 }
 
+const AdministeredInstallationRow = v.object({
+  id: v.string(),
+  display_name: v.string(),
+  auth_mode: v.picklist(AUTH_MODES),
+  auth_subject: v.nullable(v.string()),
+  platform: v.string(),
+  version: v.string(),
+  last_heartbeat: v.string(),
+  seconds_since_heartbeat: v.number(),
+  revoked_at: v.nullable(v.string()),
+});
+
+/** Every installation, whoever signed it in; revoked ones after the rest. */
+export function listAllRunnerInstallations(db: D1<'all'>) {
+  return queryAll(
+    db.prepare(
+      `
+      SELECT id, display_name, auth_mode, auth_subject, platform, version, last_heartbeat,
+        CAST((julianday('now') - julianday(last_heartbeat)) * 86400 AS INTEGER)
+          AS seconds_since_heartbeat,
+        revoked_at
+      FROM balance_runner_installations
+      ORDER BY revoked_at IS NOT NULL, datetime(last_heartbeat) DESC, id
+    `,
+    ),
+    AdministeredInstallationRow,
+  );
+}
+
+const RevokedRow = v.object({ revoked_at: v.string() });
+
+/** The installation's revocation time, set now unless it already had one; null when it does not exist. */
+export function revokeRunnerInstallation(db: D1<'first'>, runnerId: string) {
+  return queryFirst(
+    db
+      .prepare(
+        `
+      UPDATE balance_runner_installations
+      SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+      RETURNING revoked_at
+    `,
+      )
+      .bind(runnerId),
+    RevokedRow,
+  );
+}
+
+const AdmittedRow = v.object({ admitted: v.literal(1) });
+
+/**
+ * Whether `sessionId`, the runner_id a job call carries, was last heartbeated by an
+ * unrevoked installation signed in as `auth`.
+ */
+export async function runnerSessionAdmitted(
+  db: D1<'first'>,
+  sessionId: string,
+  auth: AuthorizedRunner,
+): Promise<boolean> {
+  const row = await queryFirst(
+    db
+      .prepare(
+        `
+      SELECT 1 AS admitted
+      FROM balance_runner_capabilities c
+      JOIN balance_runner_installations r ON r.id = c.runner_id
+      WHERE c.session_id = ? AND r.revoked_at IS NULL
+        AND r.auth_mode = ? AND r.auth_subject IS ?
+      LIMIT 1
+    `,
+      )
+      .bind(sessionId, auth.authMode, auth.subject),
+    AdmittedRow,
+  );
+  return row !== null;
+}
+
 export function findRunnerInstallation(db: D1<'first'>, runnerId: string) {
   return queryFirst(
     db

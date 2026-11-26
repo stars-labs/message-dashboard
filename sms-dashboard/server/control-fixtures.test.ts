@@ -11,6 +11,7 @@ import {
 import { Database } from 'bun:sqlite';
 import type { ControlFixture } from '../shared/control-fixtures/fixture.js';
 import { callState, type CallFixture, type Fleet } from '../test/call-state-fleet.js';
+import { registerRunnerSession } from '../test/runner-session.js';
 import { createSchema } from '../test/schema.js';
 import { controlFixtures } from '../test/control-fixtures.js';
 import { sqliteD1 } from '../test/sqlite-d1.js';
@@ -180,6 +181,8 @@ async function replay(name: string, request: ControlFixture['request']): Promise
     `INSERT INTO modems (equipment_id, status, detected_iccid)
      VALUES ('861234567890123', 'connected', '${ICCID}')`,
   );
+  // Every Balance Agent heartbeats before it claims a job.
+  if (name.startsWith('runner/')) registerRunnerSession(sqlite, 'runner-1');
   const fleet = callState(null);
   const bindings = { DB: sqliteD1(sqlite), CALL_STATE: fleet };
   const exchange = async ({ method, path, body, text, anonymous }: ControlFixture['request']) => {

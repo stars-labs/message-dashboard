@@ -505,6 +505,7 @@
                 {databasePollingPaused}
                 canQueryBalances={can('balances.query')}
                 canWriteBills={can('bills.write')}
+                canManageRunners={can('runners.write')}
                 onQueriesChanged={balances.refresh}
                 onOpenBalance={balances.open}
               />

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
+import { registerRunnerSession } from '../../test/runner-session.js';
 import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
@@ -9,6 +10,7 @@ import type { D1, D1Batch } from '../lib/d1.js';
 import { auth0Handler } from './auth0.js';
 
 const API_KEY = 'secret';
+const RUNNER_NOT_ADMITTED = 'Runner session is not registered or its installation is revoked';
 const PROFILE = 'cn-mobile-sms-menu-v1';
 const SIM_NUMBER = '+8613500000000';
 const MENU = '11.账务查询\n12.客户服务';
@@ -35,6 +37,7 @@ beforeEach(async () => {
   sqlite.run(`
     INSERT INTO sims (iccid, sim_index, phone_number) VALUES ('iccid-1', 1, '${SIM_NUMBER}');
   `);
+  registerRunnerSession(sqlite, 'runner-1');
   db = sqliteD1(sqlite);
 });
 
@@ -234,12 +237,59 @@ describe('POST /api/control/balance-skills/jobs/claim', () => {
 
   test('lets only the owning account claim a Dashboard-owned job', async () => {
     seedJob(MENU, { owner: 'auth0|alice' });
+    registerRunnerSession(sqlite, 'bob-session', {
+      authMode: 'auth0_device',
+      subject: 'auth0|bob',
+    });
+    registerRunnerSession(sqlite, 'alice-session', {
+      authMode: 'auth0_device',
+      subject: 'auth0|alice',
+    });
 
-    const other = await claimResponse({ headers: signInDevice('auth0|bob') });
+    const other = await claimResponse({
+      runnerId: 'bob-session',
+      headers: signInDevice('auth0|bob'),
+    });
     expect(other.status).toBe(204);
 
-    const job = await claim({ headers: signInDevice('auth0|alice') });
+    const job = await claim({ runnerId: 'alice-session', headers: signInDevice('auth0|alice') });
     expect(job.id).toBe('job-1');
+  });
+
+  test('refuses a session no heartbeat has registered', async () => {
+    seedJob(MENU);
+
+    const response = await claimResponse({ runnerId: 'unheard-session' });
+
+    expect(response.status).toBe(403);
+    expect(await errorOf(response)).toBe(RUNNER_NOT_ADMITTED);
+    expect(jobState().status).toBe('pending');
+  });
+
+  test('refuses a session of a revoked installation', async () => {
+    seedJob(MENU);
+    registerRunnerSession(sqlite, 'revoked-session', undefined, { revoked: true });
+
+    const response = await claimResponse({ runnerId: 'revoked-session' });
+
+    expect(response.status).toBe(403);
+    expect(jobState().status).toBe('pending');
+  });
+
+  test("refuses another account's session", async () => {
+    seedJob(MENU, { owner: 'auth0|alice' });
+    registerRunnerSession(sqlite, 'alice-session', {
+      authMode: 'auth0_device',
+      subject: 'auth0|alice',
+    });
+
+    const response = await claimResponse({
+      runnerId: 'alice-session',
+      headers: signInDevice('auth0|mallory'),
+    });
+
+    expect(response.status).toBe(403);
+    expect(jobState().status).toBe('pending');
   });
 
   test('stops a job whose skill has used its turns instead of handing it out', async () => {

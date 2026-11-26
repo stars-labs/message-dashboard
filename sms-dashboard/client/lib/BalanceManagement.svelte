@@ -26,6 +26,7 @@
   import HistoryTab from './balance/HistoryTab.svelte';
   import OverviewFilters from './balance/OverviewFilters.svelte';
   import OverviewTable from './balance/OverviewTable.svelte';
+  import RunnerAdminDialog from './balance/RunnerAdminDialog.svelte';
   import RunnerStatus from './balance/RunnerStatus.svelte';
   import SingleQueryDialog from './balance/SingleQueryDialog.svelte';
   import { buildFilterTabs, currentFilterLabel, matchesStatusFilter } from './balance/filters.js';
@@ -56,6 +57,7 @@
     onOpenBalance?: ((check: BalanceCheck) => void) | null;
     canQueryBalances?: boolean;
     canWriteBills?: boolean;
+    canManageRunners?: boolean;
     databasePollingPaused?: boolean;
     onQueriesChanged?: ((change: QueriesChange) => Promise<void>) | null;
   }
@@ -66,11 +68,13 @@
     onOpenBalance = null,
     canQueryBalances = false,
     canWriteBills = false,
+    canManageRunners = false,
     databasePollingPaused = false,
     onQueriesChanged = null,
   }: Props = $props();
 
   let activeTab: 'overview' | 'bills' | 'history' = $state('overview');
+  let managingRunners = $state(false);
   let statusFilter: StatusFilter = $state('all');
   let carrierFilter = $state('all');
   let searchQuery = $state('');
@@ -514,7 +518,15 @@
     />
 
     {#if activeTab !== 'bills'}
-      <RunnerStatus {runnerStatus} loading={runnerStatusLoading} />
+      <RunnerStatus
+        {runnerStatus}
+        loading={runnerStatusLoading}
+        onManage={canManageRunners
+          ? () => {
+              managingRunners = true;
+            }
+          : undefined}
+      />
     {/if}
 
     <StatusBanners {billAccountsError} bind:notice onRetryAccounts={() => loadBillingAccounts()} />
@@ -598,6 +610,15 @@
       singlePreview = null;
     }}
     onSubmit={() => submitSingle()}
+  />
+{/if}
+
+{#if managingRunners}
+  <RunnerAdminDialog
+    onClose={() => {
+      managingRunners = false;
+      void loadRunnerStatus();
+    }}
   />
 {/if}
 

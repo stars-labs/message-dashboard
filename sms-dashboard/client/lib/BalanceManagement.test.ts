@@ -561,6 +561,26 @@ describe('balance management', () => {
     expect(view.getByText('浏览器任务逐张处理')).toBeTruthy();
   });
 
+  test('lets only a runner admin open the runner list', async () => {
+    stubApi((url) =>
+      url.pathname === '/api/balance-runners/installations'
+        ? Response.json({ success: true, runners: [] })
+        : undefined,
+    );
+    const viewer = render(BalanceManagement, {
+      props: { phoneNumbers: [phone], balanceChecks: [check] },
+    });
+    expect(viewer.queryByRole('button', { name: '管理查询助手' })).toBeNull();
+    cleanup();
+
+    const admin = render(BalanceManagement, {
+      props: { phoneNumbers: [phone], balanceChecks: [check], canManageRunners: true },
+    });
+    await fireEvent.click(admin.getByRole('button', { name: '管理查询助手' }));
+    expect(await admin.findByRole('dialog', { name: '管理查询助手' })).toBeTruthy();
+    expect(await admin.findByText('还没有电脑登记为查询助手')).toBeTruthy();
+  });
+
   test('shows a per-SIM overview and opens the latest query', async () => {
     stubApi();
     const opened: BalanceCheck[] = [];

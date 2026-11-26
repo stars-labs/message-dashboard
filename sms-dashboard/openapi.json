@@ -9308,6 +9308,171 @@
         ]
       }
     },
+    "/api/balance-runners/installations": {
+      "get": {
+        "operationId": "balanceRunners.installations",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "runners": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "auth_mode": {
+                            "enum": [
+                              "legacy_api_key",
+                              "auth0_device"
+                            ],
+                            "type": "string"
+                          },
+                          "auth_subject": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "platform": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          },
+                          "last_heartbeat": {
+                            "type": "string"
+                          },
+                          "online": {
+                            "type": "boolean"
+                          },
+                          "revoked_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "display_name",
+                          "auth_mode",
+                          "auth_subject",
+                          "platform",
+                          "version",
+                          "last_heartbeat",
+                          "online",
+                          "revoked_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "runners"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "runners.read"
+            ]
+          },
+          {
+            "auth0": [
+              "runners.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-runners/{id}/revoke": {
+      "post": {
+        "operationId": "balanceRunners.revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "runner_id": {
+                      "type": "string"
+                    },
+                    "revoked_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "runner_id",
+                    "revoked_at"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "runners.write"
+            ]
+          },
+          {
+            "auth0": [
+              "runners.write"
+            ]
+          }
+        ]
+      }
+    },
     "/api/carrier-billing/accounts": {
       "get": {
         "operationId": "carrierBills.accounts",

@@ -45,6 +45,12 @@
   that work.
 - `NULL` ownership is reserved for legacy API-key jobs. Do not weaken this
   compatibility boundary.
+- A claim's `runner_id` is the Agent's session ID. A claim is refused (403) unless a
+  heartbeat has registered that session under an unrevoked installation signed in
+  the same way (same API key mode, or same Auth0 `sub`). An admin with
+  `runners.write` revokes an installation (`balance_runner_installations.revoked_at`);
+  its heartbeats and claims are refused from then on, and a restart cannot re-register
+  it.
 
 ## Carrier billing contracts
 

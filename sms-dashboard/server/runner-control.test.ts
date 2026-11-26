@@ -3,6 +3,7 @@
 // move onto the contract must leave all of it as it is.
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { registerRunnerSession } from '../test/runner-session.js';
 import { createSchema } from '../test/schema.js';
 import { sqliteD1 } from '../test/sqlite-d1.js';
 import { callWorker, TEST_API_KEY } from '../test/worker-harness.js';
@@ -53,6 +54,7 @@ beforeEach(async () => {
       'cn-unicom-web-balance-v1');
     INSERT INTO sim_balance_web_jobs (id, check_id, provider) VALUES ('web-1', 'check-w', 'china_unicom');
   `);
+  registerRunnerSession(sqlite, 'runner-1');
   db = sqliteD1(sqlite);
   verifySpy = spyOn(auth0Handler, 'verifyToken').mockRejectedValue(new Error('bad audience'));
   errorSpy = spyOn(console, 'error').mockImplementation(() => undefined);
@@ -335,6 +337,9 @@ describe('runner refusals on the wire', () => {
       '/api/control/carrier-web-balance/jobs/claim',
     ]) {
       expect(await send('GET', `${base}?runner_id=runner-1`, {})).toEqual(NO_CONTENT);
+      expect(await send('GET', `${base}?runner_id=unheard`, {})).toEqual(
+        answer(403, '{"error":"Runner session is not registered or its installation is revoked"}'),
+      );
     }
   });
 

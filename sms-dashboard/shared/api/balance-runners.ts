@@ -67,6 +67,36 @@ export const BalanceRunnersResponse = v.object({
 
 export type BalanceRunnersResponse = v.InferOutput<typeof BalanceRunnersResponse>;
 
+/** An installation as an admin sees it: anyone's, revoked or not. */
+export const RunnerInstallation = v.object({
+  id: v.string(),
+  display_name: v.string(),
+  auth_mode: v.picklist(['legacy_api_key', 'auth0_device']),
+  auth_subject: v.nullable(v.string()),
+  platform: v.string(),
+  version: v.string(),
+  last_heartbeat: v.string(),
+  online: v.boolean(),
+  revoked_at: v.nullable(v.string()),
+});
+
+export type RunnerInstallation = v.InferOutput<typeof RunnerInstallation>;
+
+export const RunnerInstallationsResponse = v.object({
+  success: v.literal(true),
+  runners: v.array(RunnerInstallation),
+});
+
+export type RunnerInstallationsResponse = v.InferOutput<typeof RunnerInstallationsResponse>;
+
+export const RunnerRevokeResponse = v.object({
+  success: v.literal(true),
+  runner_id: v.string(),
+  revoked_at: v.string(),
+});
+
+export type RunnerRevokeResponse = v.InferOutput<typeof RunnerRevokeResponse>;
+
 const INVALID_HEARTBEAT = 'Invalid runner heartbeat';
 
 function boundedText(max: number) {

@@ -57,6 +57,8 @@ const EXPECTED = [
   ['POST', '/api/balance-checks/query-batch'],
   ['GET', '/api/balance-checks/:id'],
   ['GET', '/api/balance-runners'],
+  ['GET', '/api/balance-runners/installations'],
+  ['POST', '/api/balance-runners/:id/revoke'],
   ['GET', '/api/carrier-billing/accounts'],
   ['GET', '/api/carrier-bills'],
   ['GET', '/api/carrier-bills/:id'],

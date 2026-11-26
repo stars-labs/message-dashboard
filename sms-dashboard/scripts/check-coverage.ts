@@ -8,7 +8,7 @@ const root = join(import.meta.dirname, '..');
 
 const FLOORS: Record<string, { report: string; floor: Coverage }> = {
   runtime: { report: 'coverage/runtime/lcov.info', floor: { lines: 99.3, functions: 99.5 } },
-  client: { report: 'coverage/client/lcov.info', floor: { lines: 84.1, functions: 82.2 } },
+  client: { report: 'coverage/client/lcov.info', floor: { lines: 85.7, functions: 83.6 } },
   agent: { report: 'balance-agent/coverage/lcov.info', floor: { lines: 64.1, functions: 61.3 } },
 };
 

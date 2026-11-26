@@ -25,6 +25,8 @@ export const ROLE_PERMISSIONS = {
     'filters.delete',
     'users.read',
     'users.write',
+    'runners.read',
+    'runners.write',
   ],
 } as const satisfies Record<CanonicalRole, readonly string[]>;
 

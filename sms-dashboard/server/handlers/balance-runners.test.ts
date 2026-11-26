@@ -431,3 +431,153 @@ describe('runner status', () => {
     expect(response.status).toBe(401);
   });
 });
+
+const ADMIN_TOKEN = 'session-admin';
+
+const ADMIN_SESSIONS = memoryKv({
+  [ALICE_TOKEN]: JSON.stringify({
+    user: { id: ALICE, email: 'alice@example.com', roles: ['sms-viewer'] },
+    expires_at: Date.now() + 3_600_000,
+  }),
+  [ADMIN_TOKEN]: JSON.stringify({
+    user: { id: 'auth0|admin', email: 'admin@example.com', roles: ['sms-admin'] },
+    expires_at: Date.now() + 3_600_000,
+  }),
+});
+
+const InstallationsBody = v.object({
+  success: v.literal(true),
+  runners: v.array(
+    v.object({
+      id: v.string(),
+      display_name: v.string(),
+      auth_mode: v.string(),
+      auth_subject: v.nullable(v.string()),
+      platform: v.string(),
+      version: v.string(),
+      last_heartbeat: v.string(),
+      online: v.boolean(),
+      revoked_at: v.nullable(v.string()),
+    }),
+  ),
+});
+
+async function adminCall(method: string, path: string, token: string): Promise<Response> {
+  const { response } = await callWorker(method, path, {
+    headers: { Cookie: `auth_token=${token}` },
+    bindings: { DB: db, SESSIONS: ADMIN_SESSIONS },
+  });
+  return response;
+}
+
+function seedRunners() {
+  sqlite.run(`
+    INSERT INTO balance_runner_installations (
+      id, display_name, auth_mode, auth_subject, platform, version, last_heartbeat, revoked_at
+    ) VALUES
+      ('alice-mac', 'Alice Mac', 'auth0_device', 'auth0|alice', 'darwin', '1.2.0', CURRENT_TIMESTAMP, NULL),
+      ('bob-mac', 'Bob Mac', 'auth0_device', 'auth0|bob', 'darwin', '1.1.0', datetime('now', '-1 day'), NULL),
+      ('old-mac', 'Old Mac', 'auth0_device', 'auth0|alice', 'darwin', '1.0.0', datetime('now', '-9 days'), '2026-11-01 08:00:00');
+    INSERT INTO balance_runner_capabilities (runner_id, capability, state, session_id) VALUES
+      ('alice-mac', 'sms_ai', 'ready', 'alice-session'),
+      ('bob-mac', 'sms_ai', 'ready', 'bob-session');
+  `);
+}
+
+describe('runner administration', () => {
+  test('lists every installation, revoked ones last, for an admin', async () => {
+    seedRunners();
+    const response = await adminCall('GET', '/api/balance-runners/installations', ADMIN_TOKEN);
+    expect(response.status).toBe(200);
+    const body = v.parse(InstallationsBody, await response.json());
+    expect(
+      body.runners.map(({ id, auth_subject, version, online, revoked_at }) => ({
+        id,
+        auth_subject,
+        version,
+        online,
+        revoked_at,
+      })),
+    ).toEqual([
+      {
+        id: 'alice-mac',
+        auth_subject: 'auth0|alice',
+        version: '1.2.0',
+        online: true,
+        revoked_at: null,
+      },
+      {
+        id: 'bob-mac',
+        auth_subject: 'auth0|bob',
+        version: '1.1.0',
+        online: false,
+        revoked_at: null,
+      },
+      {
+        id: 'old-mac',
+        auth_subject: 'auth0|alice',
+        version: '1.0.0',
+        online: false,
+        revoked_at: '2026-11-01 08:00:00',
+      },
+    ]);
+  });
+
+  test('does not show the installations to a viewer', async () => {
+    seedRunners();
+    const response = await adminCall('GET', '/api/balance-runners/installations', ALICE_TOKEN);
+    expect(response.status).toBe(403);
+  });
+
+  test('revokes one installation and leaves the others alone', async () => {
+    seedRunners();
+    const response = await adminCall('POST', '/api/balance-runners/bob-mac/revoke', ADMIN_TOKEN);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, runner_id: 'bob-mac' });
+    expect(
+      sqlite
+        .query(
+          'SELECT id, revoked_at IS NOT NULL AS revoked FROM balance_runner_installations ORDER BY id',
+        )
+        .all(),
+    ).toEqual([
+      { id: 'alice-mac', revoked: 0 },
+      { id: 'bob-mac', revoked: 1 },
+      { id: 'old-mac', revoked: 1 },
+    ]);
+
+    const refused = await heartbeat(
+      { ...HEARTBEAT, runner_id: 'bob-mac', session_id: 'bob-session' },
+      signInDevice('auth0|bob'),
+    );
+    expect(refused.status).toBe(403);
+    const accepted = await heartbeat(
+      { ...HEARTBEAT, runner_id: 'alice-mac', session_id: 'alice-session' },
+      signInDevice('auth0|alice'),
+    );
+    expect(accepted.status).toBe(200);
+  });
+
+  test('keeps the first revocation time when revoked again', async () => {
+    seedRunners();
+    const response = await adminCall('POST', '/api/balance-runners/old-mac/revoke', ADMIN_TOKEN);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      success: true,
+      runner_id: 'old-mac',
+      revoked_at: '2026-11-01 08:00:00',
+    });
+  });
+
+  test('answers 404 for an unknown installation', async () => {
+    const response = await adminCall('POST', '/api/balance-runners/nope/revoke', ADMIN_TOKEN);
+    expect(response.status).toBe(404);
+  });
+
+  test('does not let a viewer revoke', async () => {
+    seedRunners();
+    const response = await adminCall('POST', '/api/balance-runners/bob-mac/revoke', ALICE_TOKEN);
+    expect(response.status).toBe(403);
+    expect(count('balance_runner_installations WHERE revoked_at IS NULL')).toBe(2);
+  });
+});

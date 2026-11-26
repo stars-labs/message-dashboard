@@ -4,7 +4,10 @@ import type { CarrierBillMutationBody } from '../../shared/api/carrier-bills.js'
 import { contract } from '../../shared/api/contract/index.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { balanceQueriesHandler } from '../handlers/balance-queries.js';
-import { balanceRunnersHandler } from '../handlers/balance-runners.js';
+import {
+  balanceRunnersHandler,
+  requireAdmittedRunnerSession,
+} from '../handlers/balance-runners.js';
 import { balanceSkillRunnerHandler } from '../handlers/balance-skill-runner.js';
 import { callsHandler } from '../handlers/calls.js';
 import { daemonCallsHandler } from '../handlers/daemon-calls.js';
@@ -80,6 +83,11 @@ export const router = os.router({
   },
   balanceSkillJobs: {
     claim: os.balanceSkillJobs.claim.handler(async ({ context, input }) => {
+      await requireAdmittedRunnerSession(
+        context.request.env.DB,
+        input.query.runner_id,
+        runnerOf(context),
+      );
       const job = await balanceSkillRunnerHandler.claim(
         context.request,
         runnerOf(context),
@@ -106,6 +114,11 @@ export const router = os.router({
   },
   carrierWebJobs: {
     claim: os.carrierWebJobs.claim.handler(async ({ context, input }) => {
+      await requireAdmittedRunnerSession(
+        context.request.env.DB,
+        input.query.runner_id,
+        runnerOf(context),
+      );
       const job = await carrierWebBalanceHandler.claim(
         context.request,
         runnerOf(context),
@@ -274,6 +287,12 @@ export const router = os.router({
   balanceRunners: {
     status: os.balanceRunners.status.handler(({ context }) =>
       balanceRunnersHandler.status(context.request),
+    ),
+    installations: os.balanceRunners.installations.handler(({ context }) =>
+      balanceRunnersHandler.installations(context.request),
+    ),
+    revoke: os.balanceRunners.revoke.handler(({ context, input }) =>
+      balanceRunnersHandler.revoke(context.request, input.params.id),
     ),
   },
   carrierBills: {

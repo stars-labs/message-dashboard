@@ -14,7 +14,11 @@ import {
   BalanceQueryPreviewResponse,
   BalanceQueryResponse,
 } from '../balance-checks.js';
-import { BalanceRunnersResponse } from '../balance-runners.js';
+import {
+  BalanceRunnersResponse,
+  RunnerInstallationsResponse,
+  RunnerRevokeResponse,
+} from '../balance-runners.js';
 import { route } from './route.js';
 
 export const balanceChecks = {
@@ -66,4 +70,17 @@ export const balanceRunners = {
     'GET',
     '/api/balance-runners',
   ).output(BalanceRunnersResponse),
+  installations: route(
+    { kind: 'user', permission: 'runners.read' },
+    'GET',
+    '/api/balance-runners/installations',
+  ).output(RunnerInstallationsResponse),
+  revoke: route(
+    { kind: 'user', permission: 'runners.write' },
+    'POST',
+    '/api/balance-runners/{id}/revoke',
+  )
+    .route({ inputStructure: 'detailed' })
+    .input(v.object({ params: v.object({ id: v.string() }) }))
+    .output(RunnerRevokeResponse),
 };

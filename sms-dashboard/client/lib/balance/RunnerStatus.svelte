@@ -9,9 +9,11 @@
   interface Props {
     runnerStatus: BalanceRunnersResponse | null;
     loading: boolean;
+    /** Shown only to whoever may revoke runners. */
+    onManage?: (() => void) | undefined;
   }
 
-  let { runnerStatus, loading }: Props = $props();
+  let { runnerStatus, loading, onManage }: Props = $props();
 </script>
 
 <section
@@ -33,4 +35,14 @@
     </span>
   {/each}
   <span class="text-[11px] text-stone-400 sm:ml-auto">浏览器任务逐张处理</span>
+  {#if onManage}
+    <button
+      type="button"
+      onclick={onManage}
+      aria-label="管理查询助手"
+      class="text-[11px] text-stone-500 hover:text-stone-800 underline-offset-2 hover:underline"
+    >
+      管理
+    </button>
+  {/if}
 </section>

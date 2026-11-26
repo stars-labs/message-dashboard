@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
+import { registerRunnerSession } from '../../test/runner-session.js';
 import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker } from '../../test/worker-harness.js';
@@ -86,6 +87,15 @@ beforeEach(async () => {
     INSERT INTO sim_balance_web_jobs (id, check_id, provider)
     VALUES ('job-1', 'check-1', 'china_unicom');
   `);
+  for (const session of ['runner-1', 'runner-2', 'runner-9']) {
+    registerRunnerSession(sqlite, session);
+  }
+  for (const subject of ['alice', 'mallory']) {
+    registerRunnerSession(sqlite, `${subject}-session`, {
+      authMode: 'auth0_device',
+      subject: `auth0|${subject}`,
+    });
+  }
   db = sqliteD1(sqlite);
   verifySpy = spyOn(auth0Handler, 'verifyToken').mockRejectedValue(new Error('no device token'));
 });
@@ -303,7 +313,7 @@ describe('carrier browser balance job protocol', () => {
 
     await send('claim', { database: recorded });
 
-    expect(recorded.prepared[0]).toContain(
+    expect(recorded.prepared.join('\n')).toContain(
       'sim_balance_web_jobs j INDEXED BY idx_balance_web_jobs_pending_claim',
     );
   });
@@ -1102,25 +1112,67 @@ describe('runner credentials', () => {
   test('lets a device runner claim a job its account requested', async () => {
     sqlite.run("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
 
-    const response = await send('claim', { headers: signInDevice('auth0|alice') });
+    const response = await send('claim', {
+      runnerId: 'alice-session',
+      headers: signInDevice('auth0|alice'),
+    });
 
     expect(response.status).toBe(200);
-    expect(jobState()).toMatchObject({ status: 'leased', lease_owner: 'runner-1' });
+    expect(jobState()).toMatchObject({ status: 'leased', lease_owner: 'alice-session' });
   });
 
   test("does not let a device runner claim another account's job", async () => {
     sqlite.run("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
 
-    const response = await send('claim', { headers: signInDevice('auth0|mallory') });
+    const response = await send('claim', {
+      runnerId: 'mallory-session',
+      headers: signInDevice('auth0|mallory'),
+    });
 
     expect(response.status).toBe(204);
     expect(jobState().status).toBe('pending');
   });
 
   test('does not let a device runner claim a legacy control job', async () => {
-    const response = await send('claim', { headers: signInDevice('auth0|alice') });
+    const response = await send('claim', {
+      runnerId: 'alice-session',
+      headers: signInDevice('auth0|alice'),
+    });
 
     expect(response.status).toBe(204);
+    expect(jobState().status).toBe('pending');
+  });
+
+  test("refuses a claim under another account's session", async () => {
+    sqlite.run("UPDATE sim_balance_checks SET requested_by_subject = 'auth0|alice'");
+
+    const response = await send('claim', {
+      runnerId: 'alice-session',
+      headers: signInDevice('auth0|mallory'),
+    });
+
+    expect(response.status).toBe(403);
+    expect(jobState().status).toBe('pending');
+  });
+
+  test('refuses a claim from a revoked installation, and only from it', async () => {
+    sqlite.run(
+      "UPDATE balance_runner_installations SET revoked_at = CURRENT_TIMESTAMP WHERE id = 'installation-runner-1'",
+    );
+
+    const refused = await send('claim');
+    expect(refused.status).toBe(403);
+    expect(jobState().status).toBe('pending');
+
+    const other = await send('claim', { runnerId: 'runner-2' });
+    expect(other.status).toBe(200);
+    expect(jobState()).toMatchObject({ status: 'leased', lease_owner: 'runner-2' });
+  });
+
+  test('refuses a claim from a session no heartbeat registered', async () => {
+    const response = await send('claim', { runnerId: 'unheard-session' });
+
+    expect(response.status).toBe(403);
     expect(jobState().status).toBe('pending');
   });
 });

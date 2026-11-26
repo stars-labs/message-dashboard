@@ -3,9 +3,12 @@ import * as v from 'valibot';
 import type { D1, D1Batch } from '../lib/d1.js';
 import {
   findRunnerInstallation,
+  listAllRunnerInstallations,
   listUserRunnerCapabilities,
   listUserRunnerInstallations,
   recordRunnerHeartbeat,
+  revokeRunnerInstallation,
+  runnerSessionAdmitted,
 } from '../db/balance-runners.js';
 import type { AuthorizedRunner } from '../utils/runner-auth.js';
 import {
@@ -15,6 +18,8 @@ import {
   type BalanceRunnersResponse,
   type RunnerHeartbeatBody,
   type RunnerHeartbeatResponse,
+  type RunnerInstallationsResponse,
+  type RunnerRevokeResponse,
 } from '../../shared/api/balance-runners.js';
 
 const ONLINE_SECONDS = 90;
@@ -113,4 +118,39 @@ export const balanceRunnersHandler = {
     if (user === undefined || user.id === '') throw new ORPCError('UNAUTHORIZED');
     return { success: true, ...(await loadBalanceRunnerStatus(env.DB, user.id)) };
   },
+
+  async installations({ env }: { env: { DB: D1<'all'> } }): Promise<RunnerInstallationsResponse> {
+    const rows = await listAllRunnerInstallations(env.DB);
+    return {
+      success: true,
+      runners: rows.map(({ seconds_since_heartbeat, ...runner }) => ({
+        ...runner,
+        online: runner.revoked_at === null && isOnline({ seconds_since_heartbeat }),
+      })),
+    };
+  },
+
+  async revoke(
+    { env }: { env: { DB: D1<'first'> } },
+    runnerId: string,
+  ): Promise<RunnerRevokeResponse> {
+    const revoked = await revokeRunnerInstallation(env.DB, runnerId);
+    if (revoked === null) {
+      throw new ORPCError('NOT_FOUND', { message: 'Runner installation not found' });
+    }
+    return { success: true, runner_id: runnerId, revoked_at: revoked.revoked_at };
+  },
 };
+
+/** Refuses a job call whose session is not a live, unrevoked runner of `auth`'s account. */
+export async function requireAdmittedRunnerSession(
+  db: D1<'first'>,
+  sessionId: string,
+  auth: AuthorizedRunner,
+): Promise<void> {
+  if (!(await runnerSessionAdmitted(db, sessionId, auth))) {
+    throw new ORPCError('FORBIDDEN', {
+      message: 'Runner session is not registered or its installation is revoked',
+    });
+  }
+}
