@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[test]
 fn recognizes_only_plain_ascii_short_codes() {
@@ -365,7 +366,7 @@ async fn processing_sends_each_pending_message_and_reports_it() {
         "created_at": "2026-11-25T00:00:00.000Z"
     }]});
     let replies = [
-        ("200 OK", pending.to_string()),
+        ("200 OK\r\nX-Poll-Interval: 10", pending.to_string()),
         ("200 OK", REPORTED.to_string()),
     ];
     let (result, requests) = serve(&replies, |url| async move {
@@ -374,7 +375,7 @@ async fn processing_sends_each_pending_message_and_reports_it() {
     .await
     .unwrap();
 
-    result.unwrap();
+    assert_eq!(result.unwrap(), Some(Duration::from_secs(10)));
     assert_eq!(
         (requests[0].method.as_str(), requests[0].path.as_str()),
         ("GET", "/api/control/pending-sms")
@@ -389,13 +390,16 @@ async fn processing_sends_each_pending_message_and_reports_it() {
 #[tokio::test]
 async fn processing_nothing_pending_sends_nothing_else() {
     let (result, requests) = serve(
-        &[("200 OK", r#"{"pending_messages": []}"#.into())],
+        &[(
+            "200 OK\r\nX-Poll-Interval: 25",
+            r#"{"pending_messages": []}"#.into(),
+        )],
         |url| async move { sender_at(url).unwrap().process_pending_sms().await },
     )
     .await
     .unwrap();
 
-    result.unwrap();
+    assert_eq!(result.unwrap(), Some(Duration::from_secs(25)));
     assert_eq!(requests.len(), 1);
 }
 
@@ -564,7 +568,7 @@ async fn sender_uses_the_shared_pending_sms_model_and_claiming_session() {
                 Arc::new(ModemManager::new()),
                 "fixture-session".into(),
             );
-            sender.get_pending_sms().await
+            sender.get_pending_sms().await.map(|(messages, _)| messages)
         },
     )
     .await
@@ -663,7 +667,7 @@ async fn sender_keeps_the_entire_claimed_batch_when_one_purpose_is_missing() {
                 Arc::new(ModemManager::new()),
                 "fixture-session".into(),
             );
-            sender.get_pending_sms().await
+            sender.get_pending_sms().await.map(|(messages, _)| messages)
         },
     )
     .await
@@ -691,7 +695,7 @@ async fn sender_keeps_http_error_status_and_response_body() {
                 Arc::new(ModemManager::new()),
                 "fixture-session".into(),
             );
-            sender.get_pending_sms().await
+            sender.get_pending_sms().await.map(|(messages, _)| messages)
         },
     )
     .await

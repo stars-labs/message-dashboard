@@ -351,6 +351,7 @@ fn serializes_failed_submission_with_its_error() {
 mod control_fixtures {
     use crate::identifiers::{Iccid, Imei, SimNumber, SmsAddress};
     use crate::message_store::StoredMessage;
+    use crate::pace::worker_pace;
     use crate::types::{Message, SmsSubmission};
     use crate::wire::{
         CallEndReason, Direction, EndedCallRequest, HealthSnapshot, IncomingCallRequest,
@@ -358,9 +359,12 @@ mod control_fixtures {
         Purpose, QueueHealthSnapshot, SmsResult, SyncMode, UploadResponse, UploadStatus,
         UploadedMessage,
     };
+    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
     use serde::de::DeserializeOwned;
     use serde::{Deserialize, Serialize};
     use serde_json::Value;
+    use std::collections::HashMap;
+    use std::time::Duration;
 
     #[derive(Deserialize)]
     struct Fixture {
@@ -378,7 +382,20 @@ mod control_fixtures {
     struct Response {
         status: u16,
         #[serde(default)]
+        headers: HashMap<String, String>,
+        #[serde(default)]
         body: Value,
+    }
+
+    fn recorded_pace(fixture: &Fixture) -> Option<Duration> {
+        let mut headers = HeaderMap::new();
+        for (name, value) in &fixture.response.headers {
+            headers.insert(
+                HeaderName::try_from(name.as_str()).unwrap(),
+                HeaderValue::try_from(value.as_str()).unwrap(),
+            );
+        }
+        worker_pace(&headers)
     }
 
     macro_rules! fixture {
@@ -390,6 +407,19 @@ mod control_fixtures {
             )))
             .unwrap()
         };
+    }
+
+    #[test]
+    fn every_recurring_answer_sets_when_to_call_again() {
+        for recurring in [
+            fixture!("heartbeat"),
+            fixture!("devices"),
+            fixture!("pending-sms"),
+            fixture!("pending-sms.empty"),
+        ] {
+            assert!(recorded_pace(&recurring).is_some());
+        }
+        assert_eq!(recorded_pace(&fixture!("messages")), None);
     }
 
     const ICCID: &str = "89860123456789012345";

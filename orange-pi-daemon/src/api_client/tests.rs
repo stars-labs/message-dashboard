@@ -8,6 +8,7 @@ use crate::wire::{
     CallEndReason, Direction, HealthSnapshot, ModemReport, QueueHealthSnapshot, SyncMode,
 };
 use serde_json::Value;
+use std::time::Duration;
 
 const API_KEY: &str = "test_api_key_12345";
 
@@ -83,12 +84,13 @@ async fn test_empty_incremental_device_delta_is_a_noop() {
         .upload_modem_reports(&reports, &removed, SyncMode::Incremental, "session")
         .await;
 
-    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), None);
 }
 
 #[tokio::test]
 async fn test_empty_full_device_snapshot_reaches_the_reconciliation_endpoint() {
-    let (result, requests) = serve(&[("200 OK", "{}".into())], |url| async move {
+    let paced = [("200 OK\r\nX-Poll-Interval: 30", "{}".into())];
+    let (result, requests) = serve(&paced, |url| async move {
         client_for(url)
             .upload_modem_reports(&[], &[], SyncMode::Full, "session")
             .await
@@ -96,7 +98,7 @@ async fn test_empty_full_device_snapshot_reaches_the_reconciliation_endpoint() {
     .await
     .unwrap();
 
-    result.unwrap();
+    assert_eq!(result.unwrap(), Some(Duration::from_secs(30)));
     let [request] = requests.as_slice() else {
         panic!("expected one request, got {requests:?}")
     };
@@ -152,7 +154,8 @@ fn health_snapshot() -> HealthSnapshot {
 
 #[tokio::test]
 async fn health_snapshot_carries_the_key_and_the_daemon_version() {
-    let (result, requests) = serve(&[("200 OK", "{}".into())], |url| async move {
+    let paced = [("200 OK\r\nX-Poll-Interval: 60", "{}".into())];
+    let (result, requests) = serve(&paced, |url| async move {
         client_for(url)
             .send_health_snapshot(&health_snapshot())
             .await
@@ -160,7 +163,7 @@ async fn health_snapshot_carries_the_key_and_the_daemon_version() {
     .await
     .unwrap();
 
-    result.unwrap();
+    assert_eq!(result.unwrap(), Some(Duration::from_secs(60)));
     let [request] = requests.as_slice() else {
         panic!("expected one request, got {requests:?}")
     };

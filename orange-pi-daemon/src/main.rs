@@ -5,6 +5,7 @@ mod identifiers;
 mod logging;
 mod message_store;
 mod modem_manager;
+mod pace;
 mod partial_sms;
 mod periodic_tasks;
 mod proxy_protocol;

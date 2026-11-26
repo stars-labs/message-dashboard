@@ -29,7 +29,8 @@ impl Request {
 }
 
 /// Answers the next requests with `replies` in order (`"200 OK"`, body), one
-/// connection each, while `call` runs against the server's base URL. Fails if
+/// connection each; a status may go on with header lines
+/// (`"200 OK\r\nX-Poll-Interval: 10"`). Runs while `call` runs against the server's base URL. Fails if
 /// `call` finishes without sending every scripted request.
 pub(crate) async fn serve<F, Fut, T>(
     replies: &[(&str, String)],

@@ -1,5 +1,6 @@
 use crate::identifiers::{Iccid, Imei};
 use crate::message_store::StoredMessage;
+use crate::pace::worker_pace;
 use crate::types::Config;
 use crate::wire::{
     CallEndReason, EndedCallRequest, HealthSnapshot, IncomingCallRequest, MessageBatchRequest,
@@ -8,6 +9,7 @@ use crate::wire::{
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Serialize;
+use std::time::Duration;
 use tracing::info;
 
 impl<'a> From<&'a StoredMessage> for UploadedMessage<'a> {
@@ -32,14 +34,18 @@ pub struct ApiClient {
 impl ApiClient {
     pub fn new(config: Config) -> Result<Self> {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(Duration::from_secs(30))
             .build()
             .context("Failed to create HTTP client")?;
         Ok(Self { client, config })
     }
 
-    /// Send an independent, versioned process and task health report.
-    pub async fn send_health_snapshot(&self, snapshot: &HealthSnapshot) -> Result<()> {
+    /// Send an independent, versioned process and task health report; answers
+    /// when the Worker wants the next one.
+    pub async fn send_health_snapshot(
+        &self,
+        snapshot: &HealthSnapshot,
+    ) -> Result<Option<Duration>> {
         let url = format!("{}/api/control/heartbeat", self.config.api_url);
         let response = self
             .client
@@ -57,22 +63,23 @@ impl ApiClient {
             anyhow::bail!("Health endpoint returned {status}: {body}");
         }
 
-        Ok(())
+        Ok(worker_pace(response.headers()))
     }
 
-    /// Upload changed modem reports and explicit removals.
+    /// Upload changed modem reports and explicit removals; answers when the
+    /// Worker wants the next sync, or `None` when there was nothing to send.
     pub async fn upload_modem_reports(
         &self,
         reports: &[ModemReport],
         removed_equipment_ids: &[Imei],
         sync_mode: SyncMode,
         session_id: &str,
-    ) -> Result<()> {
+    ) -> Result<Option<Duration>> {
         if sync_mode == SyncMode::Incremental
             && reports.is_empty()
             && removed_equipment_ids.is_empty()
         {
-            return Ok(());
+            return Ok(None);
         }
 
         let url = format!("{}/api/control/devices", self.config.api_url);
@@ -119,7 +126,7 @@ impl ApiClient {
             "✅ Successfully uploaded modem reports (mode: {})",
             sync_mode.as_str()
         );
-        Ok(())
+        Ok(worker_pace(response.headers()))
     }
 
     pub async fn upload_messages(&self, messages: &[StoredMessage]) -> Result<Vec<UploadResult>> {
@@ -174,7 +181,7 @@ impl ApiClient {
             results.extend(response.results);
 
             if batch_num < messages.chunks(BATCH_SIZE).len() - 1 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
 
@@ -218,7 +225,7 @@ impl ApiClient {
             .client
             .post(&url)
             .header("x-api-key", self.config.api_key.expose())
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(Duration::from_secs(10))
             .json(body)
             .send()
             .await

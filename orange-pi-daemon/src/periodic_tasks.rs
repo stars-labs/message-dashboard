@@ -16,6 +16,13 @@ use crate::wire::{ModemReport, QueueHealthSnapshot, SyncMode};
 
 use crate::{SharedDevices, SharedHealth};
 
+// Each Worker-facing loop waits as long as the Worker's last answer asked
+// (X-Poll-Interval, ADR 0002); these hold only when it set no pace, such as
+// after a failed call.
+const UNPACED_DEVICE_SYNC: Duration = Duration::from_secs(30);
+const UNPACED_SMS_POLL: Duration = Duration::from_secs(10);
+const UNPACED_HEARTBEAT: Duration = Duration::from_secs(60);
+
 /// Syncs the reader's latest reports instead of calling `process_modems()` again,
 /// which would fight the reader over serial ports.
 pub(crate) fn spawn_device_sync(
@@ -28,9 +35,10 @@ pub(crate) fn spawn_device_sync(
 
     tokio::spawn(async move {
         let mut last_synced_reports = Vec::new();
+        let mut pace = UNPACED_DEVICE_SYNC;
 
         loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::time::sleep(pace).await;
 
             let all_reports = {
                 let devices = devices.read().await;
@@ -78,7 +86,8 @@ pub(crate) fn spawn_device_sync(
                 )
                 .await
             {
-                Ok(()) => {
+                Ok(next) => {
+                    pace = next.unwrap_or(UNPACED_DEVICE_SYNC);
                     info!(
                         "📊 Status sync: {} changed, {} removed (mode: {:?})",
                         delta.reports.len(),
@@ -89,6 +98,7 @@ pub(crate) fn spawn_device_sync(
                     sync_manager.record_success(sync_mode);
                 }
                 Err(e) => {
+                    pace = UNPACED_DEVICE_SYNC;
                     warn!(
                         event = "cloud_sync_failed",
                         operation = "device_sync",
@@ -194,14 +204,14 @@ pub(crate) fn spawn_sms_sender(
     session_id: String,
 ) {
     tokio::spawn(async move {
-        info!("📤 SMS Sender task started - polling every 10 seconds");
+        info!("📤 SMS Sender task started - polling as the Worker paces it");
 
         let mut sms_sender = SmsSender::new(api_client, modem_manager, session_id);
         sms_sender.update_modem_cache(modem_cache);
 
         loop {
-            match sms_sender.process_pending_sms().await {
-                Ok(()) => {}
+            let pace = match sms_sender.process_pending_sms().await {
+                Ok(next) => next.unwrap_or(UNPACED_SMS_POLL),
                 Err(e) => {
                     warn!(
                         event = "cloud_sync_failed",
@@ -210,10 +220,11 @@ pub(crate) fn spawn_sms_sender(
                         error = %e,
                         "Outbound SMS poll failed"
                     );
+                    UNPACED_SMS_POLL
                 }
-            }
+            };
 
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep(pace).await;
         }
     });
 }
@@ -226,7 +237,7 @@ pub(crate) fn spawn_health_heartbeat(
     store: Arc<MessageStore>,
 ) {
     tokio::spawn(async move {
-        info!("💓 Independent health heartbeat started - reporting every 60 seconds");
+        info!("💓 Independent health heartbeat started - reporting as the Worker paces it");
         loop {
             let queue_stats = store.get_queue_stats().unwrap_or_default();
             let snapshot = {
@@ -238,16 +249,20 @@ pub(crate) fn spawn_health_heartbeat(
                         .oldest_unacknowledged_age_seconds,
                 })
             };
-            if let Err(e) = client.send_health_snapshot(&snapshot).await {
-                warn!(
-                    event = "cloud_sync_failed",
-                    operation = "health_heartbeat",
-                    error_code = "cloud_api_request_failed",
-                    error = %e,
-                    "Health heartbeat failed"
-                );
-            }
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            let pace = match client.send_health_snapshot(&snapshot).await {
+                Ok(next) => next.unwrap_or(UNPACED_HEARTBEAT),
+                Err(e) => {
+                    warn!(
+                        event = "cloud_sync_failed",
+                        operation = "health_heartbeat",
+                        error_code = "cloud_api_request_failed",
+                        error = %e,
+                        "Health heartbeat failed"
+                    );
+                    UNPACED_HEARTBEAT
+                }
+            };
+            tokio::time::sleep(pace).await;
         }
     });
 }

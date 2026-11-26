@@ -1,9 +1,11 @@
 use crate::identifiers::{Iccid, SmsAddress};
+use crate::pace::worker_pace;
 use crate::types::SmsSubmission;
 use crate::wire::{PendingSms, PendingSmsResponse, SmsReportOutcome, SmsResult};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug)]
@@ -32,7 +34,8 @@ impl SmsSender {
         self.modem_cache = cache;
     }
 
-    pub async fn get_pending_sms(&self) -> Result<Vec<PendingSms>> {
+    /// The queued messages, and when the Worker wants the next poll.
+    pub async fn get_pending_sms(&self) -> Result<(Vec<PendingSms>, Option<Duration>)> {
         let url = format!("{}/api/control/pending-sms", self.api_client.config.api_url);
 
         debug!("🌐 Fetching pending SMS from: {}", url);
@@ -43,7 +46,7 @@ impl SmsSender {
             .header("X-API-Key", self.api_client.config.api_key.expose())
             .header("X-Daemon-Session-Id", &self.session_id)
             .header("Accept", "application/json")
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(Duration::from_secs(10))
             .send()
             .await?;
 
@@ -53,6 +56,7 @@ impl SmsSender {
             return Err(anyhow!("Failed to fetch pending SMS: {status} - {text}"));
         }
 
+        let pace = worker_pace(response.headers());
         let api_response: PendingSmsResponse = response.json().await?;
 
         if !api_response.pending_messages.is_empty() {
@@ -62,7 +66,7 @@ impl SmsSender {
             );
         }
 
-        Ok(api_response.pending_messages)
+        Ok((api_response.pending_messages, pace))
     }
 
     pub async fn find_modem_for_iccid(&self, target_iccid: &Iccid) -> Option<String> {
@@ -188,7 +192,7 @@ impl SmsSender {
             .header("Content-Type", "application/json")
             .header("X-API-Key", self.api_client.config.api_key.expose())
             .json(&result)
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(Duration::from_secs(10))
             .send()
             .await?;
 
@@ -213,11 +217,12 @@ impl SmsSender {
         Ok(())
     }
 
-    pub async fn process_pending_sms(&self) -> Result<()> {
-        let pending_messages = self.get_pending_sms().await?;
+    /// Sends what is queued; answers when the Worker wants the next poll.
+    pub async fn process_pending_sms(&self) -> Result<Option<Duration>> {
+        let (pending_messages, pace) = self.get_pending_sms().await?;
 
         if pending_messages.is_empty() {
-            return Ok(());
+            return Ok(pace);
         }
 
         info!(
@@ -236,7 +241,7 @@ impl SmsSender {
             }
         }
 
-        Ok(())
+        Ok(pace)
     }
 }
 
