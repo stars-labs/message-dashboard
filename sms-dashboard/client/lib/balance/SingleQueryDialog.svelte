@@ -55,8 +55,10 @@
           在电脑上启动并登录查询助手（Balance Agent）后再查询，可立即处理任务。
         </p>
       {:else}
-        <p>联通官方网站将在运行查询助手的电脑上打开，并逐张处理。</p>
-        <p class="mt-2 text-xs text-stone-400">登录过程中可能需要完成滑块或图片验证。</p>
+        <p>
+          {preflight.profile?.carrier ?? '运营商'}官方网站将在运行查询助手的电脑上打开，并逐张处理。
+        </p>
+        <p class="mt-2 text-xs text-stone-400">登录时可能需要短信验证码，或人工完成验证。</p>
       {/if}
     </div>
     <footer class="px-5 py-4 border-t border-stone-100 flex items-center justify-end gap-2">

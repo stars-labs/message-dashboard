@@ -826,6 +826,7 @@ describe('balance management', () => {
       if (url.pathname === '/api/balance-checks/query-preflight') {
         return Response.json(
           preflight({
+            profile: { id: 'sg-m1-prepaid-browser-v1', method: 'browser', carrier: 'M1' },
             method: { category: 'browser', capability: 'carrier_browser', interactive: true },
             runner: { required: true, ...runnerSummary({ available: true, state: 'ready' }) },
           }),
@@ -846,7 +847,9 @@ describe('balance management', () => {
     await waitFor(() => {
       expect(view.getByText('浏览器查询确认')).toBeTruthy();
     });
-    expect(view.getByText(/滑块或图片验证/)).toBeTruthy();
+    expect(view.getByText(/M1官方网站将在运行查询助手的电脑上打开/)).toBeTruthy();
+    expect(view.queryByText(/联通/)).toBeNull();
+    expect(view.getByText(/人工完成验证/)).toBeTruthy();
     expect(queued).toBe(0);
     await fireEvent.click(view.getByRole('button', { name: '开始查询' }));
     await waitFor(() => {

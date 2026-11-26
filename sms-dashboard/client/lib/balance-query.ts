@@ -22,7 +22,7 @@ const STATUS_META = {
   skill_pending: { label: '等待 AI', className: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   skill_processing: { label: 'AI 判断中', className: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   web_pending: { label: '等待本机', className: 'bg-stone-100 text-stone-600 border-stone-200' },
-  web_processing: { label: '打开联通网站', className: 'bg-sky-50 text-sky-700 border-sky-200' },
+  web_processing: { label: '打开运营商网站', className: 'bg-sky-50 text-sky-700 border-sky-200' },
   web_otp: { label: '等待登录码', className: 'bg-amber-50 text-amber-700 border-amber-200' },
   web_authenticating: { label: '正在登录', className: 'bg-sky-50 text-sky-700 border-sky-200' },
   web_querying: { label: '查询中', className: 'bg-sky-50 text-sky-700 border-sky-200' },
