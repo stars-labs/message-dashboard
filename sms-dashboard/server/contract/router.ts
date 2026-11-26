@@ -3,6 +3,7 @@ import type * as v from 'valibot';
 import type { CarrierBillMutationBody } from '../../shared/api/carrier-bills.js';
 import { contract } from '../../shared/api/contract/index.js';
 import { auth0Handler } from '../handlers/auth0.js';
+import { balanceBatchesHandler } from '../handlers/balance-batches.js';
 import { balanceQueriesHandler } from '../handlers/balance-queries.js';
 import {
   balanceRunnersHandler,
@@ -280,6 +281,17 @@ export const router = os.router({
       status: 202,
       body: await balanceQueriesHandler.queryBatch(context.request, input),
     })),
+  },
+  balanceBatches: {
+    list: os.balanceBatches.list.handler(({ context }) =>
+      balanceBatchesHandler.list(context.request),
+    ),
+    get: os.balanceBatches.get.handler(({ context, input }) =>
+      balanceBatchesHandler.get(context.request, input.params.id),
+    ),
+    cancel: os.balanceBatches.cancel.handler(({ context, input }) =>
+      balanceBatchesHandler.cancel(context.request, input.params.id),
+    ),
   },
   balanceRunners: {
     status: os.balanceRunners.status.handler(({ context }) =>

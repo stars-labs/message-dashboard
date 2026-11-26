@@ -122,6 +122,7 @@ function timestampValue(check: BalanceCheck): number {
 
 // Cancellations and superseded jobs are not real query failures.
 function isCancelledCheck(check: BalanceCheck): boolean {
+  if (check.status === 'cancelled') return true;
   const err = check.error ?? '';
   return (
     err.startsWith('Cancelled') ||

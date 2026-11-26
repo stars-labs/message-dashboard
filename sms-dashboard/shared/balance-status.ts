@@ -7,6 +7,7 @@ export const CHECK_STATUSES = [
   'failed',
   'timed_out',
   'unparsed',
+  'cancelled',
 ] as const;
 
 export const ACTIVE_WEB_JOB_STATUSES = [

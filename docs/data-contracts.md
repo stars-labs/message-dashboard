@@ -28,6 +28,16 @@
   offline SIMs; legacy activity must not make a schema-v1 daemon healthy.
 - Daemon liveness is the Worker's receive time (`last_heartbeat =
   CURRENT_TIMESTAMP`). The Pi's wall clock never decides whether it is online.
+- A batch query is a `sim_balance_batches` row; its checks carry `batch_id`.
+  Cancelling a batch (migration `084`) cancels only checks nobody has started: still
+  `queued`, with their outbound SMS still `sending` (the daemon has not taken it) or
+  their browser job still `pending`. In one transaction the check becomes
+  `cancelled`, its SMS `cancelled` and its job `stopped`. A cancelled check is not a
+  failure: it counts toward neither the 24-hour cooldown nor 查询失败.
+- `sim_balance_checks` is referenced, directly or through `messages`, by nine
+  tables. Changing one of its constraints means rebuilding all ten, as `084` does:
+  D1 cannot turn foreign keys off, and dropping a parent runs its children's
+  `ON DELETE` actions even with `defer_foreign_keys` on.
 
 ## Authentication contracts
 

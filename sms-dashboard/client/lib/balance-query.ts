@@ -34,6 +34,7 @@ const STATUS_META = {
   failed: { label: '失败', className: 'bg-red-50 text-red-700 border-red-200' },
   timed_out: { label: '已超时', className: 'bg-stone-100 text-stone-600 border-stone-200' },
   unparsed: { label: '待识别', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  cancelled: { label: '已取消', className: 'bg-stone-100 text-stone-500 border-stone-200' },
 } satisfies Record<DisplayStatus, BalanceStatusMeta>;
 
 const METRIC_LABELS = new Map([

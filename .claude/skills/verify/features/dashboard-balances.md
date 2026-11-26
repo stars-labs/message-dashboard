@@ -13,6 +13,10 @@ Locally neither runs unless a journey starts the agent, so checks stay queued.
 - runner-not-ready dialog: 查询助手未就绪 with 取消 / 仍然排队 / 打开查询助手, when the
   profile needs the Balance Agent and none is signed in.
 - batch query: 批量查询 → 批量查询预览 → 确认查询 N 张卡.
+- batch progress: region `批量查询进度` shows each unfinished batch (and any from the
+  last 30 minutes): `完成 n/total`, 成功 / 失败 / 已取消 / 进行中. With `balances.query`,
+  `取消未开始的 N 张` → confirm 取消这些查询 cancels the checks no daemon or runner
+  has taken. Checked in: `scripts/verify/journeys/cancel-balance-batch.ts`.
 - history: one row per check with method (BROWSER / SMS), status label (排队中,
   等待本机, 已解析, …) and 详情.
 - detail drawer: `余额查询详情`, closed with `关闭`.

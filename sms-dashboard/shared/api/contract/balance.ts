@@ -15,6 +15,11 @@ import {
   BalanceQueryResponse,
 } from '../balance-checks.js';
 import {
+  BalanceBatchCancelResponse,
+  BalanceBatchesResponse,
+  BalanceBatchResponse,
+} from '../balance-batches.js';
+import {
   BalanceRunnersResponse,
   RunnerInstallationsResponse,
   RunnerRevokeResponse,
@@ -62,6 +67,26 @@ export const balanceChecks = {
     .route({ inputStructure: 'detailed' })
     .input(v.object({ params: v.object({ id: v.string() }) }))
     .output(BalanceCheckDetailResponse),
+};
+
+const BatchParams = v.object({ params: v.object({ id: v.string() }) });
+
+export const balanceBatches = {
+  list: route({ kind: 'user', permission: 'messages.read' }, 'GET', '/api/balance-batches').output(
+    BalanceBatchesResponse,
+  ),
+  get: route({ kind: 'user', permission: 'messages.read' }, 'GET', '/api/balance-batches/{id}')
+    .route({ inputStructure: 'detailed' })
+    .input(BatchParams)
+    .output(BalanceBatchResponse),
+  cancel: route(
+    { kind: 'user', permission: 'balances.query' },
+    'POST',
+    '/api/balance-batches/{id}/cancel',
+  )
+    .route({ inputStructure: 'detailed' })
+    .input(BatchParams)
+    .output(BalanceBatchCancelResponse),
 };
 
 export const balanceRunners = {

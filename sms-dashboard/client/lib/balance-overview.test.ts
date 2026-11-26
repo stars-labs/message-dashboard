@@ -243,6 +243,16 @@ describe('balance overview', () => {
     expect(row?.latestCheck).toBeNull();
   });
 
+  test('a check cancelled with its batch does not shadow the parsed one before it', () => {
+    const checks = [
+      check('sg2', 'cancelled', null, null, '2026-08-14 08:00:00'),
+      check('sg2', 'parsed', 25, 'SGD', '2026-08-14 07:00:00'),
+    ];
+    const [row] = buildBalanceRows([sim('sg2', 'SG')], checks, now);
+
+    expect(row?.latestCheck?.status).toBe('parsed');
+  });
+
   test('cancelled check does not shadow a real earlier failure', () => {
     const checks = [
       {

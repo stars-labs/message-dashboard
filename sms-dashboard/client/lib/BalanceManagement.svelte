@@ -20,13 +20,13 @@
   import { textOr } from '../../shared/text.js';
   import BalanceHeader from './balance/BalanceHeader.svelte';
   import StatusBanners from './balance/StatusBanners.svelte';
+  import BatchProgress from './balance/BatchProgress.svelte';
   import BatchQueryDialog from './balance/BatchQueryDialog.svelte';
   import BillDetailDialog from './balance/BillDetailDialog.svelte';
   import BillsTab from './balance/BillsTab.svelte';
   import HistoryTab from './balance/HistoryTab.svelte';
   import OverviewFilters from './balance/OverviewFilters.svelte';
   import OverviewTable from './balance/OverviewTable.svelte';
-  import RunnerAdminDialog from './balance/RunnerAdminDialog.svelte';
   import RunnerStatus from './balance/RunnerStatus.svelte';
   import SingleQueryDialog from './balance/SingleQueryDialog.svelte';
   import { buildFilterTabs, currentFilterLabel, matchesStatusFilter } from './balance/filters.js';
@@ -74,7 +74,7 @@
   }: Props = $props();
 
   let activeTab: 'overview' | 'bills' | 'history' = $state('overview');
-  let managingRunners = $state(false);
+  let batchesQueued = $state(0);
   let statusFilter: StatusFilter = $state('all');
   let carrierFilter = $state('all');
   let searchQuery = $state('');
@@ -458,6 +458,7 @@
         message: `已加入 ${result.summary.queued} 张卡${result.summary.failed_to_queue ? `，${result.summary.failed_to_queue} 张失败` : ''}`,
       };
       fastPollingUntil = Date.now() + 15_000;
+      batchesQueued += 1;
       await onQueriesChanged?.({ queuedChecks: result.checks });
       await loadRunnerStatus();
     } catch (error) {
@@ -521,12 +522,18 @@
       <RunnerStatus
         {runnerStatus}
         loading={runnerStatusLoading}
-        onManage={canManageRunners
-          ? () => {
-              managingRunners = true;
-            }
-          : undefined}
+        canManage={canManageRunners}
+        onManaged={loadRunnerStatus}
       />
+      {#key batchesQueued}
+        <BatchProgress
+          canCancel={canQueryBalances}
+          paused={databasePollingPaused}
+          onCancelled={() => {
+            void onQueriesChanged?.({ activeIds: activeBalanceCheckIds(balanceChecks) });
+          }}
+        />
+      {/key}
     {/if}
 
     <StatusBanners {billAccountsError} bind:notice onRetryAccounts={() => loadBillingAccounts()} />
@@ -610,15 +617,6 @@
       singlePreview = null;
     }}
     onSubmit={() => submitSingle()}
-  />
-{/if}
-
-{#if managingRunners}
-  <RunnerAdminDialog
-    onClose={() => {
-      managingRunners = false;
-      void loadRunnerStatus();
-    }}
   />
 {/if}
 

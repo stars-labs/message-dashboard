@@ -6657,7 +6657,8 @@
                               "parsed",
                               "failed",
                               "timed_out",
-                              "unparsed"
+                              "unparsed",
+                              "cancelled"
                             ],
                             "type": "string"
                           },
@@ -6894,6 +6895,7 @@
                               "failed",
                               "timed_out",
                               "unparsed",
+                              "cancelled",
                               "skill_pending",
                               "skill_processing",
                               "web_pending",
@@ -7079,7 +7081,8 @@
                               "parsed",
                               "failed",
                               "timed_out",
-                              "unparsed"
+                              "unparsed",
+                              "cancelled"
                             ],
                             "type": "string"
                           },
@@ -7152,6 +7155,7 @@
                               "failed",
                               "timed_out",
                               "unparsed",
+                              "cancelled",
                               "skill_pending",
                               "skill_processing",
                               "web_pending",
@@ -7891,7 +7895,8 @@
                             "parsed",
                             "failed",
                             "timed_out",
-                            "unparsed"
+                            "unparsed",
+                            "cancelled"
                           ],
                           "type": "string"
                         },
@@ -8128,6 +8133,7 @@
                             "failed",
                             "timed_out",
                             "unparsed",
+                            "cancelled",
                             "skill_pending",
                             "skill_processing",
                             "web_pending",
@@ -8433,7 +8439,8 @@
                               "parsed",
                               "failed",
                               "timed_out",
-                              "unparsed"
+                              "unparsed",
+                              "cancelled"
                             ],
                             "type": "string"
                           },
@@ -8670,6 +8677,7 @@
                               "failed",
                               "timed_out",
                               "unparsed",
+                              "cancelled",
                               "skill_pending",
                               "skill_processing",
                               "web_pending",
@@ -9000,6 +9008,342 @@
           {
             "auth0": [
               "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-batches": {
+      "get": {
+        "operationId": "balanceBatches.list",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "batches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "requested_by_subject": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "cancelled_at": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "total": {
+                            "type": "number"
+                          },
+                          "parsed": {
+                            "type": "number"
+                          },
+                          "failed": {
+                            "type": "number"
+                          },
+                          "cancelled": {
+                            "type": "number"
+                          },
+                          "in_progress": {
+                            "type": "number"
+                          },
+                          "cancellable": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "requested_by_subject",
+                          "created_at",
+                          "cancelled_at",
+                          "total",
+                          "parsed",
+                          "failed",
+                          "cancelled",
+                          "in_progress",
+                          "cancellable"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "batches"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-batches/{id}": {
+      "get": {
+        "operationId": "balanceBatches.get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "batch": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "requested_by_subject": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "cancelled_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "total": {
+                          "type": "number"
+                        },
+                        "parsed": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "cancelled": {
+                          "type": "number"
+                        },
+                        "in_progress": {
+                          "type": "number"
+                        },
+                        "cancellable": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "requested_by_subject",
+                        "created_at",
+                        "cancelled_at",
+                        "total",
+                        "parsed",
+                        "failed",
+                        "cancelled",
+                        "in_progress",
+                        "cancellable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "batch"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "messages.read"
+            ]
+          },
+          {
+            "auth0": [
+              "messages.read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/balance-batches/{id}/cancel": {
+      "post": {
+        "operationId": "balanceBatches.cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "cancelled": {
+                      "type": "number"
+                    },
+                    "batch": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "requested_by_subject": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "cancelled_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "total": {
+                          "type": "number"
+                        },
+                        "parsed": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "cancelled": {
+                          "type": "number"
+                        },
+                        "in_progress": {
+                          "type": "number"
+                        },
+                        "cancellable": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "requested_by_subject",
+                        "created_at",
+                        "cancelled_at",
+                        "total",
+                        "parsed",
+                        "failed",
+                        "cancelled",
+                        "in_progress",
+                        "cancellable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "cancelled",
+                    "batch"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [
+          {
+            "session": [
+              "balances.query"
+            ]
+          },
+          {
+            "auth0": [
+              "balances.query"
             ]
           }
         ]

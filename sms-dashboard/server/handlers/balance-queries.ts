@@ -2,6 +2,7 @@ import { ORPCError } from '@orpc/server';
 import { nanoid } from 'nanoid';
 import * as v from 'valibot';
 import { D1_MAX_BOUND_PARAMETERS, type D1, type D1Batch } from '../lib/d1.js';
+import { assignChecksToBatch, createBalanceBatch } from '../db/balance-batches.js';
 import {
   findBalanceCheckId,
   listBalanceCheckMessages,
@@ -336,6 +337,8 @@ export const balanceQueriesHandler = {
 
     const plan = await loadBalanceQueryPlan(env.DB, { scope });
     const eligible = filterBalancePlanByMethods(plan, methods);
+    const batchId = `balance-batch-${nanoid()}`;
+    await createBalanceBatch(env.DB, batchId, requestedBySubject);
     const queuedIds: string[] = [];
     const failures: { phone_iccid: string; sim_index: number; error: string }[] = [];
 
@@ -353,11 +356,12 @@ export const balanceQueriesHandler = {
       }
     }
 
+    await assignChecksToBatch(env.DB, batchId, queuedIds);
     const checks = await loadQueuedChecks(env.DB, queuedIds);
 
     return {
       success: true,
-      batch_id: `balance-batch-${nanoid()}`,
+      batch_id: batchId,
       summary: {
         ...summarizePlan(plan),
         selected: eligible.length,

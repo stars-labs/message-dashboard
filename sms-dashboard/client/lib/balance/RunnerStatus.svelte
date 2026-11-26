@@ -5,15 +5,19 @@
   } from '../../../shared/api/balance-runners.js';
   import { textOr } from '../../../shared/text.js';
   import { capabilityLabels, capabilityPresentation } from './presentation.js';
+  import RunnerAdminDialog from './RunnerAdminDialog.svelte';
 
   interface Props {
     runnerStatus: BalanceRunnersResponse | null;
     loading: boolean;
-    /** Shown only to whoever may revoke runners. */
-    onManage?: (() => void) | undefined;
+    /** Whoever may revoke runners gets 管理. */
+    canManage?: boolean;
+    /** After the runner list closes, as a revocation may have changed the status. */
+    onManaged?: () => Promise<void>;
   }
 
-  let { runnerStatus, loading, onManage }: Props = $props();
+  let { runnerStatus, loading, canManage = false, onManaged }: Props = $props();
+  let managing = $state(false);
 </script>
 
 <section
@@ -35,10 +39,12 @@
     </span>
   {/each}
   <span class="text-[11px] text-stone-400 sm:ml-auto">浏览器任务逐张处理</span>
-  {#if onManage}
+  {#if canManage}
     <button
       type="button"
-      onclick={onManage}
+      onclick={() => {
+        managing = true;
+      }}
       aria-label="管理查询助手"
       class="text-[11px] text-stone-500 hover:text-stone-800 underline-offset-2 hover:underline"
     >
@@ -46,3 +52,12 @@
     </button>
   {/if}
 </section>
+
+{#if managing}
+  <RunnerAdminDialog
+    onClose={() => {
+      managing = false;
+      void onManaged?.();
+    }}
+  />
+{/if}

@@ -12,6 +12,7 @@ const OUTBOUND_STATUS = new Map([
   ['sent', { label: '已发送', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' }],
   ['failed', { label: '发送失败', className: 'border-red-200 bg-red-50 text-red-700' }],
   ['unknown', { label: '结果未知', className: 'border-amber-200 bg-amber-50 text-amber-800' }],
+  ['cancelled', { label: '已取消', className: 'border-stone-200 bg-stone-50 text-stone-500' }],
 ]);
 
 export function getOutboundStatusMeta(
