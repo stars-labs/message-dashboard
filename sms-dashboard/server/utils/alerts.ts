@@ -1,4 +1,5 @@
 import { errorText } from '../../shared/error-text.js';
+import { classifyD1Error } from './d1-error.js';
 import type { D1 } from '../lib/d1.js';
 import type { KV } from '../lib/kv.js';
 import {
@@ -44,9 +45,35 @@ function sqlTimestampMs(value: string): number {
   return Date.parse(`${value.replace(' ', 'T')}Z`);
 }
 
+function checkFailedMessage(error: unknown, now: number): Message {
+  const failure = classifyD1Error(error, new Date(now));
+  if (failure.code !== 'D1_QUOTA_EXCEEDED') {
+    return {
+      subject: '[SMS 告警] 告警检查失败',
+      text: `告警检查本身失败了，采集服务目前无人监控：\n\n${errorText(error)}\n\n${DASHBOARD_URL}`,
+    };
+  }
+  const reset = `${failure.retryAt.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+  const writes = failure.quota === 'rows_written';
+  return {
+    subject: `[SMS 告警] D1 ${writes ? '写入' : '读取'}额度已用完`,
+    text: [
+      writes
+        ? 'D1 今天的写入额度已用完，Worker 记不下心跳、设备状态和短信。采集服务可能仍在运行，收到的短信留在 Orange Pi 上，额度恢复后自动上传。'
+        : 'D1 今天的读取额度已用完，页面和告警检查都读不到数据。采集服务可能仍在运行。',
+      `额度在 ${reset} 恢复；升级到 Workers Paid 可以立即恢复。`,
+      '',
+      errorText(error),
+      '',
+      DASHBOARD_URL,
+    ].join('\n'),
+  };
+}
+
 export async function runAlertChecks({ db, kv, mail, recipients, now }: AlertChecks) {
+  const canDeliver = mail !== undefined && recipients !== undefined && recipients.length > 0;
   const deliver = async (message: Message): Promise<boolean> => {
-    if (mail === undefined || recipients === undefined || recipients.length === 0) {
+    if (!canDeliver) {
       console.error(`[alerts] not sent, no recipients configured: ${message.subject}`);
       return false;
     }
@@ -74,19 +101,19 @@ export async function runAlertChecks({ db, kv, mail, recipients, now }: AlertChe
 
     const due = state?.notified_at == null || now - Date.parse(state.notified_at) >= REMINDER_MS;
     if (!due) return;
-    const sent = await deliver({
+    // Record the email before sending it: when D1 refuses the write, the catch below
+    // reports that once, instead of every run resending an alert it cannot record.
+    const notifiedAt = canDeliver ? at : null;
+    if (state === null) await openAlert(db, 'daemon_offline', at, notifiedAt);
+    else if (notifiedAt !== null) await markAlertNotified(db, 'daemon_offline', notifiedAt);
+    await deliver({
       subject: `[SMS 告警] 采集服务 ${String(Math.floor(silentMs / MINUTE_MS))} 分钟没有心跳`,
       text: `Orange Pi 上的采集服务最后一次心跳在 ${heartbeat ?? ''} (UTC)。\n收不到短信、发不出短信，直到它恢复。\n\n${DASHBOARD_URL}`,
     });
-    if (state === null) await openAlert(db, 'daemon_offline', at, sent ? at : null);
-    else if (sent) await markAlertNotified(db, 'daemon_offline', at);
   } catch (error) {
     console.error('[alerts] check failed:', error);
     if ((await kv.get(CHECK_FAILED_KEY)) !== null) return;
-    const sent = await deliver({
-      subject: '[SMS 告警] 告警检查失败',
-      text: `告警检查本身失败了，采集服务目前无人监控：\n\n${errorText(error)}\n\n${DASHBOARD_URL}`,
-    });
+    const sent = await deliver(checkFailedMessage(error, now));
     if (sent) {
       await kv.put(CHECK_FAILED_KEY, new Date(now).toISOString(), {
         expirationTtl: REMINDER_MS / 1000,

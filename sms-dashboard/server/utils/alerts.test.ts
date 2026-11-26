@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createSchema } from '../../test/schema.js';
 import { memoryKv } from '../../test/memory-kv.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
+import type { D1, D1Statement } from '../lib/d1.js';
 import { runAlertChecks, type AlertEmail } from './alerts.js';
 
 const RECIPIENTS = ['ops-a@example.com', 'ops-b@example.com'];
@@ -58,9 +59,30 @@ function alertRows(): unknown[] {
   return sqlite.query('SELECT alert, notified_at IS NOT NULL AS notified FROM alert_state').all();
 }
 
-async function run(at: number, recipients: string[] = RECIPIENTS) {
+const WRITE_QUOTA =
+  "D1_ERROR: Your account has exceeded D1's free tier daily row write limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue.";
+
+function refusingWrites(db: D1<'first' | 'run'>): D1<'first' | 'run'> {
+  const refuse = (statement: D1Statement<'first' | 'run'>): D1Statement<'first' | 'run'> => ({
+    first: () => statement.first(),
+    run: () => Promise.reject(new Error(WRITE_QUOTA)),
+    bind: (...values) => refuse(statement.bind(...values)),
+  });
+  return {
+    prepare: (sql) => {
+      const statement = db.prepare(sql);
+      return /^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql) ? refuse(statement) : statement;
+    },
+  };
+}
+
+async function run(
+  at: number,
+  recipients: string[] = RECIPIENTS,
+  db: D1<'first' | 'run'> = sqliteD1(sqlite),
+) {
   await runAlertChecks({
-    db: sqliteD1(sqlite),
+    db,
     kv,
     mail: { send: (email) => Promise.resolve(void sent.push(email)) },
     recipients,
@@ -149,5 +171,30 @@ describe('delivery', () => {
 
     expect(sent.map((email) => email.subject)).toEqual(['[SMS 告警] 告警检查失败']);
     expect(sent[0]?.text).toContain('exceeded daily row read limit');
+  });
+
+  test('when D1 refuses writes, emails the quota once instead of a silent daemon every run', async () => {
+    heartbeatAt(START);
+    const db = refusingWrites(sqliteD1(sqlite));
+
+    for (let check = 0; check < 4; check++)
+      await run(START + (25 + 5 * check) * MINUTE, RECIPIENTS, db);
+
+    expect(sent.map((email) => email.subject)).toEqual(['[SMS 告警] D1 写入额度已用完']);
+    expect(sent[0]?.text).toContain('采集服务可能仍在运行');
+    expect(sent[0]?.text).toContain('2026-11-26 00:00 UTC');
+  });
+
+  test('reports the silent daemon once D1 accepts writes again', async () => {
+    heartbeatAt(START);
+    await run(START + 25 * MINUTE, RECIPIENTS, refusingWrites(sqliteD1(sqlite)));
+
+    await run(START + 30 * MINUTE);
+
+    expect(sent.map((email) => email.subject)).toEqual([
+      '[SMS 告警] D1 写入额度已用完',
+      '[SMS 告警] 采集服务 30 分钟没有心跳',
+    ]);
+    expect(alertRows()).toEqual([{ alert: 'daemon_offline', notified: 1 }]);
   });
 });
