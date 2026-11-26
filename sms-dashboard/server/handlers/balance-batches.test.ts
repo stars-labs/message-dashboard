@@ -125,6 +125,18 @@ describe('balance batches', () => {
     ).toEqual({ n: 4 });
   });
 
+  test('the schema refuses an unknown check status and a batch that does not exist', async () => {
+    const { checkOf } = await queueBatch();
+    const check = checkOf('sms-1');
+
+    expect(() =>
+      sqlite.run("UPDATE sim_balance_checks SET status = 'paused' WHERE id = ?", [check]),
+    ).toThrow('CHECK constraint failed');
+    expect(() =>
+      sqlite.run("UPDATE sim_balance_checks SET batch_id = 'no-batch' WHERE id = ?", [check]),
+    ).toThrow('FOREIGN KEY constraint failed');
+  });
+
   test('reports how far the batch has got', async () => {
     const { batchId, checkOf } = await queueBatch();
     sqlite.run(`UPDATE sim_balance_checks SET status = 'parsed' WHERE id = '${checkOf('sms-1')}'`);
