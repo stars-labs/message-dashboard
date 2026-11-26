@@ -1,3 +1,4 @@
+import { balanceAgentReleaseUrl } from '../../shared/balance-agent-release.js';
 import { textOr } from '../../shared/text.js';
 import type { AgentState } from './ipc/contract.js';
 import { STATE_LABELS } from './ipc/state-labels.js';
@@ -44,6 +45,8 @@ type Appearance = 'ready' | 'busy' | 'attention' | 'error' | 'idle';
 export interface MenuBarModel {
   appearance: Appearance;
   dashboardUrl: string | null;
+  /** The GitHub page of the newer release, built here from its version alone. */
+  updateUrl: string | null;
   fallbackTitle: string;
   tooltip: string;
   items: MenuItem[];
@@ -149,6 +152,7 @@ export function createMenuBarModel(
   return {
     appearance,
     dashboardUrl: textOr(dashboardUrl, null),
+    updateUrl: state.update ? balanceAgentReleaseUrl(state.update.version) : null,
     ...APPEARANCE_META[appearance],
     items,
   };

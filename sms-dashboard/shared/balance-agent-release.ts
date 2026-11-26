@@ -10,9 +10,13 @@ export function balanceAgentReleaseTag(version: string): string {
   return `balance-agent-v${version}`;
 }
 
+/** Built by the app from the version alone, so the Dashboard cannot point it anywhere else. */
+export function balanceAgentReleaseUrl(version: string): string {
+  return `${RELEASES_URL}/tag/${balanceAgentReleaseTag(version)}`;
+}
+
 export const LatestBalanceAgent = v.object({
   version: v.pipe(v.string(), v.regex(VERSION)),
-  release_url: v.pipe(v.string(), v.url()),
 });
 
 export type LatestBalanceAgent = v.InferOutput<typeof LatestBalanceAgent>;
@@ -23,5 +27,4 @@ export type LatestBalanceAgent = v.InferOutput<typeof LatestBalanceAgent>;
  */
 export const LATEST_BALANCE_AGENT: LatestBalanceAgent = v.parse(LatestBalanceAgent, {
   version: agentPackage.version,
-  release_url: `${RELEASES_URL}/tag/${balanceAgentReleaseTag(agentPackage.version)}`,
 });

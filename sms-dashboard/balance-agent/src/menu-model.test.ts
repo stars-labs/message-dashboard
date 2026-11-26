@@ -37,11 +37,7 @@ describe('Balance Agent menu bar model', () => {
   test('offers a newer release right under the header, and nothing when up to date', () => {
     const model = createMenuBarModel(
       readyState({
-        update: {
-          version: '0.2.0',
-          release_url:
-            'https://github.com/stars-labs/message-dashboard/releases/tag/balance-agent-v0.2.0',
-        },
+        update: { version: '0.2.0' },
       }),
     );
     expect(labelled(model)[1]).toMatchObject({
@@ -49,7 +45,12 @@ describe('Balance Agent menu bar model', () => {
       label: '有新版本 0.2.0 · 打开下载页',
       indicator: 'attention',
     });
-    expect(item(createMenuBarModel(readyState()), 'update-available')).toBeUndefined();
+    expect(model.updateUrl).toBe(
+      'https://github.com/stars-labs/message-dashboard/releases/tag/balance-agent-v0.2.0',
+    );
+    const upToDate = createMenuBarModel(readyState());
+    expect(item(upToDate, 'update-available')).toBeUndefined();
+    expect(upToDate.updateUrl).toBeNull();
   });
 
   test('shows a compact ready menu with the actual launch-at-login state', () => {

@@ -61,11 +61,7 @@ describe('runner presence client', () => {
   });
 
   test('passes on the Agent version the Dashboard announces', async () => {
-    const latest = {
-      version: '0.2.0',
-      release_url:
-        'https://github.com/stars-labs/message-dashboard/releases/tag/balance-agent-v0.2.0',
-    };
+    const latest = { version: '0.2.0' };
     const { client } = fakeControlClient(() =>
       jsonAnswer({ success: true, runner_id: 'workstation', latest_agent: latest }),
     );
