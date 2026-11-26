@@ -76,18 +76,19 @@ so the read budget holds whatever a client does.
 
 ### 4. Every registry entry has a bounded-read test, and the registry has a budget
 
-- A helper in `test/` runs a recurring call's real entry point on `createSchema`
-  twice, once with little history and once with thousands of unrelated rows, and
-  records `EXPLAIN QUERY PLAN` for every statement it prepares. It fails on any
-  `SCAN`, including `SCAN … USING INDEX` (how `failUnsendableMessages` read the
-  whole sent history through an index), and returns the rows read per call.
-  `server/handlers/control.test.ts` ("an idle poll reads only the pending and
-  processing indexes") and `carrier-web-balance.test.ts` ("reads only active jobs
-  and queued checks") are its first two users.
-- A census test, like `server/route-census.test.ts`, fails when a registry entry
-  has no bounded-read test, or a test names an entry the registry lacks.
-- A budget test sums, over the registry, callers × calls a day × rows read per
-  idle call, and fails above the daily budget.
+- `server/recurring-calls.test.ts` makes every idle call (the daemon's and the
+  Agent's as their fixtures record them, the dashboard's as the client sends them,
+  each cron run) on a Miniflare D1, which counts rows as production D1 bills them,
+  with a production-sized fleet: once without history and once with 2000 rows each
+  of sent messages and finished jobs. A call that reads more the second time fails.
+  It measures reads rather than judging query plans: a plan cannot tell a partial
+  index over the pending queue, which is bounded, from one over all sent history,
+  which is how `failUnsendableMessages` read 7 million rows.
+- Each registry entry maps to its idle call in a `Record` keyed by the registry,
+  so a new entry without one is a type error; an entry that runs only while work
+  is in progress maps to none.
+- A budget test sums, over the idle entries, callers × calls a day × rows read per
+  call, and fails above the daily budget.
 
 ### Budgets are set against the free plan
 
@@ -159,3 +160,10 @@ Each step is one deploy that the previous one does not depend on reversing.
 - What stays outside these checks: calls that do not recur (a page load, a
   report), and how many rows an active queue holds. A bounded read is bounded by
   the work waiting, so a backlog still costs reads in proportion to it.
+- The budget counts D1 only. Every signed-in dashboard request also reads the
+  session from KV, whose free plan allows 100,000 reads a day: the registry's idle
+  dashboard polls make 13,248 requests a day per tab, 66,240 at five tabs.
+- When step 1 landed, the idle calls read about 946,000 of the 1,000,000 rows:
+  device sync reads every modem every 30 seconds (296,640), the two Agent claims
+  read 207,360 each, and the dashboard's runner status 144,000. The next recurring
+  call needs one of these cut first.
