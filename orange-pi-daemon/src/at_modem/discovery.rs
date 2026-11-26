@@ -77,18 +77,55 @@ impl AtModemManager {
         }
     }
 
+    /// The USB interface number a `/dev/ttyUSBN` port is bound to, e.g. `2` for `:1.2`.
+    ///
+    /// The interface number is a property of the device, unlike the ttyUSB number,
+    /// which the kernel hands out in enumeration order. `root` is the sysfs mount,
+    /// so the ancestor walk can be tested without a modem.
+    pub fn usb_interface_for_port_in(root: &std::path::Path, port: &str) -> Option<u8> {
+        let name = port.trim_start_matches("/dev/");
+        let link = root.join(format!("sys/class/tty/{name}/device"));
+        let canon = fs::canonicalize(&link).ok()?;
+        // Ancestors look like `2-1.3.4.3.4:1.2`; the interface number is the suffix.
+        canon
+            .ancestors()
+            .filter_map(|dir| dir.file_name())
+            .map(|f| f.to_string_lossy().into_owned())
+            .find_map(|segment| segment.rsplit_once(":1.").map(|(_, n)| n.to_string()))
+            .and_then(|n| n.parse::<u8>().ok())
+    }
+
     /// Order a modem's ttyUSB ports so the real AT command port is tried first.
     ///
-    /// The default 4-port layout DIAG/NMEA/AT/MODEM has AT at index 2; the slimmed
-    /// AT+MODEM layout has it at index 0. The MODEM/PPP port also answers a bare "AT",
-    /// so the lowest port cannot be tried first or it would be cached as the AT port.
+    /// The default 4-port layout is DIAG/NMEA/AT/MODEM on interfaces 1.0/1.1/1.2/1.3,
+    /// so interface 1.2 is the AT port. Picking it by interface number is what makes
+    /// this stable: the kernel does not guarantee that a device's ttyUSB numbers sort
+    /// in interface order, and enumerating by sorted position instead once cached a
+    /// DIAG port as the AT port on modems whose numbers came back out of order.
+    ///
+    /// The MODEM/PPP port also answers a bare "AT", so a wrong choice is not caught
+    /// by probing: it must be avoided by construction. Positions are only a fallback
+    /// for when sysfs is unreadable (tests, or a device mid-enumeration).
     pub fn at_probe_order(ports: &[String]) -> Vec<String> {
+        Self::at_probe_order_in(std::path::Path::new("/"), ports)
+    }
+
+    /// `at_probe_order` against a sysfs mounted somewhere other than `/`.
+    pub fn at_probe_order_in(root: &std::path::Path, ports: &[String]) -> Vec<String> {
+        let at_slot = ports
+            .iter()
+            .position(|p| Self::usb_interface_for_port_in(root, p) == Some(2))
+            .or_else(|| {
+                // Slimmed AT+MODEM layout has AT on interface 1.0, which also sorts
+                // first, so position 2 of a 4-port device is the legacy guess.
+                (ports.len() >= 3).then_some(2)
+            });
         let mut order: Vec<String> = Vec::with_capacity(ports.len());
-        if let Some(at_slot) = ports.get(2) {
-            order.push(at_slot.clone());
+        if let Some(slot) = at_slot.and_then(|i| ports.get(i)) {
+            order.push(slot.clone());
         }
         for (i, p) in ports.iter().enumerate() {
-            if i != 2 {
+            if Some(i) != at_slot {
                 order.push(p.clone());
             }
         }
@@ -168,18 +205,40 @@ impl AtModemManager {
         groups: &BTreeMap<String, Vec<String>>,
         at_port: &str,
     ) -> Option<VoicePorts> {
+        Self::pick_voice_ports_in(std::path::Path::new("/"), groups, at_port)
+    }
+
+    /// `pick_voice_ports` against a sysfs mounted somewhere other than `/`.
+    pub fn pick_voice_ports_in(
+        root: &std::path::Path,
+        groups: &BTreeMap<String, Vec<String>>,
+        at_port: &str,
+    ) -> Option<VoicePorts> {
         let ports = groups
             .values()
             .find(|ports| ports.iter().any(|p| p == at_port))?;
-        let [_, nmea, at, modem, ..] = ports.as_slice() else {
-            return None;
+        // Pick by interface number, not by position: sorted ttyUSB numbers do not
+        // follow interface order on every device (see `at_probe_order`). A device
+        // with no NMEA interface (slimmed) has no interface 1, so this is also what
+        // makes voice unavailable there.
+        let by_interface = |wanted: u8| {
+            ports
+                .iter()
+                .find(|p| Self::usb_interface_for_port_in(root, p) == Some(wanted))
+                .cloned()
         };
-        if at != at_port {
+        if let (Some(nmea), Some(modem)) = (by_interface(1), by_interface(3)) {
+            return Some(VoicePorts { nmea, modem });
+        }
+        // Sysfs is unreadable (tests, or a device mid-enumeration): fall back to
+        // the 4-port layout of DIAG/NMEA/AT/MODEM.
+        let at_index = ports.iter().position(|p| p == at_port)?;
+        if at_index != 2 || ports.len() < 4 {
             return None;
         }
         Some(VoicePorts {
-            nmea: nmea.clone(),
-            modem: modem.clone(),
+            nmea: ports.get(1)?.clone(),
+            modem: ports.get(3)?.clone(),
         })
     }
 }
