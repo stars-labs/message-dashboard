@@ -126,22 +126,30 @@ Add a new numbered file — never rewrite an applied migration.
 `bun run check:migrations` (part of `bun run check`) rejects a change to any
 migration on `origin/main`, and a new one not named `NNN_name.sql` above main's
 highest number.
-Apply with: `bunx wrangler d1 execute sms-dashboard --remote --file=migrations/NNN_name.sql`
-Do **not** use `wrangler d1 migrations apply --remote`.
+Apply with `bun run db:apply NNN` once the migration is on main, one at a time and
+in order, then commit the two baseline files it regenerates. `bun run deploy`
+refuses while a migration is newer than the baseline. Never run
+`wrangler d1 execute --remote --file` or `wrangler d1 migrations apply --remote`
+on a migration by hand.
 
 The baseline is `migrations/schema.sql` (structure) plus `reference-data.sql` (the
 `sim_balance_profiles` rows only migrations write), exported from production; its
 `-- through: NNN` header names the last migration included. Tests build every
 database with `createSchema` (`test/schema.ts`): baseline, then each newer
 migration. `bun run lint` rejects `CREATE TABLE|INDEX|VIEW|TRIGGER` in a test outside
-`migrations/`, whose tests start from the tables before their migration. After a migration reaches
-production, regenerate both files and run `bun run check:schema-drift`
+`migrations/`, whose tests start from the tables before their migration, and rejects
+`schema.sql` or `reference-data.sql` in a migration's test. `db:apply` regenerates
+both files and checks them with `bun run check:schema-drift`
 ([deployment](../docs/deployment.md)).
 
 ### Bulk D1 quota preflight
 
 Apply this before production table copies or rebuilds, index builds on existing
 data, backfills, and bulk updates or deletes, including retention jobs.
+`bun run db:rehearse <file.sql>` measures SQL on an isolated copy of production
+as D1 counts it, and `db:apply` refuses a migration whose rehearsal exceeds its
+limits, records the bookmark and waits for the heartbeat; the rules below still
+apply to what those tools cannot see, such as the account's remaining allowance.
 
 - In the change review, record the affected table sizes and estimated D1 rows
   read and written per operation and in total. Include table copies, index
