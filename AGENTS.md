@@ -38,6 +38,11 @@ plaintext `.env` files. Never commit secrets, browser profiles, `node_modules`,
 unless explicitly requested. Tests use fixtures/mocks only. Never automate CAPTCHA
 or slider bypasses — human verification is an operator handoff.
 
+**Recurring D1 access** — Changes to polling, heartbeats, retries, scheduled jobs,
+or the SQL and indexes they use must meet the [D1 read budget and regression test
+requirements](sms-dashboard/AGENTS.md#recurring-d1-read-budget). This also applies
+to callers in the daemon, dashboard, and Balance Agent.
+
 **Scope** — Never revert or overwrite user changes. Keep changes inside the
 component that owns the behavior.
 

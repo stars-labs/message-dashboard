@@ -20,6 +20,28 @@
 
 Full schema and auth contracts: [docs/data-contracts.md](../docs/data-contracts.md)
 
+## Recurring D1 read budget
+
+- For a new or changed polling, heartbeat, retry, or scheduled path, record the
+  call interval, expected number of callers, and estimated daily D1 rows read in
+  the change review. Include idle calls, each statement in a batch, and retry
+  traffic. Multiply reads per invocation by invocations per day across callers
+  and check the estimate against the account-wide daily allowance.
+- Bound the reads by an indexed key or range, the active queue, or a bounded
+  cursor window. Historical rows outside that scope must not increase the cost
+  of a poll. This applies to `UPDATE` and `DELETE` too. An empty result, zero
+  rows written, or a `LIMIT` alone does not establish a read bound.
+- Before changing recurring SQL, add a regression test to the existing test
+  suite. Exercise the real entry point on `createSchema`, including competing
+  indexes, with an empty queue and substantial unrelated history. Also cover
+  applicable active work. Check the actual statements and bound parameters
+  with `EXPLAIN QUERY PLAN` or a rows-read assertion. Check the index and range
+  that bound the reads. Rerun the affected tests when a migration changes an
+  index used by a recurring path.
+- After an authorized production deployment, use read-only D1 Query Insights
+  to verify executions and total rows read for the changed queries against the
+  estimate. Record the observed time window and database with the result.
+
 ## Adding an API route
 
 Every `/api/*` route is declared on the contract, in `shared/api/contract/`, with
