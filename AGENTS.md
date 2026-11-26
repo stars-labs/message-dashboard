@@ -43,6 +43,9 @@ or the SQL and indexes they use must meet the [D1 read budget and regression tes
 requirements](sms-dashboard/AGENTS.md#recurring-d1-read-budget). This also applies
 to callers in the daemon, dashboard, and Balance Agent.
 
+**Bulk D1 changes** — Before deploying a migration, backfill, or cleanup that
+can touch many rows, complete the [D1 quota preflight](sms-dashboard/AGENTS.md#bulk-d1-quota-preflight).
+
 **Scope** — Never revert or overwrite user changes. Keep changes inside the
 component that owns the behavior.
 

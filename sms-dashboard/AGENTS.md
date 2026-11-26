@@ -138,6 +138,30 @@ migration. `bun run lint` rejects `CREATE TABLE|INDEX|VIEW|TRIGGER` in a test ou
 production, regenerate both files and run `bun run check:schema-drift`
 ([deployment](../docs/deployment.md)).
 
+### Bulk D1 quota preflight
+
+Apply this before production table copies or rebuilds, index builds on existing
+data, backfills, and bulk updates or deletes, including retention jobs.
+
+- In the change review, record the affected table sizes and estimated D1 rows
+  read and written per operation and in total. Include table copies, index
+  entries, triggers, and foreign-key actions. Rehearse the exact SQL on isolated
+  D1 with representative row counts and indexes. Capture `meta.rows_read` and
+  `meta.rows_written` where available, and document conservative estimates for
+  operations without measurements.
+- Before executing in production, check the account's remaining read and write
+  allowance for the current quota window. Reserve room for normal database
+  traffic through the next reset, including daemon heartbeats, SMS uploads, and
+  outbound claims. Proceed only when the change and the reserve fit both
+  budgets. If they do not fit, prefer an additive schema change, use resumable
+  batches across quota windows, or obtain approval for a Cloudflare plan with
+  sufficient allowance. A quiet deploy window does not increase the daily limit.
+- For batches, define the maximum rows and budget per batch, a checkpoint, and
+  a stopping point that preserves the reserve. Record the recovery procedure
+  and a Time Travel bookmark for table rebuilds. After an authorized rollout,
+  compare the account's measured usage with the estimate and check that the
+  daemon has written a new heartbeat.
+
 ## Deploy
 
 See [docs/deployment.md](../docs/deployment.md).
