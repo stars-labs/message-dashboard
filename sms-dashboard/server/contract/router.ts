@@ -2,6 +2,7 @@ import { implement } from '@orpc/server';
 import type * as v from 'valibot';
 import type { CarrierBillMutationBody } from '../../shared/api/carrier-bills.js';
 import { contract } from '../../shared/api/contract/index.js';
+import { POLL_INTERVAL_HEADER, RECURRING, type RecurringName } from '../../shared/recurring.js';
 import { auth0Handler } from '../handlers/auth0.js';
 import { balanceBatchesHandler } from '../handlers/balance-batches.js';
 import { balanceQueriesHandler } from '../handlers/balance-queries.js';
@@ -35,6 +36,13 @@ export interface ContractContext {
 
 const os = implement(contract).$context<ContractContext>();
 
+/** Tells the daemon or the Balance Agent when to call again, once the call has succeeded. */
+async function paced<T>(context: ContractContext, name: RecurringName, answer: Promise<T>) {
+  const value = await answer;
+  context.resHeaders.set(POLL_INTERVAL_HEADER, String(RECURRING[name].everySeconds));
+  return value;
+}
+
 function runnerOf({ runner }: ContractContext): AuthorizedRunner {
   if (runner === null) throw new Error('a runner route ran without an admitted runner');
   return runner;
@@ -62,16 +70,20 @@ function billMutation(input: {
 export const router = os.router({
   control: {
     heartbeat: os.control.heartbeat.handler(({ context, input }) =>
-      recordHeartbeat(context.request, input),
+      paced(context, 'daemonHeartbeat', recordHeartbeat(context.request, input)),
     ),
     devices: os.control.devices.handler(({ context, input }) =>
-      controlHandler.updateDevices(context.request, input),
+      paced(context, 'daemonDevices', controlHandler.updateDevices(context.request, input)),
     ),
     uploadMessages: os.control.uploadMessages.handler(({ context, input }) =>
       controlHandler.uploadMessages(context.request, input),
     ),
     pendingSms: os.control.pendingSms.handler(({ context, input }) =>
-      controlHandler.getPendingSMS(context.request, input.headers['x-daemon-session-id']),
+      paced(
+        context,
+        'daemonPendingSms',
+        controlHandler.getPendingSMS(context.request, input.headers['x-daemon-session-id']),
+      ),
     ),
     smsResult: os.control.smsResult.handler(({ context, input }) =>
       controlHandler.updateSMSResult(context.request, input),
@@ -86,15 +98,21 @@ export const router = os.router({
   balanceRunnerControl: {
     check: os.balanceRunnerControl.check.handler(() => ({ success: true }) as const),
     heartbeat: os.balanceRunnerControl.heartbeat.handler(({ context, input }) =>
-      balanceRunnersHandler.heartbeat(context.request, runnerOf(context), input),
+      paced(
+        context,
+        'runnerHeartbeat',
+        balanceRunnersHandler.heartbeat(context.request, runnerOf(context), input),
+      ),
     ),
   },
   balanceSkillJobs: {
     claim: os.balanceSkillJobs.claim.handler(async ({ context, input }) => {
-      const job = await balanceSkillRunnerHandler.claim(
-        context.request,
-        await sessionRunner(context, input.query.runner_id),
-        input.query.runner_id,
+      const job = await paced(
+        context,
+        'runnerSkillClaim',
+        sessionRunner(context, input.query.runner_id).then((runner) =>
+          balanceSkillRunnerHandler.claim(context.request, runner, input.query.runner_id),
+        ),
       );
       return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
     }),
@@ -117,10 +135,12 @@ export const router = os.router({
   },
   carrierWebJobs: {
     claim: os.carrierWebJobs.claim.handler(async ({ context, input }) => {
-      const job = await carrierWebBalanceHandler.claim(
-        context.request,
-        await sessionRunner(context, input.query.runner_id),
-        input.query.runner_id,
+      const job = await paced(
+        context,
+        'runnerWebClaim',
+        sessionRunner(context, input.query.runner_id).then((runner) =>
+          carrierWebBalanceHandler.claim(context.request, runner, input.query.runner_id),
+        ),
       );
       return job === null ? { status: 204 as const } : { status: 200 as const, body: job };
     }),

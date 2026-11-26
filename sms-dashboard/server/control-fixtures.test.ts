@@ -36,6 +36,7 @@ interface World {
 interface Answer {
   status: number;
   contentType: string | null;
+  pollInterval: string | null;
   text: string;
 }
 
@@ -204,7 +205,12 @@ async function replay(name: string, request: ControlFixture['request']): Promise
   const response = await exchange(request);
   const text = await response.text();
   sqlite.close();
-  return { status: response.status, contentType: response.headers.get('Content-Type'), text };
+  return {
+    status: response.status,
+    contentType: response.headers.get('Content-Type'),
+    pollInterval: response.headers.get('X-Poll-Interval'),
+    text,
+  };
 }
 
 /** A heartbeat announces the Agent version this Worker ships with; the recording holds a fixed one. */
@@ -226,10 +232,16 @@ function asDeployed(
   };
 }
 
-function onTheWire({ status, body }: ControlFixture['response']): Answer {
+function onTheWire({ status, headers, body }: ControlFixture['response']): Answer {
+  const pollInterval = headers?.['X-Poll-Interval'] ?? null;
   return body === undefined
-    ? { status, contentType: null, text: '' }
-    : { status, contentType: 'application/json;charset=utf-8', text: JSON.stringify(body) };
+    ? { status, contentType: null, pollInterval, text: '' }
+    : {
+        status,
+        contentType: 'application/json;charset=utf-8',
+        pollInterval,
+        text: JSON.stringify(body),
+      };
 }
 
 const fixtures = controlFixtures();

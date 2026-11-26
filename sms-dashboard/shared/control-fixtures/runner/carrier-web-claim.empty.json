@@ -4,6 +4,7 @@
     "path": "/api/control/carrier-web-balance/jobs/claim?runner_id=runner-1"
   },
   "response": {
-    "status": 204
+    "status": 204,
+    "headers": { "X-Poll-Interval": "5" }
   }
 }

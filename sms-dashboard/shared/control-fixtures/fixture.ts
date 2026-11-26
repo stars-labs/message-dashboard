@@ -15,6 +15,8 @@ export const ControlFixture = v.strictObject({
   }),
   response: v.strictObject({
     status: v.number(),
+    /** Present on a recurring call's answer: how long to wait before the next one (ADR 0002). */
+    headers: v.optional(v.strictObject({ 'X-Poll-Interval': v.string() })),
     body: v.optional(v.unknown()),
   }),
 });

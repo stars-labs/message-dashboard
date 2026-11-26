@@ -29,6 +29,7 @@
   },
   "response": {
     "status": 200,
+    "headers": { "X-Poll-Interval": "30" },
     "body": {
       "success": true,
       "sync_mode": "full",

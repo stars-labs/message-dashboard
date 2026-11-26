@@ -19,6 +19,7 @@
   },
   "response": {
     "status": 200,
+    "headers": { "X-Poll-Interval": "60" },
     "body": {
       "success": true,
       "message": "Heartbeat received",

@@ -5,6 +5,7 @@
   },
   "response": {
     "status": 200,
+    "headers": { "X-Poll-Interval": "10" },
     "body": {
       "success": true,
       "pending_messages": []

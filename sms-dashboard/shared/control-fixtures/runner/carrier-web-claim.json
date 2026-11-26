@@ -5,6 +5,7 @@
   },
   "response": {
     "status": 200,
+    "headers": { "X-Poll-Interval": "5" },
     "body": {
       "id": "web-job-1",
       "check_id": "check-1",
