@@ -210,6 +210,8 @@ export default defineConfig([
       'migrations/**',
       // These test the SQL tooling itself, on toy tables.
       'scripts/schema-drift.test.ts',
+      'scripts/d1-sql.test.ts',
+      'scripts/migration-apply-rules.test.ts',
       'test/sqlite-d1.test.ts',
     ],
     rules: { 'no-restricted-syntax': ['error', ...TEST_SCHEMAS] },

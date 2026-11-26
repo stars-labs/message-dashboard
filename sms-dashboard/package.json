@@ -32,10 +32,12 @@
     "dev": "bunx vite",
     "build": "bunx vite build",
     "build:unified": "bun run build && bun scripts/build-unified.ts",
-    "deploy": "bun run build:unified && bunx wrangler deploy",
+    "deploy": "bun scripts/check-deployable.ts && bun run build:unified && bunx wrangler deploy",
     "preview": "bunx vite preview",
     "db:init": "bun scripts/init-local-db.ts",
-    "d1:hot-queries": "bun scripts/report-hot-queries.ts"
+    "d1:hot-queries": "bun scripts/report-hot-queries.ts",
+    "db:rehearse": "bun scripts/db-rehearse.ts",
+    "db:apply": "bun scripts/db-apply.ts"
   },
   "dependencies": {
     "@orpc/client": "1.16.2",

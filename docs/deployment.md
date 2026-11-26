@@ -8,43 +8,47 @@ cd sms-dashboard
 # 1. Confirm identity
 bunx wrangler whoami   # must be @bitgc.io, account 793e3286eaca411bf1eebaf4b8c7051e
 
-# 2. Apply any new D1 migration (if needed)
-bunx wrangler d1 execute sms-dashboard --remote --file=migrations/NNN_name.sql
+# 2. Apply each new D1 migration, in order, once it is on main; then commit
+#    migrations/schema.sql and reference-data.sql, which it regenerates
+bun run db:apply NNN
 
 # 3. Deploy
 bun run deploy
-
-# 4. After a migration: regenerate the baseline (the headers of
-#    migrations/schema.sql and reference-data.sql give the commands; set
-#    `through` to NNN), then confirm it matches production and commit it
-bun run check:schema-drift
 ```
 
+- `bun run db:rehearse <file.sql>` runs SQL on a copy of production in an isolated
+  local D1 and reports the rows it reads and writes as D1 counts them, index entries
+  and DDL included. Run it on a new migration before merging it. Production is only
+  read (one full `d1 export`), and the copy is deleted afterwards: it holds phone
+  numbers and message text.
+- `bun run db:apply NNN` applies the migration right after the baseline's `through`,
+  as `origin/main` holds it. It rehearses it first and refuses one above
+  `--max-rows-written` (default 50,000, about 50 days of the Worker's own writes) or
+  `--max-rows-read` (default 5,000,000). Then it records a Time Travel bookmark,
+  applies the file with `d1 execute --file`, compares the touched tables' row counts
+  with the rehearsal, regenerates the baseline, checks production against it, and
+  waits for a daemon heartbeat written after the migration. A migration above the
+  limits is split into batches that fit a quota window, or the limit is raised
+  explicitly once the account's remaining allowance covers it and normal traffic.
+- The baseline's `through` is the record of what production has. `bun run deploy`
+  refuses while a migration in `migrations/` is newer than it, or while production
+  differs from the baseline (`check:schema-drift`, two `d1 export` calls, which
+  briefly hold other D1 requests).
 - Do **not** run `wrangler d1 migrations apply --remote` — production predates
   Wrangler migration bookkeeping. Always apply only the exact new migration file.
-- `bun run check` fails once main has a migration newer than `schema.sql`'s
-  `through`, so step 4 cannot be skipped for long. `check:schema-drift` reads
-  production (two `d1 export` calls, which briefly hold other D1 requests).
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
   A change to a recurring path is checked a few hours later with
   `bun run d1:hot-queries -- --period 1d`: it lists the statements that run at least
   96 times a day and read at least 50 rows a run, from Query Insights (read-only).
   Insights lags by minutes, and a window shorter than an hour can come back empty.
 - A migration that rebuilds tables (`084` rebuilds `messages` and nine other
-  tables) is not documented as atomic when run with `d1 execute --file`. Before
-  applying one, record a Time Travel bookmark, and keep it until the counts match:
-
-  ```bash
-  bunx wrangler d1 time-travel info sms-dashboard          # note the bookmark
-  bunx wrangler d1 execute sms-dashboard --remote --file=migrations/084_balance_batches.sql
-  bunx wrangler d1 execute sms-dashboard --remote \
-    --command "SELECT (SELECT COUNT(*) FROM messages) m, (SELECT COUNT(*) FROM sim_balance_checks) c, (SELECT COUNT(*) FROM sim_balance_metrics) x"
-  # Counts differ from before, or the file failed part-way:
-  bunx wrangler d1 time-travel restore sms-dashboard --bookmark=<bookmark>
-  ```
-
-  Take the same counts before applying. Apply the migration before deploying the
-  Worker that needs it.
+  tables, and wrote 307,242 rows) is not documented as atomic when run with
+  `d1 execute --file`. If `db:apply` reports counts that moved differently from the
+  rehearsal, or the file failed part-way, restore with the command it prints:
+  `bunx wrangler d1 time-travel restore sms-dashboard --bookmark=<bookmark>`.
+- `d1 execute --file` goes through D1's import path, which kept working on
+  2026-11-26 while the Worker's writes were refused for quota. A successful apply
+  does not show the quota has room; the daemon heartbeat `db:apply` waits for does.
 
 ### Free-plan limits
 
