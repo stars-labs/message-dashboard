@@ -26,6 +26,21 @@ bun run check:schema-drift
   `through`, so step 4 cannot be skipped for long. `check:schema-drift` reads
   production (two `d1 export` calls, which briefly hold other D1 requests).
 - After deploy: verify `https://sexy.itoken.world/api/health` and the affected workflow.
+- A migration that rebuilds tables (`084` rebuilds `messages` and nine other
+  tables) is not documented as atomic when run with `d1 execute --file`. Before
+  applying one, record a Time Travel bookmark, and keep it until the counts match:
+
+  ```bash
+  bunx wrangler d1 time-travel info sms-dashboard          # note the bookmark
+  bunx wrangler d1 execute sms-dashboard --remote --file=migrations/084_balance_batches.sql
+  bunx wrangler d1 execute sms-dashboard --remote \
+    --command "SELECT (SELECT COUNT(*) FROM messages) m, (SELECT COUNT(*) FROM sim_balance_checks) c, (SELECT COUNT(*) FROM sim_balance_metrics) x"
+  # Counts differ from before, or the file failed part-way:
+  bunx wrangler d1 time-travel restore sms-dashboard --bookmark=<bookmark>
+  ```
+
+  Take the same counts before applying. Apply the migration before deploying the
+  Worker that needs it.
 
 ### Free-plan limits
 
