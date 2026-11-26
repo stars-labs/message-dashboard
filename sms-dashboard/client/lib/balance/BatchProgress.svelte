@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import type { BalanceBatch } from '../../../shared/api/balance-batches.js';
   import { errorText } from '../../../shared/error-text.js';
+  import { intervalMs } from '../../../shared/recurring.js';
   import { contractApi } from '../api.js';
   import { confirmAction } from '../confirm.svelte.js';
   import { toEpochMilliseconds } from '../time.js';
@@ -15,7 +16,7 @@
 
   let { canCancel, paused = false, onCancelled }: Props = $props();
 
-  const POLL_MS = 10_000;
+  const POLL_MS = intervalMs('dashboardBatchProgress');
   const RECENT_MS = 30 * 60_000;
 
   let batches = $state<BalanceBatch[]>([]);

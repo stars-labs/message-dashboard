@@ -27,6 +27,7 @@
   import { textOr } from '../shared/text.js';
   import { isView, VIEW_PERMISSION, type View } from '../shared/views.js';
   import AuthGate from './app/AuthGate.svelte';
+  import { intervalMs } from '../shared/recurring.js';
   import { BalanceChecks } from './app/balance-checks.svelte.js';
   import { CallController } from './app/call-controller.svelte.js';
   import CallLayer from './app/CallLayer.svelte';
@@ -70,8 +71,8 @@
   let showSendDrawer = $state(false);
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let pollInFlight = false;
-  const POLL_INTERVAL_MS = 60000;
-  const DAEMON_POLL_INTERVAL_MS = 300000;
+  const POLL_INTERVAL_MS = intervalMs('dashboardMessages');
+  const DAEMON_POLL_INTERVAL_MS = intervalMs('dashboardDaemonStatus');
   let lastDaemonPollAt = 0;
   let daemonStatusRequest: Promise<boolean> | null = null;
   let daemonRefreshing = $state(false);

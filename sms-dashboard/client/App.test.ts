@@ -11,6 +11,7 @@ import type { KeywordsResponse } from '../shared/api/keywords.js';
 import type { IccidMapping } from '../shared/api/iccid-mappings.js';
 import type { ApiMessage, MessagePage, SendMessageResponse } from '../shared/api/messages.js';
 import type { Phone, PhonesResponse } from '../shared/api/phones.js';
+import { intervalMs } from '../shared/recurring.js';
 import App from './App.svelte';
 import { auth } from './lib/auth.js';
 
@@ -507,8 +508,11 @@ describe('mobile detail navigation', () => {
       source.indexOf('function stopPolling()'),
     );
 
-    expect(source).toContain('const POLL_INTERVAL_MS = 60000');
-    expect(source).toContain('const DAEMON_POLL_INTERVAL_MS = 300000');
+    expect(source).toContain("const POLL_INTERVAL_MS = intervalMs('dashboardMessages')");
+    expect(source).toContain("const DAEMON_POLL_INTERVAL_MS = intervalMs('dashboardDaemonStatus')");
+    expect([intervalMs('dashboardMessages'), intervalMs('dashboardDaemonStatus')]).toEqual([
+      60_000, 300_000,
+    ]);
     expect(loadData).toContain('api.getMessages({ limit: MESSAGE_PAGE_SIZE })');
     expect(polling).toContain("document.visibilityState !== 'visible'");
     expect(polling).toContain('now - lastDaemonPollAt >= DAEMON_POLL_INTERVAL_MS');

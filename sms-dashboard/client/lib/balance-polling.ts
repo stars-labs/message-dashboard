@@ -1,3 +1,4 @@
+import { intervalMs } from '../../shared/recurring.js';
 import { textOr } from '../../shared/text.js';
 
 const ACTIVE_QUERY_STATUSES = new Set([
@@ -28,5 +29,7 @@ export function isActiveBalanceCheck(check: PollableCheck | null | undefined): b
 }
 
 export function balancePollDelay(now: number, fastUntil: number): number {
-  return now < fastUntil ? 2_000 : 5_000;
+  return now < fastUntil
+    ? intervalMs('dashboardBalanceStatusFast')
+    : intervalMs('dashboardBalanceStatus');
 }

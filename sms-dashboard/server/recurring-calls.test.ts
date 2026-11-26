@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,11 +14,13 @@ import {
 import { RECURRING, type RecurringName } from '../shared/recurring.js';
 import { callState } from '../test/call-state-fleet.js';
 import { controlFixtures } from '../test/control-fixtures.js';
+import { memoryKv } from '../test/memory-kv.js';
 import { planDetails } from '../test/query-plan.js';
 import { registerRunnerSession } from '../test/runner-session.js';
 import { createSchema } from '../test/schema.js';
 import { callWorker, TEST_API_KEY } from '../test/worker-harness.js';
 import type { D1, D1Batch, D1RunResult, D1Statement } from './lib/d1.js';
+import { runScheduled } from './scheduled.js';
 
 // ADR 0002: the idle recurring calls together read at most a fifth of the free plan's
 // 5,000,000 rows a day, counted as D1 counts them (Miniflare's local D1).
@@ -29,16 +32,44 @@ const HISTORY = 2000;
 /** What a call may read more once HISTORY rows of finished work exist: none, give or take. */
 const GROWTH_ALLOWED = HISTORY / 100;
 
-/** Each recurring call, made as its idle fixture records it. A missing entry is a type error. */
-const IDLE_CALL: Record<RecurringName, string> = {
-  daemonPendingSms: 'daemon/pending-sms.empty',
-  daemonDevices: 'daemon/devices',
-  daemonHeartbeat: 'daemon/heartbeat',
-  runnerSkillClaim: 'runner/balance-skills-claim.empty',
-  runnerWebClaim: 'runner/carrier-web-claim.empty',
-  runnerHeartbeat: 'runner/balance-runners-heartbeat',
+const SINCE = new Date(Date.now() - 60_000).toISOString();
+
+type IdleCall = { fixture: string } | { dashboard: string } | { cron: string };
+
+/**
+ * How each recurring call is made with nothing to do: a daemon or Agent call as its
+ * fixture records it, a dashboard poll as the client sends it, or a cron run. A call that
+ * only runs while work is in progress has none. A missing entry is a type error.
+ */
+const IDLE_CALL: Record<RecurringName, IdleCall | null> = {
+  daemonPendingSms: { fixture: 'daemon/pending-sms.empty' },
+  daemonDevices: { fixture: 'daemon/devices' },
+  daemonHeartbeat: { fixture: 'daemon/heartbeat' },
+  runnerSkillClaim: { fixture: 'runner/balance-skills-claim.empty' },
+  runnerWebClaim: { fixture: 'runner/carrier-web-claim.empty' },
+  runnerHeartbeat: { fixture: 'runner/balance-runners-heartbeat' },
+  dashboardMessages: { dashboard: `/api/messages?since=${encodeURIComponent(SINCE)}&limit=100` },
+  dashboardDaemonStatus: { dashboard: '/api/daemon/status' },
+  dashboardRunnerStatus: { dashboard: '/api/balance-runners' },
+  dashboardCallState: { dashboard: '/api/calls/state' },
+  dashboardLiveCallState: null,
+  dashboardBatchProgress: null,
+  dashboardBalanceStatus: null,
+  dashboardBalanceStatusFast: null,
+  cronMaintenance: { cron: RECURRING.cronMaintenance.cron },
+  cronNightly: { cron: RECURRING.cronNightly.cron },
 };
 const NAMES = Object.keys(IDLE_CALL).filter((key): key is RecurringName => key in RECURRING);
+const IDLE_NAMES = NAMES.filter((name) => IDLE_CALL[name] !== null);
+
+const ADMIN = 'session-admin';
+const sessions = () =>
+  memoryKv({
+    [ADMIN]: JSON.stringify({
+      user: { id: 'auth0|operator', email: 'operator@example.com', roles: ['sms-admin'] },
+      expires_at: Date.now() + 3_600_000,
+    }),
+  });
 
 const Meta = v.object({
   meta: v.object({ rows_read: v.number(), changes: v.number(), last_row_id: v.number() }),
@@ -108,9 +139,12 @@ function seedFleet(db: Database): void {
 
 function seedHistory(db: Database): void {
   db.run(`${series(HISTORY)}
-    INSERT INTO messages (id, phone_iccid, content, type, status, recipient, created_at)
-    SELECT 'sent-' || i, 'iccid-001', 'history', 'sent', 'sent', '+6580000002',
-           '2026-11-01 00:00:00'
+    INSERT INTO messages (
+      id, phone_iccid, content, type, status, recipient, filter_status,
+      timestamp, created_at, updated_at
+    )
+    SELECT 'sent-' || i, 'iccid-001', 'history', 'sent', 'sent', '+6580000002', 'clean',
+           datetime('now', '-1 day'), datetime('now', '-1 day'), datetime('now', '-1 day')
     FROM n`);
   db.run(`${series(2 * HISTORY)}
     INSERT INTO sim_balance_checks (id, sim_iccid, profile_id, status, parser_version)
@@ -159,20 +193,36 @@ async function makeIdleCalls(dir: string): Promise<Map<RecurringName, Measured>>
   const local = await startLocalD1(dir);
   try {
     const measured = new Map<RecurringName, Measured>();
-    for (const name of NAMES) {
-      const fixture = fixtures.get(IDLE_CALL[name]);
-      if (fixture === undefined) throw new Error(`${name}: no fixture ${IDLE_CALL[name]}`);
+    for (const name of IDLE_NAMES) {
+      const idle = IDLE_CALL[name];
       const call: Measured = { rowsRead: 0, statements: [] };
-      const { method, path, body } = fixture.request;
-      const { response } = await callWorker(method, path, {
-        headers: {
-          'X-API-Key': TEST_API_KEY,
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        bindings: { DB: measuring(local.db, call), CALL_STATE: callState(null) },
-      });
-      expect(response.status, name).toBe(fixture.response.status);
+      const DB = measuring(local.db, call);
+      if (idle === null) continue;
+      if ('cron' in idle) {
+        await runScheduled(
+          { cron: idle.cron, scheduledTime: Date.now() },
+          { DB, SESSIONS: sessions() },
+        );
+      } else if ('dashboard' in idle) {
+        const { response } = await callWorker('GET', idle.dashboard, {
+          headers: { Cookie: `auth_token=${ADMIN}` },
+          bindings: { DB, SESSIONS: sessions(), CALL_STATE: callState(null) },
+        });
+        expect(response.status, name).toBe(200);
+      } else {
+        const fixture = fixtures.get(idle.fixture);
+        if (fixture === undefined) throw new Error(`${name}: no fixture ${idle.fixture}`);
+        const { method, path, body } = fixture.request;
+        const { response } = await callWorker(method, path, {
+          headers: {
+            'X-API-Key': TEST_API_KEY,
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          bindings: { DB, CALL_STATE: callState(null) },
+        });
+        expect(response.status, name).toBe(fixture.response.status);
+      }
       measured.set(name, call);
     }
     return measured;
@@ -219,12 +269,26 @@ afterAll(async () => {
 });
 
 describe('recurring calls', () => {
-  test('every registered call is made idle', () => {
-    expect([...busy.keys()].map(String).sort()).toEqual(Object.keys(RECURRING).sort());
+  test('every idle call is made, and only those', () => {
+    expect(NAMES.filter((name) => RECURRING[name].idle)).toEqual(IDLE_NAMES);
+    expect([...busy.keys()]).toEqual(IDLE_NAMES);
+  });
+
+  test("wrangler.toml's cron schedule is the registry's", () => {
+    const toml = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+    const crons = v.parse(
+      v.array(v.string()),
+      JSON.parse(/^crons = (\[.*\])$/m.exec(toml)?.[1] ?? 'null'),
+    );
+    expect(crons.sort()).toEqual(
+      Object.values(RECURRING)
+        .flatMap((call) => ('cron' in call ? [call.cron] : []))
+        .sort(),
+    );
   });
 
   test(`none reads more once ${String(HISTORY)} rows of finished work exist`, () => {
-    const growing = NAMES.flatMap((name) => {
+    const growing = IDLE_NAMES.flatMap((name) => {
       const before = quiet.get(name)?.rowsRead ?? 0;
       const after = busy.get(name);
       if (after === undefined || after.rowsRead - before <= GROWTH_ALLOWED) return [];
@@ -236,7 +300,7 @@ describe('recurring calls', () => {
   });
 
   test(`together they read at most ${String(DAILY_READ_BUDGET)} rows a day`, () => {
-    const daily = NAMES.map((name) => {
+    const daily = IDLE_NAMES.map((name) => {
       const { everySeconds, callers } = RECURRING[name];
       const rowsRead = busy.get(name)?.rowsRead ?? 0;
       return { name, rowsRead, perDay: rowsRead * callers * (SECONDS_A_DAY / everySeconds) };

@@ -28,6 +28,7 @@
   import OverviewFilters from './balance/OverviewFilters.svelte';
   import OverviewTable from './balance/OverviewTable.svelte';
   import RunnerStatus from './balance/RunnerStatus.svelte';
+  import { intervalMs } from '../../shared/recurring.js';
   import SingleQueryDialog from './balance/SingleQueryDialog.svelte';
   import { buildFilterTabs, currentFilterLabel, matchesStatusFilter } from './balance/filters.js';
   import { checkCarrier } from './balance/presentation.js';
@@ -222,7 +223,7 @@
   onMount(() => {
     const interval = setInterval(() => {
       if (!databasePollingPaused) void loadRunnerStatus();
-    }, 30_000);
+    }, intervalMs('dashboardRunnerStatus'));
     async function pollActiveQueries() {
       try {
         const activeIds = activeBalanceCheckIds(balanceChecks);

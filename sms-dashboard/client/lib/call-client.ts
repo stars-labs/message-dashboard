@@ -10,6 +10,7 @@ import {
 } from '../../shared/api/calls.js';
 import { contractApi } from './api.js';
 import { formatCardNumber } from '../../shared/card-number.js';
+import { intervalMs } from '../../shared/recurring.js';
 import { toError } from './error-origin.js';
 import { formatClock, toEpochMilliseconds } from './time.js';
 
@@ -133,8 +134,8 @@ export function matchesPhoneQuery(
 // Each poll costs two KV reads (session and call lock) in the namespace that also holds
 // every login session; a flat 3 s would spend 57,600 reads a day per tab against the
 // 100,000 free-tier limit. Rings last 30 s or more, so idle polling can be slow.
-export const CALL_POLL_ACTIVE_MS = 3000;
-export const CALL_POLL_IDLE_MS = 10000;
+export const CALL_POLL_ACTIVE_MS = intervalMs('dashboardLiveCallState');
+export const CALL_POLL_IDLE_MS = intervalMs('dashboardCallState');
 
 export function callPollDelay({
   call = null,
