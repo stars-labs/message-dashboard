@@ -2,7 +2,7 @@
 --   wrangler d1 export sms-dashboard --remote --no-data --output migrations/schema.sql
 -- then restore this header. Regenerate after applying a migration to production,
 -- and set `through` to that migration's number.
--- through: 084
+-- through: 085
 PRAGMA defer_foreign_keys=TRUE;
 CREATE TABLE audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -614,6 +614,20 @@ CREATE TRIGGER carrier_bill_events_immutable_delete
 BEFORE DELETE ON carrier_bill_events
 BEGIN
     SELECT RAISE(ABORT, 'carrier bill events are immutable');
+END;
+CREATE TRIGGER require_outbound_queue_fields_on_insert
+BEFORE INSERT ON messages
+WHEN NEW.type = 'sent' AND NEW.status = 'sending'
+  AND (NEW.recipient IS NULL OR NEW.phone_iccid IS NULL OR NEW.created_at IS NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'Queued outbound SMS requires recipient, phone_iccid, and created_at');
+END;
+CREATE TRIGGER require_outbound_queue_fields_on_update
+BEFORE UPDATE OF type, status, recipient, phone_iccid, created_at ON messages
+WHEN NEW.type = 'sent' AND NEW.status = 'sending'
+  AND (NEW.recipient IS NULL OR NEW.phone_iccid IS NULL OR NEW.created_at IS NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'Queued outbound SMS requires recipient, phone_iccid, and created_at');
 END;
 CREATE VIEW device_view AS
 SELECT
