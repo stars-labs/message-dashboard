@@ -99,7 +99,7 @@ agent together).
 
 ## Evidence
 
-`<out>/` survives teardown and holds `report.json` (pass/fail, every failure, notes,
+`<out>/` survives teardown and holds `report.json` (pass/fail, every failure,
 evidence files, AI prompts; written even when teardown fails, which fails the run),
 one screenshot per page or app window in its final state, `trace.zip`
 (`bunx playwright-core show-trace <out>/trace.zip`), and each `evidence(name, data)` as

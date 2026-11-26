@@ -69,8 +69,7 @@ async function verify(journeyFile: string, out: string): Promise<number> {
 
   const pages: { label: string; page: Page; issues: PageIssue[] }[] = [];
   const agents: AgentSandbox[] = [];
-  const apps: { close: () => Promise<{ forced: boolean }> }[] = [];
-  const notes: string[] = [];
+  const apps: { close: () => Promise<void> }[] = [];
   const evidence: string[] = [];
   const teardown: string[] = [];
   let error: string | null = null;
@@ -151,11 +150,7 @@ async function verify(journeyFile: string, out: string): Promise<number> {
       await attempt('trace', () => context.tracing.stop({ path: join(out, 'trace.zip') }));
     } finally {
       for (const app of apps) {
-        await attempt('Balance Agent app', async () => {
-          if ((await app.close()).forced) {
-            notes.push('the Balance Agent app did not quit within 10s and was killed');
-          }
-        });
+        await attempt('Balance Agent app', () => app.close());
       }
       await attempt('browser', () => browser.close());
     }
@@ -172,9 +167,8 @@ async function verify(journeyFile: string, out: string): Promise<number> {
   });
   await writeFile(
     join(out, 'report.json'),
-    `${JSON.stringify({ journey: resolve(journeyFile), ...result, notes, evidence, aiPrompts: ai.prompts }, null, 2)}\n`,
+    `${JSON.stringify({ journey: resolve(journeyFile), ...result, evidence, aiPrompts: ai.prompts }, null, 2)}\n`,
   );
-  for (const note of notes) console.error(`NOTE ${note}`);
   for (const failure of result.failures) console.error(`FAIL ${failure}`);
   console.log(`${result.ok ? 'PASS' : 'FAIL'} ${journeyFile} — evidence in ${out}/`);
   return result.ok ? 0 : 1;

@@ -49,7 +49,8 @@ Proof: the window's text and `settings.json` in `app.userData`.
   Storage" item in the operator's login Keychain, shared by every dev Electron app.
 - The tray menu is a native menu that Playwright cannot click; `src/menu-model.ts`
   is unit-tested instead.
-- The app does not quit when Playwright asks it to; the driver kills it after 10s and
-  the report carries a NOTE. Whether a user's 退出 has the same problem is not yet
-  known ([GRA-230](https://linear.app/gray-arrow/issue/GRA-230)).
+- Teardown quits the app the way the tray's 退出 does (`app.quit()`). An app that is
+  still running 10s later is killed and the run fails
+  ([GRA-230](https://linear.app/gray-arrow/issue/GRA-230)). Checked in:
+  `scripts/verify/journeys/agent-app-quit.ts`.
 - Closing the window only hides it.

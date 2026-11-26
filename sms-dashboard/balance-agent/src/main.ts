@@ -29,6 +29,7 @@ import {
   type MenuIndicator,
   type MenuItemId,
 } from './menu-model.js';
+import { shutdownThenExit } from './quit.js';
 import { createSecureStore } from './secure-store.js';
 import { createSettingsStore } from './settings-store.js';
 
@@ -244,8 +245,12 @@ app.on('will-quit', (event) => {
   event.preventDefault();
   const active = service;
   service = null;
-  void active.shutdown().then(() => {
-    app.quit();
+  void shutdownThenExit({
+    shutdown: () => active.shutdown(),
+    exit: (code) => {
+      app.exit(code);
+    },
+    logger: log,
   });
 });
 

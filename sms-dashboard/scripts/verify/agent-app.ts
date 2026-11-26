@@ -30,9 +30,7 @@ async function build(): Promise<void> {
   if (code !== 0) throw new Error(`Balance Agent build failed (${String(code)}): ${stderr}`);
 }
 
-export async function launchAgentApp(): Promise<
-  AgentApp & { close: () => Promise<{ forced: boolean }> }
-> {
+export async function launchAgentApp(): Promise<AgentApp & { close: () => Promise<void> }> {
   const binary = resolve(await electronBinary());
   await build();
   const userData = await mkdtemp(join(tmpdir(), 'sms-dashboard-agent-app-'));
@@ -56,8 +54,8 @@ export async function launchAgentApp(): Promise<
       await second.exited;
       return app.firstWindow({ timeout: WINDOW_TIMEOUT_MS });
     },
-    // Playwright's close can wait forever on this app, so the quit is bounded and then
-    // forced; the user-data dir is throwaway, so a kill loses nothing.
+    // A quit that hangs is a defect (GRA-230): the app is killed so teardown finishes,
+    // and the run fails.
     async close() {
       const proc = app.process();
       try {
@@ -65,15 +63,15 @@ export async function launchAgentApp(): Promise<
           () => true,
           () => true,
         );
-        if (await Promise.race([closing, Bun.sleep(QUIT_TIMEOUT_MS).then(() => false)])) {
-          return { forced: false };
-        }
+        if (await Promise.race([closing, Bun.sleep(QUIT_TIMEOUT_MS).then(() => false)])) return;
         proc.kill('SIGKILL');
         await Promise.race([closing, Bun.sleep(KILL_TIMEOUT_MS)]);
         if (proc.exitCode === null && proc.signalCode === null) {
           throw new Error(`Balance Agent app (pid ${String(proc.pid)}) survived SIGKILL`);
         }
-        return { forced: true };
+        throw new Error(
+          `did not quit within ${String(QUIT_TIMEOUT_MS / 1000)}s and was killed (GRA-230)`,
+        );
       } finally {
         await rm(userData, { recursive: true, force: true });
       }
