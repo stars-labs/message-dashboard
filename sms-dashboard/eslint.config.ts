@@ -88,6 +88,15 @@ const TEST_SCHEMAS = [
   { selector: `Literal[value=${TEST_SCHEMA_SQL}]`, message: TEST_SCHEMA_MESSAGE },
 ];
 
+const BASELINE_READ_MESSAGE =
+  "A migration's test builds the tables as they were before it. The baseline (schema.sql, reference-data.sql) moves past the migration once it reaches production, and the test then fails.";
+const BASELINE_FILE = '/(^|\\/)(schema|reference-data)\\.sql$/';
+
+const BASELINE_READS = [
+  { selector: `TemplateElement[value.raw=${BASELINE_FILE}]`, message: BASELINE_READ_MESSAGE },
+  { selector: `Literal[value=${BASELINE_FILE}]`, message: BASELINE_READ_MESSAGE },
+];
+
 const ORPC_OC = {
   name: '@orpc/contract',
   importNames: ['oc'],
@@ -204,6 +213,12 @@ export default defineConfig([
       'test/sqlite-d1.test.ts',
     ],
     rules: { 'no-restricted-syntax': ['error', ...TEST_SCHEMAS] },
+  },
+  {
+    name: "A migration's test does not start from the baseline",
+    files: ['migrations/**/*.test.ts'],
+    ignores: ['migrations/baseline.test.ts'],
+    rules: { 'no-restricted-syntax': ['error', ...BASELINE_READS] },
   },
   {
     name: 'Clients reach the Dashboard through the contract client',
