@@ -1,34 +1,16 @@
-// Runs SQL on a copy of production in an isolated local D1 and measures it the way D1
-// bills it: Miniflare's D1 counts rows read and written with the same Durable Object
-// SQLite counters, so index entries and DDL are included (100 rows into a table with two
-// indexes write 300; CREATE TRIGGER writes 1, as 085 and 086 did in production).
+// Runs SQL on a copy of production in an isolated local D1 (local-d1.ts), measured the
+// way D1 bills it.
 import { Database } from 'bun:sqlite';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as v from 'valibot';
-import { getPlatformProxy } from 'wrangler';
 import type { CountsAround, RowCounts, TableCounts } from './migration-apply-rules.ts';
-import { DATABASE, exportProduction } from './d1-remote.ts';
+import { exportProduction } from './d1-remote.ts';
+import { createLocalD1, withLocalD1 } from './local-d1.ts';
 
 export interface Rehearsal extends RowCounts {
   counts: CountsAround;
-}
-
-const CONFIG = `name = "rehearsal"
-compatibility_date = "2026-11-01"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "${DATABASE}"
-database_id = "rehearsal"
-`;
-
-async function findDatabaseFile(dir: string): Promise<string> {
-  for (const entry of await readdir(dir, { recursive: true })) {
-    if (entry.endsWith('.sqlite') && !entry.endsWith('metadata.sqlite')) return join(dir, entry);
-  }
-  throw new Error(`No local D1 database under ${dir}`);
 }
 
 function countRows(file: string, tables: readonly string[]): TableCounts {
@@ -52,30 +34,9 @@ function countRows(file: string, tables: readonly string[]): TableCounts {
   }
 }
 
-interface LocalStatement {
-  run(): Promise<unknown>;
-}
-
-interface LocalD1 {
-  prepare(sql: string): LocalStatement;
-  batch(statements: LocalStatement[]): Promise<unknown>;
-}
-
 const BatchResults = v.array(
   v.object({ meta: v.object({ rows_read: v.number(), rows_written: v.number() }) }),
 );
-
-async function withLocalD1<T>(dir: string, use: (db: LocalD1) => Promise<T>): Promise<T> {
-  const proxy = await getPlatformProxy<{ DB: LocalD1 }>({
-    configPath: join(dir, 'wrangler.toml'),
-    persist: { path: join(dir, 'state') },
-  });
-  try {
-    return await use(proxy.env.DB);
-  } finally {
-    await proxy.dispose();
-  }
-}
 
 // The production export holds phone numbers and message text: it lives in a private
 // temporary directory and is deleted with the rehearsal.
@@ -85,12 +46,9 @@ export async function rehearse(
 ): Promise<Rehearsal> {
   const dir = await mkdtemp(join(tmpdir(), 'sms-dashboard-rehearsal-'));
   try {
-    await Bun.write(join(dir, 'wrangler.toml'), CONFIG);
+    const file = await createLocalD1(dir);
     const dump = join(dir, 'production.sql');
     await exportProduction(dump);
-    await withLocalD1(dir, (db) => db.prepare('SELECT 1').run());
-
-    const file = await findDatabaseFile(join(dir, 'state'));
     const copy = new Database(file);
     try {
       copy.run('PRAGMA foreign_keys = OFF;');
