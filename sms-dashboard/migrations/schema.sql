@@ -2,7 +2,7 @@
 --   wrangler d1 export sms-dashboard --remote --no-data --output migrations/schema.sql
 -- then restore this header. Regenerate after applying a migration to production,
 -- and set `through` to that migration's number.
--- through: 085
+-- through: 086
 PRAGMA defer_foreign_keys=TRUE;
 CREATE TABLE audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -628,6 +628,20 @@ WHEN NEW.type = 'sent' AND NEW.status = 'sending'
   AND (NEW.recipient IS NULL OR NEW.phone_iccid IS NULL OR NEW.created_at IS NULL)
 BEGIN
   SELECT RAISE(ABORT, 'Queued outbound SMS requires recipient, phone_iccid, and created_at');
+END;
+CREATE TRIGGER terminal_web_jobs_hold_no_lease_on_insert
+BEFORE INSERT ON sim_balance_web_jobs
+WHEN NEW.status IN ('completed', 'failed', 'stopped')
+  AND (NEW.lease_owner IS NOT NULL OR NEW.lease_expires_at IS NOT NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'A finished web job cannot hold a lease');
+END;
+CREATE TRIGGER terminal_web_jobs_hold_no_lease_on_update
+BEFORE UPDATE OF status, lease_owner, lease_expires_at ON sim_balance_web_jobs
+WHEN NEW.status IN ('completed', 'failed', 'stopped')
+  AND (NEW.lease_owner IS NOT NULL OR NEW.lease_expires_at IS NOT NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'A finished web job cannot hold a lease');
 END;
 CREATE VIEW device_view AS
 SELECT
