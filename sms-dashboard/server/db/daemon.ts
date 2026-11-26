@@ -75,7 +75,7 @@ export async function markStaleProcessingMessagesUnknown(
   await db
     .prepare(
       `
-          UPDATE messages
+          UPDATE messages INDEXED BY idx_messages_processing_outbound
           SET status = 'unknown',
               error_message = 'Daemon restarted before confirming SMS delivery; delivery status is unknown',
               processing_session_id = NULL,
@@ -95,21 +95,6 @@ export async function markStaleProcessingMessagesUnknown(
     .run();
 }
 
-export async function failUnsendableMessages(db: D1<'run'>): Promise<void> {
-  await db
-    .prepare(
-      `
-        UPDATE messages
-        SET status = 'failed',
-            error_message = 'Message has no recipient or SIM to send from',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE type = 'sent' AND status = 'sending'
-          AND (recipient IS NULL OR phone_iccid IS NULL OR created_at IS NULL)
-      `,
-    )
-    .run();
-}
-
 export async function listSendingMessageIds(db: D1<'all'>): Promise<string[]> {
   const rows = await queryAll(
     db.prepare(
@@ -121,7 +106,7 @@ export async function listSendingMessageIds(db: D1<'all'>): Promise<string[]> {
             purpose,
             created_at,
             ROW_NUMBER() OVER (PARTITION BY purpose ORDER BY created_at, id) AS purpose_rank
-          FROM messages
+          FROM messages INDEXED BY idx_messages_pending_outbound
           WHERE type = 'sent' AND status = 'sending'
         ) pending
         WHERE purpose != 'balance_maintenance' OR purpose_rank <= 5

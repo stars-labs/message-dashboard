@@ -3,7 +3,6 @@ import { json } from '../lib/response.js';
 import * as v from 'valibot';
 import type { D1, D1Batch } from '../lib/d1.js';
 import {
-  failUnsendableMessages,
   insertReceivedMessage,
   listMessagesByIds,
   listSendingMessageIds,
@@ -343,9 +342,6 @@ export const controlHandler = {
       if (daemonSessionId) {
         await markStaleProcessingMessagesUnknown(env.DB, daemonSessionId);
       }
-
-      // The daemon's PendingSms requires both numbers; fail what lacks one.
-      await failUnsendableMessages(env.DB);
 
       const ids = await listSendingMessageIds(env.DB);
 

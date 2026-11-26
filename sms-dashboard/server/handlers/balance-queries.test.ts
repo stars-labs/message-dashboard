@@ -1505,6 +1505,7 @@ describe('balance reply correlation', () => {
         content: '10086',
         checkId: 'bal-1',
         status: 'sending',
+        recipient: '10086',
       });
 
       await updateBalanceCheckForSmsResult(db, 'msg-1', outcome);
@@ -1527,6 +1528,7 @@ describe('balance reply correlation', () => {
       content: '10086',
       checkId: 'bal-1',
       status: 'sending',
+      recipient: '10086',
     });
 
     await updateBalanceCheckForSmsResult(db, 'msg-1', 'failed', 'explicit modem error');
@@ -1548,6 +1550,7 @@ describe('balance reply correlation', () => {
       content: '10086',
       checkId: 'bal-1',
       status: 'sending',
+      recipient: '10086',
     });
     await updateBalanceCheckForSmsResult(db, 'msg-1', 'failed');
     expect(checkState('bal-1').error).toBe('SMS send failed');

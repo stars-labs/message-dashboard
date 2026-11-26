@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 
 import { Database } from 'bun:sqlite';
 import * as v from 'valibot';
 import type { Schema } from '../../shared/parse-json.js';
+import { planDetails } from '../../test/query-plan.js';
 import { createSchema } from '../../test/schema.js';
 import { sqliteD1 } from '../../test/sqlite-d1.js';
 import { callWorker, TEST_API_KEY } from '../../test/worker-harness.js';
@@ -738,23 +739,48 @@ describe('GET /api/control/pending-sms', () => {
     expect(outboundState('msg-sent').status).toBe('sent');
   });
 
-  test('never sends a message without a recipient or SIM, and marks it failed', async () => {
-    insertOutbound('msg-ok', { createdAt: '2026-09-03 00:00:01' });
-    insertOutbound('msg-no-recipient', { createdAt: '2026-09-03 00:00:02' });
-    insertOutbound('msg-no-sim', { createdAt: '2026-09-03 00:00:03' });
-    sqlite.run(`UPDATE messages SET recipient = NULL WHERE id = 'msg-no-recipient'`);
-    sqlite.run(`UPDATE messages SET phone_iccid = NULL WHERE id = 'msg-no-sim'`);
+  test('an idle poll reads only the pending and processing indexes', async () => {
+    sqlite.run(`
+      WITH RECURSIVE history(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM history WHERE n < 2000)
+      INSERT INTO messages (id, content, type, status)
+      SELECT 'historical-' || n, 'history', 'sent', 'sent' FROM history
+    `);
 
-    const { pending_messages } = await read(await poll(), PendingBody);
+    const accesses: string[] = [];
+    const database: TestDb = {
+      ...db,
+      prepare(sql) {
+        const recordPlan = (params: string[]) => {
+          const details = planDetails(sqlite.query(`EXPLAIN QUERY PLAN ${sql}`).all(...params));
+          accesses.push(...details.filter((detail) => /^(SCAN|SEARCH) messages\b/.test(detail)));
+        };
+        const statement = db.prepare(sql);
+        return {
+          ...statement,
+          bind(...values) {
+            recordPlan(v.parse(v.array(v.string()), values));
+            return statement.bind(...values);
+          },
+          all() {
+            recordPlan([]);
+            return statement.all();
+          },
+          run() {
+            recordPlan([]);
+            return statement.run();
+          },
+        };
+      },
+    };
 
-    expect(pending_messages.map((message) => message['id'])).toEqual(['msg-ok']);
-    for (const id of ['msg-no-recipient', 'msg-no-sim']) {
-      expect(outboundState(id)).toEqual({
-        status: 'failed',
-        processing_session_id: null,
-        error_message: 'Message has no recipient or SIM to send from',
-      });
-    }
+    expect(await read(await poll('rust-daemon-session-2', database), PendingBody)).toEqual({
+      success: true,
+      pending_messages: [],
+    });
+    expect(accesses.map((detail) => / USING (?:COVERING )?INDEX (\w+)/.exec(detail)?.[1])).toEqual([
+      'idx_messages_processing_outbound',
+      'idx_messages_pending_outbound',
+    ]);
   });
 
   test('sends user messages first and at most five maintenance messages per poll', async () => {
